@@ -15,10 +15,10 @@ export const metadata: Metadata = {
     template: "%s | TrendScope",
   },
   description:
-    "Real-time consumer trend detection powered by Yahoo News RSS, OpenAI semantic clustering, and ElevenLabs audio briefings. Turn market signals into business decisions.",
+    "Real-time consumer trend detection powered by Google News RSS, MiniMax AI clustering, and ElevenLabs audio briefings. Turn market signals into business decisions.",
   keywords: [
     "market intelligence", "trend detection", "consumer trends", "AI analytics",
-    "Yahoo News", "fashion trends", "Gen Z", "retail innovation",
+    "Google News", "fashion trends", "Gen Z", "retail innovation",
   ],
   authors: [{ name: "TrendScope Team" }],
   metadataBase: new URL(APP_URL),
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
     type: "website",
     title: "TrendScope — AI Market Intelligence",
     description:
-      "Ingest Yahoo News, cluster articles into emerging trends, and generate AI-powered audience insights and actionable recommendations.",
+      "Ingest Google News, cluster articles into emerging trends, and generate AI-powered audience insights and actionable recommendations.",
     siteName: "TrendScope",
     url: APP_URL,
   },

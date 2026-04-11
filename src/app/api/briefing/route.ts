@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
       };
     });
 
-    // 1. Generate the briefing script via OpenAI
+    // 1. Generate the briefing script via MiniMax
     const script = await generateBriefingScript(trendInputs);
 
     // 2. If format=script, or ElevenLabs isn't configured, return text only

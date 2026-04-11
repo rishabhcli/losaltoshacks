@@ -1,25 +1,47 @@
 import OpenAI from "openai";
 
+const MINIMAX_MODEL = "MiniMax-M2.7";
+
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || "",
+  apiKey: process.env.MINIMAX_API_KEY || "",
+  baseURL: "https://api.minimax.io/v1",
 });
 
 export default openai;
 
-export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
-  const batchSize = 100;
-  const allEmbeddings: number[][] = [];
+/**
+ * MiniMax M2.7 may prepend &lt;think&gt;...&lt;/think&gt; chain-of-thought tags.
+ * Strip them so downstream JSON.parse succeeds.
+ */
+/**
+ * Clean MiniMax M2.7 responses:
+ * 1. Strip <think>...</think> chain-of-thought blocks
+ * 2. Strip markdown code fences (```json ... ```)
+ * 3. If all content was in think tags, extract JSON from within them
+ */
+function cleanModelResponse(text: string): string {
+  // Strip think tags first
+  let cleaned = text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 
-  for (let i = 0; i < texts.length; i += batchSize) {
-    const batch = texts.slice(i, i + batchSize);
-    const response = await openai.embeddings.create({
-      model: "text-embedding-3-small",
-      input: batch,
-    });
-    allEmbeddings.push(...response.data.map((d) => d.embedding));
+  // If nothing left, try extracting JSON from inside think tags
+  if (!cleaned && text.length > 0) {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) cleaned = jsonMatch[0];
   }
 
-  return allEmbeddings;
+  // Strip markdown code fences
+  cleaned = cleaned.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+
+  return cleaned;
+}
+
+/**
+ * Embeddings stub — MiniMax does not expose a public embeddings API,
+ * so we return empty arrays. The clustering layer will fall back to
+ * keyword-based grouping automatically.
+ */
+export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
+  return texts.map(() => []);
 }
 
 export async function generateInsight(
@@ -36,7 +58,7 @@ export async function generateInsight(
   confidence: string;
 }> {
   const response = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: MINIMAX_MODEL,
     response_format: { type: "json_object" },
     messages: [
       {
@@ -62,17 +84,17 @@ export async function generateInsight(
       },
     ],
     temperature: 0.7,
-    max_tokens: 1000,
+    max_tokens: 4000,
   });
 
-  return JSON.parse(response.choices[0].message.content || "{}");
+  return JSON.parse(cleanModelResponse(response.choices[0].message.content || "{}"));
 }
 
 export async function generateTrendLabel(
   articleTitles: string[]
 ): Promise<{ name: string; keywords: string[]; description: string }> {
   const response = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: MINIMAX_MODEL,
     response_format: { type: "json_object" },
     messages: [
       {
@@ -86,10 +108,10 @@ export async function generateTrendLabel(
       },
     ],
     temperature: 0.5,
-    max_tokens: 200,
+    max_tokens: 2000,
   });
 
-  return JSON.parse(response.choices[0].message.content || "{}");
+  return JSON.parse(cleanModelResponse(response.choices[0].message.content || "{}"));
 }
 
 export async function generateReport(
@@ -97,7 +119,7 @@ export async function generateReport(
   targetContext: string
 ): Promise<string> {
   const response = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: MINIMAX_MODEL,
     messages: [
       {
         role: "system",
@@ -114,10 +136,10 @@ export async function generateReport(
       },
     ],
     temperature: 0.7,
-    max_tokens: 2000,
+    max_tokens: 8000,
   });
 
-  return response.choices[0].message.content || "";
+  return cleanModelResponse(response.choices[0].message.content || "");
 }
 
 export async function generateBriefingScript(
@@ -131,7 +153,7 @@ export async function generateBriefingScript(
   const duration = trendCount <= 2 ? "30-45" : trendCount <= 4 ? "60-90" : "90-120";
 
   const response = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: MINIMAX_MODEL,
     messages: [
       {
         role: "system",
@@ -155,8 +177,8 @@ Tone: professional, concise, confident. Speak as if addressing a C-suite audienc
       },
     ],
     temperature: 0.7,
-    max_tokens: 1000,
+    max_tokens: 4000,
   });
 
-  return response.choices[0].message.content || "";
+  return cleanModelResponse(response.choices[0].message.content || "");
 }

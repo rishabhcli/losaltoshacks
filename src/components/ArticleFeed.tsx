@@ -27,7 +27,7 @@ export default function ArticleFeed({
       <div className="border-b border-gray-700 px-4 py-3">
         <h3 className="text-sm font-semibold">{title}</h3>
         <p className="text-xs text-gray-400">
-          {articles.length} articles from Yahoo News
+          {articles.length} articles from Google News
         </p>
       </div>
       <div className="divide-y divide-gray-800 max-h-96 overflow-y-auto">
@@ -71,7 +71,7 @@ export default function ArticleFeed({
         ))}
         {articles.length === 0 && (
           <div className="px-4 py-8 text-center text-sm text-gray-500">
-            No articles yet. Run ingestion to fetch from Yahoo News.
+            No articles yet. Run ingestion to fetch from Google News.
           </div>
         )}
       </div>

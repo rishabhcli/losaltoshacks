@@ -9,7 +9,7 @@ const features = [
   {
     icon: Globe,
     title: "Detect",
-    description: "Ingest Yahoo News RSS feeds across fashion, retail, beauty, and lifestyle keywords in real time.",
+    description: "Ingest Google News RSS feeds across fashion, retail, beauty, and lifestyle keywords in real time.",
     color: "text-blue-400",
     bg: "bg-blue-400/10",
   },
@@ -30,9 +30,9 @@ const features = [
 ];
 
 const sponsors = [
-  { name: "Yahoo", desc: "Live RSS signal feed" },
-  { name: "MongoDB Atlas", desc: "Vector search & storage" },
-  { name: "OpenAI", desc: "GenAI insights" },
+  { name: "Google News", desc: "Live RSS signal feed" },
+  { name: "MongoDB", desc: "Vector search & storage" },
+  { name: "MiniMax", desc: "GenAI insights" },
   { name: "ElevenLabs", desc: "Audio briefings" },
   { name: "Vercel", desc: "Edge deployment" },
   { name: "Palantir AIP", desc: "Decision artifacts" },
@@ -64,7 +64,7 @@ export default function Home() {
               </span>
             </h1>
             <p className="mx-auto max-w-2xl text-lg text-gray-400 mb-10">
-              TrendScope ingests live Yahoo News coverage, clusters articles into emerging consumer trends,
+              TrendScope ingests live Google News coverage, clusters articles into emerging consumer trends,
               and generates AI-powered audience insights and actionable recommendations.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -114,7 +114,7 @@ export default function Home() {
         <h2 className="text-2xl font-bold text-center mb-12">How It Works</h2>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { step: "1", title: "Ingest", desc: "Fetch Yahoo RSS feeds for configured keywords", icon: Globe },
+            { step: "1", title: "Ingest", desc: "Fetch Google News RSS feeds for configured keywords", icon: Globe },
             { step: "2", title: "Embed & Cluster", desc: "Generate embeddings, cluster via vector similarity", icon: Database },
             { step: "3", title: "Score & Analyze", desc: "Compute growth, acceleration, and composite scores", icon: BarChart3 },
             { step: "4", title: "Recommend", desc: "AI generates audience profiles and business actions", icon: Users },

@@ -41,7 +41,7 @@ async function processCluster(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updateDoc: any = {
       $set: setFields,
-      $setOnInsert: { slug, createdAt: now, scoreHistory: [] },
+      $setOnInsert: { slug, createdAt: now },
       $push: {
         scoreHistory: {
           $each: [{ date: now, score: scores.compositeScore }],
@@ -84,7 +84,7 @@ async function processCluster(
           risks: insightData.risks,
           confidence: insightData.confidence as Insight["confidence"],
           generatedAt: now,
-          modelUsed: "gpt-4o",
+          modelUsed: "MiniMax-M2.7",
         },
       },
       { upsert: true }

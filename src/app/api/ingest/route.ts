@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
         existingArticles: 0,
         totalFeeds: feedResults.length,
         keywords,
-        message: "No articles returned from Yahoo RSS feeds.",
+        message: "No articles returned from Google News RSS feeds.",
       });
     }
 

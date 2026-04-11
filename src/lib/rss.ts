@@ -8,7 +8,7 @@ const parser = new Parser({
   },
 });
 
-const YAHOO_NEWS_RSS_BASE = "https://news.search.yahoo.com/news";
+const GOOGLE_NEWS_RSS_BASE = "https://news.google.com/rss/search";
 
 export interface RSSFetchResult {
   articles: Omit<Article, "_id" | "embedding" | "clusterId">[];
@@ -22,33 +22,30 @@ export interface MultiFeedResult {
 }
 
 /**
- * Fetch a single Yahoo News RSS feed for a given keyword.
+ * Fetch a single Google News RSS feed for a given keyword.
  * Normalises each item into an Article-compatible shape.
  */
 export async function fetchYahooRSS(keyword: string): Promise<RSSFetchResult> {
-  const url = `${YAHOO_NEWS_RSS_BASE}?p=${encodeURIComponent(keyword)}&ei=UTF-8&fr=sfp&output=rss`;
+  const url = `${GOOGLE_NEWS_RSS_BASE}?q=${encodeURIComponent(keyword)}&hl=en-US&gl=US&ceid=US:en`;
 
   const feed = await parser.parseURL(url);
 
   const now = new Date();
   const articles = (feed.items || [])
-    .filter((item) => item.title && item.link) // skip items without title or link
+    .filter((item) => item.title && item.link)
     .map((item) => {
-      // Clean up Yahoo tracking redirects to get the actual URL
-      let link = item.link || "";
-      try {
-        const parsed = new URL(link);
-        const realUrl = parsed.searchParams.get("url");
-        if (realUrl) link = realUrl;
-      } catch {
-        // keep original link if parsing fails
-      }
+      const link = item.link || "";
+
+      // Extract source from title (Google News format: "Title - Source")
+      const titleParts = (item.title || "").split(" - ");
+      const source = titleParts.length > 1 ? titleParts.pop()!.trim() : "Google News";
+      const title = titleParts.join(" - ").trim();
 
       return {
-        title: (item.title || "").trim(),
+        title,
         summary: cleanSummary(item.contentSnippet || item.content || ""),
         link,
-        source: "Yahoo News",
+        source,
         keywordTags: [keyword.toLowerCase()],
         publishedAt: item.pubDate ? new Date(item.pubDate) : now,
         fetchedAt: now,
@@ -58,7 +55,7 @@ export async function fetchYahooRSS(keyword: string): Promise<RSSFetchResult> {
   return {
     articles,
     keyword,
-    feedTitle: feed.title || `Yahoo News: ${keyword}`,
+    feedTitle: feed.title || `Google News: ${keyword}`,
   };
 }
 

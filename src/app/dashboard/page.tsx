@@ -36,7 +36,7 @@ export default function DashboardPage() {
 
   async function handleIngestAndAnalyze() {
     setIngesting(true);
-    setStatus("Ingesting Yahoo RSS feeds..."); setStatusType("info");
+    setStatus("Ingesting Google News RSS feeds..."); setStatusType("info");
     try {
       const ir = await fetch("/api/ingest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keywords }) });
       const id = await ir.json();
@@ -73,7 +73,7 @@ export default function DashboardPage() {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="text-2xl font-bold">Trend Dashboard</h1>
-            <p className="text-sm text-gray-400 mt-1">AI-powered market intelligence from Yahoo News</p>
+            <p className="text-sm text-gray-400 mt-1">AI-powered market intelligence from Google News</p>
           </div>
           <button onClick={handleIngestAndAnalyze} disabled={ingesting || analyzing}
             className="flex items-center gap-2 rounded-lg bg-indigo-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-600 transition-colors disabled:opacity-50">
@@ -133,7 +133,7 @@ export default function DashboardPage() {
           <div className="text-center py-20">
             <TrendingUp className="h-12 w-12 text-gray-600 mx-auto mb-4" />
             <h3 className="text-lg font-semibold mb-2">No trends yet</h3>
-            <p className="text-sm text-gray-400 mb-6">Click &quot;Analyze Trends&quot; to ingest Yahoo RSS feeds and discover emerging market signals.</p>
+            <p className="text-sm text-gray-400 mb-6">Click &quot;Analyze Trends&quot; to ingest Google News RSS feeds and discover emerging market signals.</p>
           </div>
         )}
       </main>

@@ -49,9 +49,9 @@ export default function Navbar() {
 
           {/* Sponsor badges */}
           <div className="hidden md:flex items-center gap-3 text-xs text-gray-500">
-            <span className="rounded border border-gray-700 px-2 py-0.5">Yahoo</span>
+            <span className="rounded border border-gray-700 px-2 py-0.5">Google News</span>
             <span className="rounded border border-gray-700 px-2 py-0.5">MongoDB</span>
-            <span className="rounded border border-gray-700 px-2 py-0.5">OpenAI</span>
+            <span className="rounded border border-gray-700 px-2 py-0.5">MiniMax</span>
             <span className="rounded border border-gray-700 px-2 py-0.5">ElevenLabs</span>
             <span className="rounded border border-gray-700 px-2 py-0.5">Vercel</span>
           </div>
