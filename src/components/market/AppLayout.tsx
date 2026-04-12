@@ -10,6 +10,7 @@ import {
   LogOut,
   Volume2,
   FileText,
+  Search,
 } from "lucide-react";
 import { usePreferences } from "@/hooks/usePreferences";
 import { SettingsMenu } from "@/components/market/SettingsMenu";
@@ -21,6 +22,7 @@ import { getIndustryLabel } from "@/lib/industry";
 
 const navItems = [
   { path: "/", icon: LayoutDashboard, label: "Dashboard" },
+  { path: "/market-research", icon: Search, label: "Market Research" },
   { path: "/trends", icon: TrendingUp, label: "Trends" },
   { path: "/recommendations", icon: Lightbulb, label: "Recommendations" },
   { path: "/briefing", icon: Volume2, label: "Briefing" },

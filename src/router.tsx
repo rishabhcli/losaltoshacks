@@ -10,6 +10,7 @@ import { Report } from "./pages/Report";
 import { BusinessType } from "./pages/BusinessType";
 import { AcceptedIdeas } from "./pages/AcceptedIdeas";
 import { RejectedIdeas } from "./pages/RejectedIdeas";
+import { MarketResearch } from "./pages/MarketResearch";
 import { LoginPage } from "./pages/LoginPage";
 
 export const router: ReturnType<typeof createBrowserRouter> = createBrowserRouter(
@@ -24,6 +25,10 @@ export const router: ReturnType<typeof createBrowserRouter> = createBrowserRoute
         {
           path: "/",
           element: <Dashboard />,
+        },
+        {
+          path: "/market-research",
+          element: <MarketResearch />,
         },
         {
           path: "/trends",
