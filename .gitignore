@@ -14,6 +14,22 @@ yarn-error.log*
 pnpm-debug.log*
 tslint.log*
 
+# Python
+__pycache__/
+*.pyc
+agents/.venv/
+agents/runtime/
+
+# Test artifacts
+test-results/
+
+# Temp files
+*.log
+*.mp3
+t.log
+t.mp3
+logs/
+
 # InsForge & AI agent skills
 .insforge
 .agent
