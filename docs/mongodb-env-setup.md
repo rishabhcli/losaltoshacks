@@ -39,6 +39,11 @@ MONGODB_DB_NAME=losaltoshacks
 MONGODB_DB_NAME=marketpulse
 ```
 
+If Atlas only shows `admin`, `config`, and `local`, that means no application database has been created yet.
+
+- For this repository, use `losaltoshacks`.
+- It will appear in Atlas after the first successful write.
+
 ## Optional
 
 ### `VITE_API_BASE_URL`
