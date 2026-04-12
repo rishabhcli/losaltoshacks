@@ -83,8 +83,8 @@ export function TrendsExplorer() {
       <div className="p-6 lg:p-8 space-y-6 max-w-[1120px]">
         {/* Header */}
         <div>
-          <h1 className="text-4xl font-semibold text-slate-900">Trends Explorer</h1>
-          <p className="text-slate-500 text-sm mt-1">
+          <h1 className="text-4xl font-semibold text-slate-900 dark:text-slate-100">Trends Explorer</h1>
+          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
             {filteredTrends.length} trend{filteredTrends.length !== 1 ? "s" : ""} detected across all sources
           </p>
         </div>
@@ -92,25 +92,25 @@ export function TrendsExplorer() {
         {/* Filter bar */}
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative flex-1 min-w-[200px] max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-slate-500" />
             <Input
               placeholder="Search trends..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="pl-9 glass border-slate-200 text-slate-800 placeholder:text-slate-300 rounded-lg"
+              className="pl-9 glass border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 rounded-lg"
             />
           </div>
 
           <Select value={industryFilter} onValueChange={setIndustryFilter}>
-            <SelectTrigger className="w-[180px] glass border-slate-200 text-slate-700 text-sm rounded-lg">
+            <SelectTrigger className="w-[180px] glass border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm rounded-lg">
               <SelectValue placeholder="Industry" />
             </SelectTrigger>
-            <SelectContent className="glass border-slate-200 rounded-lg">
-              <SelectItem value="all" className="text-sm text-slate-700">
+            <SelectContent className="border-slate-200 dark:border-slate-700 rounded-lg">
+              <SelectItem value="all" className="text-sm">
                 All Industries
               </SelectItem>
               {industries.map(ind => (
-                <SelectItem key={ind} value={ind} className="text-sm text-slate-700">
+                <SelectItem key={ind} value={ind} className="text-sm">
                   {getIndustryLabel(ind)}
                 </SelectItem>
               ))}
@@ -118,15 +118,15 @@ export function TrendsExplorer() {
           </Select>
 
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[150px] glass border-slate-200 text-slate-700 text-sm rounded-lg">
+            <SelectTrigger className="w-[150px] glass border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm rounded-lg">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
-            <SelectContent className="glass border-slate-200 rounded-lg">
-              <SelectItem value="all" className="text-sm text-slate-700">
+            <SelectContent className="border-slate-200 dark:border-slate-700 rounded-lg">
+              <SelectItem value="all" className="text-sm">
                 All Statuses
               </SelectItem>
               {statuses.map(st => (
-                <SelectItem key={st} value={st} className="text-sm text-slate-700 capitalize">
+                <SelectItem key={st} value={st} className="text-sm capitalize">
                   {st}
                 </SelectItem>
               ))}
@@ -134,17 +134,17 @@ export function TrendsExplorer() {
           </Select>
 
           <Select value={sortBy} onValueChange={v => setSortBy(v as SortField)}>
-            <SelectTrigger className="w-[160px] glass border-slate-200 text-slate-700 text-sm rounded-lg">
+            <SelectTrigger className="w-[160px] glass border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm rounded-lg">
               <SelectValue placeholder="Sort by" />
             </SelectTrigger>
-            <SelectContent className="glass border-slate-200 rounded-lg">
-              <SelectItem value="trendScore" className="text-sm text-slate-700">
+            <SelectContent className="border-slate-200 dark:border-slate-700 rounded-lg">
+              <SelectItem value="trendScore" className="text-sm">
                 Trend Score
               </SelectItem>
-              <SelectItem value="mentionCount" className="text-sm text-slate-700">
+              <SelectItem value="mentionCount" className="text-sm">
                 Mentions
               </SelectItem>
-              <SelectItem value="growthRate" className="text-sm text-slate-700">
+              <SelectItem value="growthRate" className="text-sm">
                 Growth Rate
               </SelectItem>
             </SelectContent>

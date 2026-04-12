@@ -157,6 +157,22 @@
  * against dark backgrounds without touching every component file.
  */
 .dark {
+  /* Design token overrides for dark mode */
+  --background: #0f172a;
+  --foreground: #e2e8f0;
+  --card: #1e293b;
+  --card-foreground: #e2e8f0;
+  --popover: #1e293b;
+  --popover-foreground: #e2e8f0;
+  --secondary: #334155;
+  --secondary-foreground: #e2e8f0;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  --accent: rgba(30, 58, 138, 0.35);
+  --accent-foreground: #93c5fd;
+  --border: #334155;
+  --input: #334155;
+
   /* Slate — invert for dark-mode contrast */
   --color-slate-900: #f8fafc;
   --color-slate-800: #f1f5f9;

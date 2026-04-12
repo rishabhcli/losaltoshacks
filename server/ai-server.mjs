@@ -60,7 +60,7 @@ const RESETTABLE_TABLES = [
 
 const MISSION_COLUMNS = "id,prompt,status,live_url_1,live_url_2,live_url_3,live_url_4,live_url_5,final_options";
 const AGENT_COLUMNS = "id,agent_id,status,current_url,profile_path,energy";
-const DISCOVERY_COLUMNS = "id,source_url,thumbnail_url,agent_id,keywords,likes,views,comments,created_at";
+const DISCOVERY_COLUMNS = "id,source_url,thumbnail_url,agent_id,keywords,industry,likes,views,comments,created_at";
 const LOG_COLUMNS = "id,agent_id,message,type,metadata,created_at";
 const SIGNAL_COLUMNS = "id,from_agent,to_agent,message,signal_type,created_at";
 const THOUGHT_COLUMNS = "id,agent_id,thought_type,prompt_summary,response_summary,action_taken,model,tokens_used,duration_ms,created_at";
@@ -429,14 +429,18 @@ function synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId) 
 
     const platform = PLATFORM_BY_AGENT_ID[disc.agent_id] ?? "unknown";
 
+    const discIndustry = disc.industry ?? "All";
+
     for (const kw of keywords.slice(0, 4)) {
       if (!keywordGroups.has(kw)) {
-        keywordGroups.set(kw, { count: 0, engagement: 0, platforms: new Set(), sources: [] });
+        keywordGroups.set(kw, { count: 0, engagement: 0, platforms: new Set(), sources: [], industries: {} });
       }
       const g = keywordGroups.get(kw);
       g.count++;
       g.engagement += engagement;
       g.platforms.add(platform);
+      // Track industry vote counts to pick the dominant industry for this trend
+      g.industries[discIndustry] = (g.industries[discIndustry] ?? 0) + 1;
       // Collect up to 8 clickable sources per keyword group
       if (disc.source_url && g.sources.length < 8) {
         g.sources.push({
@@ -475,12 +479,16 @@ function synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId) 
     const growthRate = parseFloat(Math.min(99, 12 + (data.count / discoveries.length) * 80).toFixed(1));
     const title = keyword.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 
+    // Pick the most-voted industry for this keyword group; fall back to "All"
+    const dominantIndustry = Object.entries(data.industries ?? {})
+      .sort((a, b) => b[1] - a[1])[0]?.[0] ?? "All";
+
     return {
       $primaryKey: `live-${missionId}-${i}`,
       trendId: `live-${missionId}-${i}`,
       title,
       description: `Trending across ${[...data.platforms].join(", ")} — found in ${data.count} source(s) from research on "${missionPrompt}".`,
-      industry: "All",
+      industry: dominantIndustry,
       category: "Live Research",
       status: score > 72 ? "growing" : "emerging",
       trendScore: score,
@@ -625,7 +633,7 @@ async function handleTrends(_request, response) {
   const [discResult, planResult] = await Promise.all([
     insforge.database
       .from("discoveries")
-      .select("id,agent_id,source_url,thumbnail_url,keywords,likes,views,comments,created_at")
+      .select("id,agent_id,source_url,thumbnail_url,keywords,industry,likes,views,comments,created_at")
       .eq("mission_id", missionId)
       .order("created_at", { ascending: false })
       .limit(200),
@@ -684,24 +692,10 @@ function invalidateRecsCache() {
 async function generateLiveRecommendations() {
   const insforge = createServerInsforgeClient();
 
-  const missionResult = await insforge.database
-    .from("missions")
-    .select("id,prompt,final_options")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (missionResult.error || !missionResult.data) return { recommendations: [] };
-
-  const mission = missionResult.data;
-  const missionId = String(mission.id ?? "");
-  const missionPrompt = String(mission.prompt ?? "");
-
+  // Use the most recent business plan regardless of which mission generated it
   const planResult = await insforge.database
     .from("business_plans")
-    .select("id,market_opportunity,competitive_landscape,revenue_models,user_acquisition,risk_analysis,confidence_score,discovery_count,created_at")
-    .eq("mission_id", missionId)
-    .order("is_final", { ascending: false })
+    .select("id,mission_id,market_opportunity,competitive_landscape,revenue_models,user_acquisition,risk_analysis,confidence_score,discovery_count,created_at")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -709,12 +703,23 @@ async function generateLiveRecommendations() {
   if (planResult.error || !planResult.data) return { recommendations: [] };
 
   const plan = planResult.data;
+  const planMissionId = String(plan.mission_id ?? "");
 
-  // Build discovery keyword summary for context
+  // Get the prompt from the mission that produced this plan
+  const missionResult = await insforge.database
+    .from("missions")
+    .select("id,prompt")
+    .eq("id", planMissionId)
+    .maybeSingle();
+
+  const missionPrompt = String(missionResult.data?.prompt ?? "multi-industry market research");
+  const missionId = planMissionId;
+
+  // Build discovery keyword summary from the same mission
   const discResult = await insforge.database
     .from("discoveries")
     .select("keywords,likes,views")
-    .eq("mission_id", missionId)
+    .eq("mission_id", planMissionId)
     .order("created_at", { ascending: false })
     .limit(40);
 
@@ -797,7 +802,7 @@ Rules:
     confidenceScore: typeof rec.confidenceScore === "number" ? rec.confidenceScore : 0.7,
     estimatedRevenuePotential: rec.estimatedRevenuePotential ?? "",
     priority: ["high", "medium", "low"].includes(rec.priority) ? rec.priority : "medium",
-    status: "active",
+    status: "new",
     actionPlan: rec.actionPlan ?? "",
     createdAt: new Date().toISOString(),
   }));
@@ -844,18 +849,18 @@ const BG_JOB_MIN_AGE_MS  = 4 * 60 * 60 * 1000;  // skip if latest mission < 4h o
 
 // One query per industry — 12 queries × ≤10 results = ≤120 discoveries per run
 const BG_SEARCH_QUERIES = [
-  "trending clothing streetwear fashion sneakers accessories viral 2025",
-  "viral makeup skincare beauty products ingredients trending now",
-  "trending food beverages drinks viral recipes new brands 2025",
-  "trending travel destinations experiences hotels popular 2025",
-  "trending wellness fitness supplements workout wearables 2025",
-  "trending AI tools SaaS software apps gaining users 2025",
-  "trending digital health telehealth mental health apps 2025",
-  "trending fintech payment apps crypto investing platforms 2025",
-  "trending proptech real estate market housing 2025",
-  "trending edtech online learning courses AI tutoring 2025",
-  "trending streaming gaming creator economy social media 2025",
-  "trending consumer products brands going viral reddit twitter 2025",
+  { q: "trending clothing streetwear fashion sneakers accessories viral 2025",    industry: "fashion-retail" },
+  { q: "viral makeup skincare beauty products ingredients trending now",           industry: "beauty-skincare" },
+  { q: "trending food beverages drinks viral recipes new brands 2025",             industry: "food-beverage" },
+  { q: "trending travel destinations experiences hotels popular 2025",             industry: "travel-hospitality" },
+  { q: "trending wellness fitness supplements workout wearables 2025",             industry: "wellness-fitness" },
+  { q: "trending AI tools SaaS software apps gaining users 2025",                 industry: "tech-saas" },
+  { q: "trending digital health telehealth mental health apps 2025",              industry: "healthcare" },
+  { q: "trending fintech payment apps crypto investing platforms 2025",            industry: "finance-fintech" },
+  { q: "trending proptech real estate market housing 2025",                        industry: "real-estate" },
+  { q: "trending edtech online learning courses AI tutoring 2025",                industry: "education" },
+  { q: "trending streaming gaming creator economy social media 2025",             industry: "entertainment-media" },
+  { q: "trending consumer products brands going viral reddit twitter 2025",        industry: "All" },
 ];
 
 // Map known domains to agent IDs so platform distribution looks natural
@@ -992,9 +997,9 @@ async function runBackgroundDataRefresh(force = false) {
   invalidateDashboardSnapshot();
   invalidateRecsCache();
 
-  // Run Brave Search queries sequentially (200ms gap to respect rate limits)
+  // Run Brave Search queries sequentially (1.1s gap to respect rate limits)
   const discoveries = [];
-  for (const q of BG_SEARCH_QUERIES) {
+  for (const { q, industry } of BG_SEARCH_QUERIES) {
     const results = await runBraveSearch(q);
     for (const r of results) {
       if (!r.url) continue;
@@ -1005,6 +1010,7 @@ async function runBackgroundDataRefresh(force = false) {
         mission_id:    missionId,
         agent_id:      agentId,
         platform:      PLATFORM_BY_AGENT_ID[agentId] ?? "market_research",
+        industry,
         source_url:    r.url,
         thumbnail_url: r.thumbnail?.src ?? r.thumbnail?.original ?? "",
         keywords,

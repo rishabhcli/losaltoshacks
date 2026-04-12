@@ -48,7 +48,7 @@ export function Recommendations() {
     let result = [...recommendations];
 
     // Only show recommendations the user hasn't acted on
-    result = result.filter(r => r.status === "new" || r.status === "reviewed");
+    result = result.filter(r => r.status === "new" || r.status === "reviewed" || r.status === "active");
 
     // Filter by user's preferred industry (cross-reference via trend)
     if (preferences.industry !== "All") {
@@ -78,9 +78,9 @@ export function Recommendations() {
         <div>
           <div className="flex items-center gap-3">
             <Lightbulb className="w-6 h-6 text-blue-600" />
-            <h1 className="text-4xl font-semibold text-slate-900">Recommendations</h1>
+            <h1 className="text-4xl font-semibold text-slate-900 dark:text-slate-100">Recommendations</h1>
           </div>
-          <p className="text-slate-500 text-sm mt-1">
+          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
             {filteredRecs.length} AI-generated recommendation{filteredRecs.length !== 1 ? "s" : ""}
           </p>
         </div>
@@ -88,35 +88,25 @@ export function Recommendations() {
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3">
           <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-            <SelectTrigger className="w-[150px] glass border-slate-200 text-slate-700 text-sm rounded-lg">
+            <SelectTrigger className="w-[150px] glass border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm rounded-lg">
               <SelectValue placeholder="Priority" />
             </SelectTrigger>
-            <SelectContent className="glass border-slate-200 rounded-lg">
-              <SelectItem value="all" className="text-sm text-slate-700">
-                All Priorities
-              </SelectItem>
-              <SelectItem value="high" className="text-sm text-slate-700">
-                High
-              </SelectItem>
-              <SelectItem value="medium" className="text-sm text-slate-700">
-                Medium
-              </SelectItem>
-              <SelectItem value="low" className="text-sm text-slate-700">
-                Low
-              </SelectItem>
+            <SelectContent className="border-slate-200 dark:border-slate-700 rounded-lg">
+              <SelectItem value="all" className="text-sm">All Priorities</SelectItem>
+              <SelectItem value="high" className="text-sm">High</SelectItem>
+              <SelectItem value="medium" className="text-sm">Medium</SelectItem>
+              <SelectItem value="low" className="text-sm">Low</SelectItem>
             </SelectContent>
           </Select>
 
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-[180px] glass border-slate-200 text-slate-700 text-sm rounded-lg">
+            <SelectTrigger className="w-[180px] glass border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm rounded-lg">
               <SelectValue placeholder="Category" />
             </SelectTrigger>
-            <SelectContent className="glass border-slate-200 rounded-lg">
-              <SelectItem value="all" className="text-sm text-slate-700">
-                All Categories
-              </SelectItem>
+            <SelectContent className="border-slate-200 dark:border-slate-700 rounded-lg">
+              <SelectItem value="all" className="text-sm">All Categories</SelectItem>
               {categories.map(cat => (
-                <SelectItem key={cat} value={cat} className="text-sm text-slate-700">
+                <SelectItem key={cat} value={cat} className="text-sm">
                   {cat}
                 </SelectItem>
               ))}
