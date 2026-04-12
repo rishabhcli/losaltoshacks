@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useOsdkObjects, marketTrend } from "@/lib/osdk-shims";
-import { Search, ArrowUpRight, ArrowDownRight, MessageCircle, TrendingUp } from "lucide-react";
+import { Search, ArrowUpRight, ArrowDownRight, MessageCircle, TrendingUp, Sparkles, X } from "lucide-react";
 import { getTrendForecast, forecastColors } from "@/lib/trendForecast";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -13,7 +13,21 @@ import { getIndustryLabel } from "@/lib/industry";
 import { TrendSparkline } from "@/components/market/TrendSparkline";
 import { StabilityBadge } from "@/components/market/StabilityBadge";
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
+
 type SortField = "trendScore" | "mentionCount" | "growthRate";
+
+interface SemanticResult {
+  keywords: string;
+  source_url: string;
+  thumbnail_url?: string;
+  agent_id: number;
+  likes?: number;
+  views?: number;
+  comments?: number;
+  created_at: string;
+  score: number;
+}
 
 export function TrendsExplorer() {
   const { preferences } = usePreferences();
@@ -21,7 +35,30 @@ export function TrendsExplorer() {
   const [industryFilter, setIndustryFilter] = useState(preferences.industry === "All" ? "all" : preferences.industry);
   const [statusFilter, setStatusFilter] = useState("all");
   const [sortBy, setSortBy] = useState<SortField>("trendScore");
+  const [semanticQuery, setSemanticQuery] = useState("");
+  const [semanticResults, setSemanticResults] = useState<SemanticResult[] | null>(null);
+  const [semanticLoading, setSemanticLoading] = useState(false);
+  const [semanticMode, setSemanticMode] = useState(false);
   const navigate = useNavigate();
+
+  const runSemanticSearch = async (q: string) => {
+    if (!q.trim()) return;
+    setSemanticLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/search/semantic`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: q, limit: 12 }),
+      });
+      if (!res.ok) throw new Error("Semantic search failed");
+      const data = await res.json();
+      setSemanticResults(data.results ?? []);
+    } catch {
+      setSemanticResults([]);
+    } finally {
+      setSemanticLoading(false);
+    }
+  };
 
   const { data: trends, isLoading } = useOsdkObjects(marketTrend, {
     orderBy: { trendScore: "desc" },
@@ -82,12 +119,91 @@ export function TrendsExplorer() {
     <ScrollArea className="h-screen">
       <div className="p-6 lg:p-8 space-y-6 max-w-[1120px]">
         {/* Header */}
-        <div>
-          <h1 className="text-4xl font-semibold text-slate-900">Trends Explorer</h1>
-          <p className="text-slate-500 text-sm mt-1">
-            {filteredTrends.length} trend{filteredTrends.length !== 1 ? "s" : ""} detected across all sources
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-4xl font-semibold text-slate-900">Trends Explorer</h1>
+            <p className="text-slate-500 text-sm mt-1">
+              {filteredTrends.length} trend{filteredTrends.length !== 1 ? "s" : ""} detected across all sources
+            </p>
+          </div>
+          <button
+            onClick={() => { setSemanticMode(m => !m); setSemanticResults(null); setSemanticQuery(""); }}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium border transition-colors shrink-0 ${
+              semanticMode
+                ? "bg-violet-600 text-white border-violet-600 hover:bg-violet-700"
+                : "bg-white border-slate-200 text-slate-600 hover:bg-violet-50 hover:border-violet-300 hover:text-violet-700"
+            }`}
+          >
+            <Sparkles className="w-4 h-4" />
+            Semantic Search
+            {semanticMode && <span className="text-[10px] font-semibold uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded">ON</span>}
+          </button>
         </div>
+
+        {/* Semantic Search Panel — MongoDB Atlas Vector Search */}
+        {semanticMode && (
+          <div className="border border-violet-200 dark:border-violet-800 bg-violet-50/60 dark:bg-violet-950/20 rounded-xl p-4 space-y-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-violet-700 dark:text-violet-400 uppercase tracking-wider">
+              <Sparkles className="w-3.5 h-3.5" />
+              MongoDB Atlas Vector Search
+            </div>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-violet-400" />
+                <input
+                  placeholder="Describe what you're looking for… e.g. sustainable energy startups"
+                  value={semanticQuery}
+                  onChange={e => setSemanticQuery(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && runSemanticSearch(semanticQuery)}
+                  className="w-full pl-9 pr-4 py-2 rounded-lg border border-violet-200 dark:border-violet-700 bg-white dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-violet-400"
+                />
+              </div>
+              <button
+                onClick={() => runSemanticSearch(semanticQuery)}
+                disabled={semanticLoading || !semanticQuery.trim()}
+                className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {semanticLoading ? "Searching…" : "Search"}
+              </button>
+              {semanticResults !== null && (
+                <button onClick={() => { setSemanticResults(null); setSemanticQuery(""); }} className="px-2 py-2 rounded-lg border border-slate-200 text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {semanticResults !== null && (
+              <div>
+                <p className="text-xs text-slate-500 mb-3">
+                  {semanticResults.length} semantically similar signal{semanticResults.length !== 1 ? "s" : ""} found
+                </p>
+                {semanticResults.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {semanticResults.map((r, i) => (
+                      <div key={i} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3">
+                        <div className="flex items-start justify-between gap-2 mb-1.5">
+                          <p className="text-xs font-medium text-slate-700 dark:text-slate-200 line-clamp-2">{r.keywords}</p>
+                          <span className="text-[10px] font-semibold text-violet-600 bg-violet-50 dark:bg-violet-950/40 px-1.5 py-0.5 rounded shrink-0">
+                            {(r.score * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                        {r.source_url && (
+                          <a href={r.source_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 hover:underline truncate block">{r.source_url}</a>
+                        )}
+                        <div className="flex items-center gap-3 mt-1.5 text-[10px] text-slate-400">
+                          {(r.views ?? 0) > 0 && <span>{r.views?.toLocaleString()} views</span>}
+                          {(r.likes ?? 0) > 0 && <span>{r.likes?.toLocaleString()} likes</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-400 py-2">No signals matched — try a different query or run a mission first to populate data.</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Filter bar */}
         <div className="flex flex-wrap items-center gap-3">

@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useOsdkObjects, marketRecommendation, marketTrend } from "@/lib/osdk-shims";
 import { Lightbulb } from "lucide-react";
+import { VoiceButton } from "@/components/VoiceButton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { StatusBadge } from "@/components/market/StatusBadge";
@@ -155,7 +156,7 @@ export function Recommendations() {
 
 function RecCard({ rec, trendTitle, onClick }: { rec: { $primaryKey: string | number; title?: string; description?: string; confidenceScore?: number; estimatedRevenuePotential?: string; priority?: string }; trendTitle: string | null; onClick: () => void }) {
   return (
-    <button
+    <div
       onClick={onClick}
       className="border border-slate-200 glass rounded-xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all text-left cursor-pointer w-full"
     >
@@ -171,14 +172,29 @@ function RecCard({ rec, trendTitle, onClick }: { rec: { $primaryKey: string | nu
         <StatusBadge value={rec.priority} />
       </div>
       <p className="text-xs text-slate-500 line-clamp-2">{rec.description}</p>
-      <div className="flex items-center gap-3 mt-3 text-xs">
-        <span className="font-semibold text-blue-600">
-          {rec.confidenceScore != null ? `${(rec.confidenceScore * 100).toFixed(0)}% confidence` : ""}
-        </span>
-        {rec.estimatedRevenuePotential && (
-          <span className="font-semibold text-emerald-500">{rec.estimatedRevenuePotential}</span>
-        )}
+      <div className="flex items-center justify-between mt-3">
+        <div className="flex items-center gap-3 text-xs">
+          <span className="font-semibold text-blue-600">
+            {rec.confidenceScore != null ? `${(rec.confidenceScore * 100).toFixed(0)}% confidence` : ""}
+          </span>
+          {rec.estimatedRevenuePotential && (
+            <span className="font-semibold text-emerald-500">{rec.estimatedRevenuePotential}</span>
+          )}
+        </div>
+        <div onClick={e => e.stopPropagation()}>
+          <VoiceButton
+            size="sm"
+            label="Read"
+            getText={() =>
+              `${rec.title ?? ""}. ${rec.description ?? ""}. ${
+                rec.confidenceScore != null
+                  ? `Confidence: ${(rec.confidenceScore * 100).toFixed(0)} percent.`
+                  : ""
+              } ${rec.estimatedRevenuePotential ? `Estimated revenue: ${rec.estimatedRevenuePotential}.` : ""}`
+            }
+          />
+        </div>
       </div>
-    </button>
+    </div>
   );
 }

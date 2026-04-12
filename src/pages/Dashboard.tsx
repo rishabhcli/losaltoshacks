@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useOsdkObjects, marketTrend, marketInsight } from "@/lib/osdk-shims";
 import { TrendingUp, ArrowUpRight, ArrowDownRight, Zap, Eye, BarChart3, Search, Play, Loader2, ArrowRight } from "lucide-react";
+import { VoiceButton } from "@/components/VoiceButton";
 import { useMasterBuildDashboard } from "@/hooks/useMasterBuildDashboard";
 import { getTrendForecast, forecastColors } from "@/lib/trendForecast";
 import { StatusBadge } from "@/components/market/StatusBadge";
@@ -226,7 +227,21 @@ export function Dashboard() {
 
             {/* Top Emerging Trends */}
             <div>
-              <h2 className="font-semibold text-lg text-slate-900 mb-4">Top Emerging Trends</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-semibold text-lg text-slate-900">Top Emerging Trends</h2>
+                {topTrends.length > 0 && (
+                  <VoiceButton
+                    label="Voice Summary"
+                    size="sm"
+                    getText={() => {
+                      const lines = topTrends.slice(0, 3).map((t, i) =>
+                        `${i + 1}. ${t.title}. Score: ${t.trendScore?.toFixed(0) ?? "N/A"}. ${t.description ?? ""}`
+                      );
+                      return `Here are your top ${lines.length} emerging market trends. ${lines.join(" ")}`;
+                    }}
+                  />
+                )}
+              </div>
               <div className="grid gap-3">
                 {topTrends.length > 0 ? (
                   topTrends.map((trend, idx) => (
