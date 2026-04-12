@@ -804,6 +804,256 @@ async function handleRecommendations(_request, response) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Background Data Refresh (Brave Search)                            */
+/* ------------------------------------------------------------------ */
+
+const BG_JOB_INTERVAL_MS = 6 * 60 * 60 * 1000;  // re-run every 6 hours
+const BG_JOB_MIN_AGE_MS  = 4 * 60 * 60 * 1000;  // skip if latest mission < 4h old
+
+// One query per industry — 12 queries × ≤10 results = ≤120 discoveries per run
+const BG_SEARCH_QUERIES = [
+  "trending clothing streetwear fashion sneakers accessories viral 2025",
+  "viral makeup skincare beauty products ingredients trending now",
+  "trending food beverages drinks viral recipes new brands 2025",
+  "trending travel destinations experiences hotels popular 2025",
+  "trending wellness fitness supplements workout wearables 2025",
+  "trending AI tools SaaS software apps gaining users 2025",
+  "trending digital health telehealth mental health apps 2025",
+  "trending fintech payment apps crypto investing platforms 2025",
+  "trending proptech real estate market housing 2025",
+  "trending edtech online learning courses AI tutoring 2025",
+  "trending streaming gaming creator economy social media 2025",
+  "trending consumer products brands going viral reddit twitter 2025",
+];
+
+// Map known domains to agent IDs so platform distribution looks natural
+const DOMAIN_TO_AGENT_ID = [
+  ["youtube.com",  1],
+  ["youtu.be",     1],
+  ["x.com",        2],
+  ["twitter.com",  2],
+  ["reddit.com",   3],
+  ["substack.com", 4],
+];
+
+function detectAgentId(url) {
+  if (!url) return 5;
+  for (const [domain, id] of DOMAIN_TO_AGENT_ID) {
+    if (url.includes(domain)) return id;
+  }
+  return 5;
+}
+
+function extractKeywordsFromResult(title, description) {
+  const text = `${title ?? ""} ${description ?? ""}`.toLowerCase();
+  const words = text
+    .split(/[\s,;:'"!?.|()\[\]{}<>\/\\–—]+/)
+    .map(w => w.replace(/[^a-z0-9]/g, ""))
+    .filter(w => w.length > 3 && !STOP_WORDS.has(w));
+  return [...new Set(words)].slice(0, 6).join(", ");
+}
+
+async function runBraveSearch(query, retries = 2) {
+  const apiKey = process.env.BRAVE_SEARCH_API_KEY;
+  if (!apiKey) return [];
+
+  const searchUrl = new URL("https://api.search.brave.com/res/v1/web/search");
+  searchUrl.searchParams.set("q", query);
+  searchUrl.searchParams.set("count", "10");
+  searchUrl.searchParams.set("search_lang", "en");
+  searchUrl.searchParams.set("country", "us");
+  searchUrl.searchParams.set("freshness", "pw"); // past week
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(searchUrl.toString(), {
+        headers: {
+          "Accept": "application/json",
+          "Accept-Encoding": "gzip",
+          "X-Subscription-Token": apiKey,
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (res.status === 429) {
+        const waitMs = 2000 * (attempt + 1);
+        console.warn(`[bg-job] Rate limited, waiting ${waitMs}ms before retry...`);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+      if (!res.ok) {
+        console.error(`[bg-job] Brave Search ${res.status} for: ${query}`);
+        return [];
+      }
+      const data = await res.json();
+      return data?.web?.results ?? [];
+    } catch (err) {
+      console.error(`[bg-job] Brave Search error for "${query}":`, err.message);
+      return [];
+    }
+  }
+  return [];
+}
+
+async function runBackgroundDataRefresh(force = false) {
+  console.log(`[bg-job] Starting background data refresh${force ? " (forced)" : ""}...`);
+  const insforge = createServerInsforgeClient();
+
+  if (!force) {
+    // Check if latest mission is too recent or still running
+    const latestMission = await insforge.database
+      .from("missions")
+      .select("id,created_at,status")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!latestMission.error && latestMission.data) {
+      const ageMs = Date.now() - new Date(latestMission.data.created_at).getTime();
+      if (ageMs < BG_JOB_MIN_AGE_MS) {
+        console.log(`[bg-job] Skipping — last mission ${Math.round(ageMs / 60000)}min ago`);
+        return;
+      }
+      if (latestMission.data.status === "queued" || latestMission.data.status === "active") {
+        console.log("[bg-job] Skipping — a mission is currently active");
+        return;
+      }
+    }
+  }
+
+  const missionId  = crypto.randomUUID();
+  const timestamp  = new Date().toISOString();
+  const prompt     = "Background market research: trending products, brands, and content across fashion, beauty, food, tech, wellness, entertainment, and more";
+
+  // Create the mission
+  const missionInsert = await insforge.database.from("missions").insert([{
+    id: missionId, prompt, status: "active",
+    live_url_1: "/agent-stream/1", live_url_2: "/agent-stream/2",
+    live_url_3: "/agent-stream/3", live_url_4: "/agent-stream/4",
+    live_url_5: "/agent-stream/5",
+    created_at: timestamp, updated_at: timestamp,
+  }]);
+  if (missionInsert.error) { console.error("[bg-job] Mission insert error:", missionInsert.error); return; }
+
+  await insforge.database.from("agents").insert(
+    AGENT_ROWS.map(a => ({
+      mission_id: missionId, agent_id: a.agentId, name: a.name,
+      platform: a.platform, role: a.role, status: "idle",
+      preview_url: a.previewUrl, assignment: prompt, energy: 100,
+      created_at: timestamp, updated_at: timestamp, last_heartbeat: timestamp,
+    }))
+  );
+
+  invalidateDashboardSnapshot();
+  invalidateRecsCache();
+
+  // Run Brave Search queries sequentially (200ms gap to respect rate limits)
+  const discoveries = [];
+  for (const q of BG_SEARCH_QUERIES) {
+    const results = await runBraveSearch(q);
+    for (const r of results) {
+      if (!r.url) continue;
+      const keywords = extractKeywordsFromResult(r.title, r.description);
+      if (!keywords) continue;
+      discoveries.push({
+        mission_id:    missionId,
+        agent_id:      detectAgentId(r.url),
+        source_url:    r.url,
+        thumbnail_url: r.thumbnail?.src ?? r.thumbnail?.original ?? null,
+        keywords,
+        likes:    0,
+        views:    0,
+        comments: 0,
+        created_at: new Date().toISOString(),
+      });
+    }
+    await new Promise(resolve => setTimeout(resolve, 1100)); // Brave allows ~1 req/s
+  }
+
+  // Insert discoveries in batches of 50
+  for (let i = 0; i < discoveries.length; i += 50) {
+    await insforge.database.from("discoveries").insert(discoveries.slice(i, i + 50));
+  }
+  console.log(`[bg-job] Inserted ${discoveries.length} discoveries`);
+
+  // Generate business plan via AI so /api/recommendations has real data to work with
+  const topKws = discoveries
+    .flatMap(d => d.keywords.split(", "))
+    .reduce((acc, kw) => { acc[kw] = (acc[kw] ?? 0) + 1; return acc; }, {});
+  const topKeywordsStr = Object.entries(topKws)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 25)
+    .map(([kw]) => kw)
+    .join(", ");
+
+  try {
+    const planResult = await inferWithOpenAI({
+      systemPrompt: "You are a senior market research analyst. Synthesize a concise business intelligence report from trending web data. Output valid JSON only — no markdown fences.",
+      userPrompt: `Synthesize a market intelligence report from ${discoveries.length} real web results scraped across fashion, beauty, food, tech, wellness, entertainment, fintech, health, travel, real estate, and education.
+
+Top trending keywords by frequency: ${topKeywordsStr}
+
+Return a JSON object with exactly these keys (2-4 sentences each):
+{
+  "market_opportunity": "...",
+  "competitive_landscape": "...",
+  "revenue_models": "...",
+  "user_acquisition": "...",
+  "risk_analysis": "...",
+  "confidence_score": 78
+}`,
+      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+      temperature: 0.3,
+    });
+
+    const cleaned = planResult.text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    const plan = match ? JSON.parse(match[0]) : null;
+
+    if (plan) {
+      await insforge.database.from("business_plans").insert([{
+        mission_id:            missionId,
+        version:               1,
+        market_opportunity:    plan.market_opportunity    ?? "",
+        competitive_landscape: plan.competitive_landscape ?? "",
+        revenue_models:        plan.revenue_models        ?? "",
+        user_acquisition:      plan.user_acquisition      ?? "",
+        risk_analysis:         plan.risk_analysis         ?? "",
+        confidence_score:      typeof plan.confidence_score === "number" ? plan.confidence_score : 75,
+        discovery_count:       discoveries.length,
+        is_final:              true,
+        raw_plan:              JSON.stringify(plan),
+        created_at:            new Date().toISOString(),
+      }]);
+      console.log("[bg-job] Business plan generated");
+    }
+  } catch (err) {
+    console.error("[bg-job] Business plan generation failed:", err.message);
+  }
+
+  // Finalize mission
+  await insforge.database.from("missions").update({
+    status: "completed", updated_at: new Date().toISOString(),
+  }).eq("id", missionId);
+
+  invalidateDashboardSnapshot();
+  invalidateRecsCache();
+
+  console.log("[bg-job] Background data refresh complete");
+}
+
+function scheduleBackgroundJob() {
+  // Run 8 seconds after server starts so it's fully ready
+  setTimeout(() => {
+    runBackgroundDataRefresh().catch(err => console.error("[bg-job] Startup run error:", err));
+  }, 8000);
+
+  // Then repeat every 6 hours
+  setInterval(() => {
+    runBackgroundDataRefresh().catch(err => console.error("[bg-job] Scheduled run error:", err));
+  }, BG_JOB_INTERVAL_MS);
+}
+
+/* ------------------------------------------------------------------ */
 /*  HTTP Server                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -1041,6 +1291,17 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
+  // Force-trigger a background data refresh (bypasses age/active checks)
+  if (request.method === "POST" && url.pathname === "/api/refresh") {
+    try {
+      writeJson(response, 200, { ok: true, message: "Background refresh triggered" });
+      void runBackgroundDataRefresh(true); // force=true
+    } catch (error) {
+      writeJson(response, 500, { error: "Failed to trigger refresh" });
+    }
+    return;
+  }
+
   // AI-generated recommendations with real revenue estimates
   if (request.method === "GET" && url.pathname === "/api/recommendations") {
     try {
@@ -1056,4 +1317,5 @@ const server = http.createServer(async (request, response) => {
 
 server.listen(port, () => {
   console.log(`AI server listening on http://localhost:${port}`);
+  scheduleBackgroundJob();
 });

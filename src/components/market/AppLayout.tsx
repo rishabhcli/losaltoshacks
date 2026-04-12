@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useAutoMission } from "@/hooks/useAutoMission";
+// useAutoMission is reserved for manual market research sessions
+// Background data is populated server-side via the Brave Search scheduler
 import {
   LayoutDashboard,
   TrendingUp,
@@ -51,9 +52,6 @@ export function AppLayout() {
       navigate("/business-type", { replace: true });
     }
   }, [preferences.hasCompletedSetup, navigate]);
-
-  // Auto-trigger background market research based on user's industry preference
-  useAutoMission();
 
   const handleLogout = async () => {
     await logout();
