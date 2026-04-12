@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useAutoMission } from "@/hooks/useAutoMission";
 import {
   LayoutDashboard,
   TrendingUp,
@@ -9,7 +10,6 @@ import {
   LogOut,
   Volume2,
   FileText,
-  Search,
 } from "lucide-react";
 import { usePreferences } from "@/hooks/usePreferences";
 import { SearchBar } from "@/components/market/SearchBar";
@@ -23,7 +23,6 @@ import { getIndustryLabel } from "@/lib/industry";
 
 const navItems = [
   { path: "/", icon: LayoutDashboard, label: "Dashboard" },
-  { path: "/market-research", icon: Search, label: "Market Research" },
   { path: "/trends", icon: TrendingUp, label: "Trends" },
   { path: "/recommendations", icon: Lightbulb, label: "Recommendations" },
   { path: "/briefing", icon: Volume2, label: "Briefing" },
@@ -52,6 +51,9 @@ export function AppLayout() {
       navigate("/business-type", { replace: true });
     }
   }, [preferences.hasCompletedSetup, navigate]);
+
+  // Auto-trigger background market research based on user's industry preference
+  useAutoMission();
 
   const handleLogout = async () => {
     await logout();

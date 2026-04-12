@@ -160,17 +160,17 @@ export function MarketResearch() {
             </div>
 
             {/* Right Panel */}
-            <div className="flex-1 flex flex-col overflow-hidden dark:bg-slate-950/20">
+            <div className="flex-1 overflow-y-auto dark:bg-slate-950/20">
               {/* Agent browser preview cards */}
-              <div className="shrink-0 px-4 pt-4 pb-2">
+              <div className="px-4 pt-4 pb-2">
                 <AgentBrowserCards agents={agents} discoveries={discoveries} isRunning={isRunning} />
               </div>
 
               {/* Discovery grid + Mission logs side by side */}
-              <div className="flex-1 flex overflow-hidden min-h-0">
+              <div className="flex h-[440px] border-t border-slate-200/40 dark:border-slate-800/70">
                 {/* Discoveries */}
-                <div className="flex-1 flex flex-col overflow-hidden px-4 pb-3">
-                  <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-300 uppercase tracking-wider mb-2">Discoveries</h3>
+                <div className="flex-1 flex flex-col overflow-hidden px-4 pb-3 pt-3 min-w-0">
+                  <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-300 uppercase tracking-wider mb-2 shrink-0">Discoveries</h3>
                   <div className="flex-1 overflow-hidden">
                     <DiscoveryGrid discoveries={discoveries} />
                   </div>

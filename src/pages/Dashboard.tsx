@@ -45,7 +45,8 @@ export function Dashboard() {
   const filteredTrends = useMemo(() => {
     if (!trends) return [];
     if (activeIndustry === "All") return trends;
-    return trends.filter(t => t.industry === activeIndustry);
+    // industry === "All" on a trend means it's live data relevant to any industry
+    return trends.filter(t => t.industry === activeIndustry || t.industry === "All");
   }, [trends, activeIndustry]);
 
   // KPI insights — filtered by user's industry preference
@@ -100,10 +101,10 @@ export function Dashboard() {
             </div>
 
             {/* Mission launcher */}
-            <div className="flex items-center gap-2.5 p-3 rounded-xl border border-blue-100 bg-blue-50/30">
+            <div className="flex items-center gap-2.5 p-3 rounded-xl border border-blue-100 dark:border-blue-900/50 bg-blue-50/30 dark:bg-blue-950/20">
               {!missionRunning ? (
                 <>
-                  <div className="flex-1 flex items-center gap-2.5 bg-white border border-slate-200 rounded-xl px-3.5 py-2">
+                  <div className="flex-1 flex items-center gap-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2">
                     <Search className="w-4 h-4 text-slate-400 shrink-0" />
                     <input
                       value={missionInput}
@@ -116,7 +117,7 @@ export function Dashboard() {
                         }
                       }}
                       placeholder="Research a market... e.g., AI fitness coaches for remote workers"
-                      className="flex-1 bg-transparent text-sm text-slate-800 placeholder:text-slate-400 outline-none"
+                      className="flex-1 bg-transparent text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 outline-none"
                       disabled={isCreatingMission}
                     />
                   </div>
@@ -141,12 +142,12 @@ export function Dashboard() {
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
                     </span>
-                    <span className="text-sm text-green-700 font-medium">Agents researching</span>
+                    <span className="text-sm text-green-700 dark:text-green-400 font-medium">Agents researching</span>
                     <span className="text-xs text-slate-400 truncate max-w-[300px]">&mdash; {latestMission?.prompt}</span>
                   </div>
                   <button
                     onClick={() => navigate("/market-research")}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-600 hover:bg-blue-100 transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-950/40 transition-colors"
                   >
                     View Research <ArrowRight className="w-3.5 h-3.5" />
                   </button>

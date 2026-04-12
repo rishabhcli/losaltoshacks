@@ -43,9 +43,9 @@ export function TrendsExplorer() {
       );
     }
 
-    // Industry filter
+    // Industry filter (industry === "All" on live trends means cross-industry)
     if (industryFilter !== "all") {
-      result = result.filter(t => t.industry === industryFilter);
+      result = result.filter(t => t.industry === industryFilter || t.industry === "All");
     }
 
     // Status filter

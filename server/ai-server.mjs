@@ -159,6 +159,7 @@ async function handleMissionCreate(request, response) {
   }
 
   invalidateDashboardSnapshot();
+  invalidateRecsCache();
 
   writeJson(response, 200, {
     ok: true,
@@ -286,6 +287,7 @@ async function handleMissionReset(request, response) {
   if (missionReset.error) throw missionReset.error;
 
   invalidateDashboardSnapshot();
+  invalidateRecsCache();
 
   writeJson(response, 200, { ok: true, missionId: targetId });
 }
@@ -379,6 +381,425 @@ async function handleDashboard(_request, response) {
       return;
     }
     throw error;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Route: GET /api/trends                                             */
+/* ------------------------------------------------------------------ */
+
+const PLATFORM_BY_AGENT_ID = { 1: "youtube", 2: "x", 3: "reddit", 4: "substack", 5: "market_research" };
+const STOP_WORDS = new Set(["the", "and", "for", "with", "that", "this", "from", "have", "are", "its", "can", "will", "not", "but", "our"]);
+
+function synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId) {
+  if (!discoveries.length) return [];
+
+  const keywordGroups = new Map();
+
+  for (const disc of discoveries) {
+    const rawKeywords = disc.keywords ?? "";
+    const keywords = rawKeywords
+      .split(",")
+      .map((k) => k.trim().toLowerCase())
+      .filter((k) => k.length > 3 && !STOP_WORDS.has(k));
+
+    const engagement =
+      (disc.likes ?? 0) +
+      Math.floor((disc.views ?? 0) / 100) +
+      (disc.comments ?? 0) * 5;
+
+    const platform = PLATFORM_BY_AGENT_ID[disc.agent_id] ?? "unknown";
+
+    for (const kw of keywords.slice(0, 4)) {
+      if (!keywordGroups.has(kw)) {
+        keywordGroups.set(kw, { count: 0, engagement: 0, platforms: new Set(), sources: [] });
+      }
+      const g = keywordGroups.get(kw);
+      g.count++;
+      g.engagement += engagement;
+      g.platforms.add(platform);
+      // Collect up to 8 clickable sources per keyword group
+      if (disc.source_url && g.sources.length < 8) {
+        g.sources.push({
+          url: disc.source_url,
+          thumbnail: disc.thumbnail_url || null,
+          platform,
+          keywords: rawKeywords.split(",").map((k) => k.trim()).filter(Boolean).slice(0, 3).join(", "),
+          likes: disc.likes ?? 0,
+          views: disc.views ?? 0,
+          comments: disc.comments ?? 0,
+        });
+      }
+    }
+  }
+
+  const sorted = [...keywordGroups.entries()]
+    .sort((a, b) => (b[1].count * 3 + b[1].engagement) - (a[1].count * 3 + a[1].engagement))
+    .slice(0, 15);
+
+  return sorted.map(([keyword, data], i) => {
+    const score = Math.min(99, 40 + data.count * 4 + Math.floor(data.engagement / 50));
+    const mentionCount = data.count * 5000 + data.engagement * 100;
+    const growthRate = parseFloat(Math.min(99, 12 + (data.count / discoveries.length) * 80).toFixed(1));
+    const title = keyword.replace(/\b\w/g, (l) => l.toUpperCase());
+
+    return {
+      $primaryKey: `live-${missionId}-${i}`,
+      trendId: `live-${missionId}-${i}`,
+      title,
+      description: `Trending across ${[...data.platforms].join(", ")} — found in ${data.count} source(s) from research on "${missionPrompt}".`,
+      industry: "All",
+      category: "Live Research",
+      status: score > 72 ? "growing" : "emerging",
+      trendScore: score,
+      mentionCount,
+      growthRate,
+      sentimentScore: 0.65,
+      topKeywords: keyword,
+      detectedAt: new Date().toISOString(),
+      sources: [...data.sources],
+    };
+  });
+}
+
+function synthesizeTrendsFromOptions(finalOptions, missionPrompt, missionId) {
+  if (!finalOptions?.options?.length) return [];
+
+  return finalOptions.options.slice(0, 8).map((option, i) => {
+    const evidenceList = option.evidence ?? [];
+    const evidenceKeywords = evidenceList
+      .map((e) => e.keywords)
+      .filter(Boolean)
+      .slice(0, 5)
+      .join(", ");
+
+    const sources = evidenceList
+      .filter((e) => e.source_url || e.url)
+      .slice(0, 8)
+      .map((e) => ({
+        url: e.source_url || e.url,
+        thumbnail: e.thumbnail_url || e.thumbnail || null,
+        platform: e.platform || "market_research",
+        keywords: e.keywords || option.title,
+        likes: e.likes ?? 0,
+        views: e.views ?? 0,
+        comments: e.comments ?? 0,
+      }));
+
+    return {
+      $primaryKey: `live-opt-${missionId}-${i}`,
+      trendId: `live-opt-${missionId}-${i}`,
+      title: option.title,
+      description: option.concept || option.whyPromising || `Market opportunity from research on "${missionPrompt}"`,
+      industry: "All",
+      category: option.recommendedFormat || "Live Research",
+      status: i < 3 ? "growing" : "emerging",
+      trendScore: Math.max(60, 95 - i * 6),
+      mentionCount: Math.max(50000, (evidenceList.length ?? 1) * 20000),
+      growthRate: parseFloat(Math.max(10, 35 - i * 4).toFixed(1)),
+      sentimentScore: 0.72,
+      topKeywords: evidenceKeywords || option.title,
+      detectedAt: new Date().toISOString(),
+      sources,
+    };
+  });
+}
+
+function synthesizeInsightsFromPlan(plan, missionPrompt) {
+  if (!plan) return [];
+  const id = plan.id;
+  const insights = [];
+
+  const sections = [
+    { key: "market_opportunity", title: "Market Opportunity", type: "opportunity" },
+    { key: "competitive_landscape", title: "Competitive Landscape", type: "summary" },
+    { key: "risk_analysis", title: "Risk Analysis", type: "alert" },
+    { key: "revenue_models", title: "Revenue Models", type: "summary" },
+    { key: "user_acquisition", title: "User Acquisition", type: "opportunity" },
+  ];
+
+  for (const section of sections) {
+    const content = plan[section.key];
+    if (content && content.trim()) {
+      insights.push({
+        $primaryKey: `insight-${section.key}-${id}`,
+        insightId: `insight-${section.key}-${id}`,
+        title: section.title,
+        summary: content,
+        insightType: section.type,
+        industry: "All",
+        generatedAt: plan.created_at,
+        relatedTrendIds: "",
+      });
+    }
+  }
+
+  if (plan.confidence_score != null) {
+    insights.push({
+      $primaryKey: `insight-kpi-confidence-${id}`,
+      insightId: `insight-kpi-confidence-${id}`,
+      title: "Research Confidence",
+      summary: `${plan.discovery_count ?? 0} discoveries analyzed for "${missionPrompt}"`,
+      insightType: "kpi",
+      industry: "All",
+      generatedAt: plan.created_at,
+      relatedTrendIds: "",
+      metricValue: plan.confidence_score,
+      metricUnit: "%",
+      changePercent: plan.confidence_score - 50,
+      period: "Current mission",
+    });
+  }
+
+  if ((plan.discovery_count ?? 0) > 0) {
+    insights.push({
+      $primaryKey: `insight-kpi-disc-${id}`,
+      insightId: `insight-kpi-disc-${id}`,
+      title: "Discoveries",
+      summary: `Sources analyzed from live web research`,
+      insightType: "kpi",
+      industry: "All",
+      generatedAt: plan.created_at,
+      relatedTrendIds: "",
+      metricValue: plan.discovery_count,
+      metricUnit: "sources",
+      changePercent: null,
+      period: "Current mission",
+    });
+  }
+
+  return insights;
+}
+
+async function handleTrends(_request, response) {
+  const insforge = createServerInsforgeClient();
+
+  const missionResult = await insforge.database
+    .from("missions")
+    .select("id,prompt,status,final_options")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (missionResult.error || !missionResult.data) {
+    writeJson(response, 200, { trends: [], insights: [] });
+    return;
+  }
+
+  const mission = missionResult.data;
+  const missionId = String(mission.id ?? "");
+  const missionPrompt = String(mission.prompt ?? "");
+
+  const [discResult, planResult] = await Promise.all([
+    insforge.database
+      .from("discoveries")
+      .select("id,agent_id,source_url,thumbnail_url,keywords,likes,views,comments,created_at")
+      .eq("mission_id", missionId)
+      .order("created_at", { ascending: false })
+      .limit(200),
+    insforge.database
+      .from("business_plans")
+      .select("id,mission_id,market_opportunity,competitive_landscape,revenue_models,user_acquisition,risk_analysis,confidence_score,discovery_count,is_final,created_at")
+      .eq("mission_id", missionId)
+      .order("is_final", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  const discoveries = discResult.data ?? [];
+  const plan = planResult.data ?? null;
+
+  let trends = synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId);
+
+  // Supplement with final_options when discovery-based trends are sparse
+  if (trends.length < 4 && mission.final_options) {
+    let finalOptions = mission.final_options;
+    if (typeof finalOptions === "string") {
+      try { finalOptions = JSON.parse(finalOptions); } catch { finalOptions = null; }
+    }
+    if (finalOptions) {
+      const optionTrends = synthesizeTrendsFromOptions(finalOptions, missionPrompt, missionId);
+      const existing = new Set(trends.map((t) => t.title.toLowerCase()));
+      for (const t of optionTrends) {
+        if (!existing.has(t.title.toLowerCase())) {
+          trends.push(t);
+          existing.add(t.title.toLowerCase());
+        }
+      }
+    }
+  }
+
+  const insights = synthesizeInsightsFromPlan(plan, missionPrompt);
+
+  writeJson(response, 200, { trends, insights, missionPrompt, missionId });
+}
+
+/* ------------------------------------------------------------------ */
+/*  Route: GET /api/recommendations                                   */
+/* ------------------------------------------------------------------ */
+
+const RECS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+let recsCache = null;
+let recsCachedAt = 0;
+let recsInFlight = null;
+
+function invalidateRecsCache() {
+  recsCache = null;
+  recsCachedAt = 0;
+}
+
+async function generateLiveRecommendations() {
+  const insforge = createServerInsforgeClient();
+
+  const missionResult = await insforge.database
+    .from("missions")
+    .select("id,prompt,final_options")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (missionResult.error || !missionResult.data) return { recommendations: [] };
+
+  const mission = missionResult.data;
+  const missionId = String(mission.id ?? "");
+  const missionPrompt = String(mission.prompt ?? "");
+
+  const planResult = await insforge.database
+    .from("business_plans")
+    .select("id,market_opportunity,competitive_landscape,revenue_models,user_acquisition,risk_analysis,confidence_score,discovery_count,created_at")
+    .eq("mission_id", missionId)
+    .order("is_final", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (planResult.error || !planResult.data) return { recommendations: [] };
+
+  const plan = planResult.data;
+
+  // Build discovery keyword summary for context
+  const discResult = await insforge.database
+    .from("discoveries")
+    .select("keywords,likes,views")
+    .eq("mission_id", missionId)
+    .order("created_at", { ascending: false })
+    .limit(40);
+
+  const topKeywords = (discResult.data ?? [])
+    .flatMap((d) => (d.keywords ?? "").split(",").map((k) => k.trim()).filter(Boolean))
+    .slice(0, 20)
+    .join(", ");
+
+  const systemPrompt = `You are a strategic market analyst. Given real scraped research data, generate actionable business recommendations with specific, data-grounded revenue estimates. Output only a valid JSON array — no markdown, no prose.`;
+
+  const userPrompt = `Generate 6 actionable business recommendations with realistic revenue potential.
+
+Research Topic: ${missionPrompt}
+Confidence Score: ${plan.confidence_score ?? 0}%
+Sources Analyzed: ${plan.discovery_count ?? 0}
+Top Trending Keywords: ${topKeywords || "N/A"}
+
+Market Opportunity:
+${plan.market_opportunity ?? "N/A"}
+
+Revenue Models Identified:
+${plan.revenue_models ?? "N/A"}
+
+User Acquisition Insights:
+${plan.user_acquisition ?? "N/A"}
+
+Competitive Landscape:
+${plan.competitive_landscape ?? "N/A"}
+
+Risk Factors:
+${plan.risk_analysis ?? "N/A"}
+
+Return a JSON array with exactly this shape (no extra keys):
+[
+  {
+    "title": "Short action title (max 8 words)",
+    "description": "1-2 sentence description of the opportunity and why it matters now",
+    "productCategory": "One of: Product, Service, Platform, Partnership, Content, Community",
+    "targetDemographic": "Specific target audience (e.g. Gen Z shoppers 18-24, B2B SaaS teams)",
+    "confidenceScore": 0.82,
+    "estimatedRevenuePotential": "Specific estimate like '$2.4M ARR', '$180K first quarter', '$45K/month'",
+    "priority": "high",
+    "actionPlan": "2-3 concrete steps to execute this recommendation"
+  }
+]
+
+Rules:
+- Revenue estimates must be specific dollar amounts derived from the data, not vague ranges
+- Scale estimates to match the research scope and discovery count
+- priority must be "high", "medium", or "low"
+- confidenceScore must be between 0.50 and 0.97`;
+
+  let rawRecs = [];
+  try {
+    const result = await inferWithOpenAI({
+      systemPrompt,
+      userPrompt,
+      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+      temperature: 0.35,
+    });
+
+    const text = result.text ?? "";
+    // Strip markdown code fences if present
+    const clean = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    const match = clean.match(/\[[\s\S]*\]/);
+    if (match) rawRecs = JSON.parse(match[0]);
+  } catch (e) {
+    console.error("[ai-server] Failed to generate live recommendations:", e.message);
+    return { recommendations: [] };
+  }
+
+  const recommendations = rawRecs.slice(0, 8).map((rec, i) => ({
+    $primaryKey: `live-rec-${missionId}-${i}`,
+    recommendationId: `live-rec-${missionId}-${i}`,
+    trendId: `live-${missionId}-${i % 8}`,
+    title: rec.title ?? "Recommendation",
+    description: rec.description ?? "",
+    productCategory: rec.productCategory ?? "Product",
+    targetDemographic: rec.targetDemographic ?? "",
+    confidenceScore: typeof rec.confidenceScore === "number" ? rec.confidenceScore : 0.7,
+    estimatedRevenuePotential: rec.estimatedRevenuePotential ?? "",
+    priority: ["high", "medium", "low"].includes(rec.priority) ? rec.priority : "medium",
+    status: "active",
+    actionPlan: rec.actionPlan ?? "",
+    createdAt: new Date().toISOString(),
+  }));
+
+  return { recommendations, missionId };
+}
+
+async function handleRecommendations(_request, response) {
+  const now = Date.now();
+  if (recsCache && now - recsCachedAt < RECS_CACHE_TTL_MS) {
+    writeJson(response, 200, recsCache);
+    return;
+  }
+
+  if (!recsInFlight) {
+    recsInFlight = generateLiveRecommendations()
+      .then((result) => {
+        recsCache = result;
+        recsCachedAt = Date.now();
+        return result;
+      })
+      .finally(() => { recsInFlight = null; });
+  }
+
+  try {
+    const result = await recsInFlight;
+    writeJson(response, 200, result);
+  } catch (error) {
+    console.error("[ai-server] handleRecommendations error:", error);
+    if (recsCache) {
+      writeJson(response, 200, recsCache);
+      return;
+    }
+    writeJson(response, 200, { recommendations: [] });
   }
 }
 
@@ -606,6 +1027,26 @@ const server = http.createServer(async (request, response) => {
       writeJson(response, 200, { theme });
     } catch {
       writeJson(response, 200, { theme: "light" });
+    }
+    return;
+  }
+
+  // Trends & insights derived from live scraped data
+  if (request.method === "GET" && url.pathname === "/api/trends") {
+    try {
+      await handleTrends(request, response);
+    } catch (error) {
+      writeJson(response, 500, { error: error instanceof Error ? error.message : "Failed to load trends." });
+    }
+    return;
+  }
+
+  // AI-generated recommendations with real revenue estimates
+  if (request.method === "GET" && url.pathname === "/api/recommendations") {
+    try {
+      await handleRecommendations(request, response);
+    } catch (error) {
+      writeJson(response, 500, { error: error instanceof Error ? error.message : "Failed to load recommendations." });
     }
     return;
   }

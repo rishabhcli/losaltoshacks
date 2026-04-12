@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { usePreferences } from "@/hooks/usePreferences";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +12,7 @@ import { toast } from "sonner";
 
 export function BusinessType() {
   const navigate = useNavigate();
-  const { preferences, setIndustry, setBusinessName, completeSetup } = usePreferences();
+  const { preferences, currentUser, setIndustry, setBusinessName, completeSetup } = usePreferences();
   const [selectedIndustry, setSelectedIndustry] = useState(preferences.industry);
   const [name, setName] = useState(preferences.businessName);
 
@@ -19,6 +20,12 @@ export function BusinessType() {
   const hasChanges = selectedIndustry !== preferences.industry || name.trim() !== preferences.businessName;
 
   const handleSave = () => {
+    // Clear the auto-mission record so a fresh mission fires on next load with the new industry
+    if (selectedIndustry !== preferences.industry && currentUser?.email) {
+      try {
+        localStorage.removeItem(`marketpulse-auto-mission-${currentUser.email}`);
+      } catch { /* ignore */ }
+    }
     setIndustry(selectedIndustry);
     setBusinessName(name.trim());
     toast.success("Business preferences updated");

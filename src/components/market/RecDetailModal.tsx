@@ -1,4 +1,4 @@
-import { useOsdkObject, useOsdkAction, useLinks, $Actions, marketTrend } from "@/lib/osdk-shims";
+import { useOsdkObject, useOsdkAction, $Actions, marketTrend } from "@/lib/osdk-shims";
 import { RotateCcw, Check, X, Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
@@ -41,8 +41,6 @@ export function RecDetailModal({ rec, trendTitle, action, onClose }: RecDetailMo
   const { theme } = useTheme();
 
   const { object: trend } = useOsdkObject(marketTrend, rec?.trendId ?? "");
-  const { links: sources } = useLinks(trend, "trendToSourcesSources", { pageSize: 20 });
-  const { links: demographics } = useLinks(trend, "trendToDemographicsDemographics", { pageSize: 20 });
 
   const handleAction = async (newStatus: string, message: string) => {
     await applyAction({ recommendation: rec as never, status: newStatus });
@@ -223,42 +221,6 @@ export function RecDetailModal({ rec, trendTitle, action, onClose }: RecDetailMo
                 />
               </div>
 
-              {sources && sources.length > 0 && (
-                <div className="mb-4">
-                  <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400 mb-2">Sources</p>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {sources.map((src: { $primaryKey: string | number; platform?: string; mentionCount?: number; engagementRate?: number }) => (
-                      <div key={src.$primaryKey} className="border border-slate-200 dark:border-slate-700 glass rounded-lg p-3">
-                        <p className="font-semibold text-xs text-slate-800 dark:text-slate-200 capitalize">{src.platform}</p>
-                        <p className="text-[10px] text-slate-400 mt-1">
-                          {fmtCompact(src.mentionCount ?? 0)} mentions &middot; {src.engagementRate?.toFixed(1)}% eng.
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {demographics && demographics.length > 0 && (
-                <div>
-                  <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400 mb-2">Demographics</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {demographics.map((demo: { $primaryKey: string | number; ageGroup?: string; gender?: string; location?: string; affinityScore?: number; purchaseIntent?: number }) => (
-                      <div key={demo.$primaryKey} className="border border-slate-200 dark:border-slate-700 glass rounded-lg p-3">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{demo.ageGroup}</span>
-                          {demo.gender && <span className="text-xs text-slate-400">{demo.gender}</span>}
-                          {demo.location && <span className="text-xs text-slate-400">&middot; {demo.location}</span>}
-                        </div>
-                        <div className="flex gap-3 text-[10px] text-slate-400">
-                          <span>Affinity: <span className="font-semibold text-blue-600">{demo.affinityScore != null ? `${(demo.affinityScore * 100).toFixed(0)}%` : "--"}</span></span>
-                          <span>Purchase: <span className="font-semibold text-slate-800 dark:text-slate-200">{demo.purchaseIntent != null ? `${(demo.purchaseIntent * 100).toFixed(0)}%` : "--"}</span></span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           </>
         )}

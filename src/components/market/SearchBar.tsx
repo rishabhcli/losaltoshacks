@@ -10,7 +10,8 @@ import {
   CommandItem,
   CommandSeparator,
 } from "@/components/ui/command";
-import { MOCK_TRENDS, MOCK_RECOMMENDATIONS } from "@/lib/mockData";
+import { useOsdkObjects, marketTrend, marketRecommendation } from "@/lib/osdk-shims";
+import type { MockTrend, MockRecommendation } from "@/lib/mockData";
 import { getIndustryLabel } from "@/lib/industry";
 
 const pages = [
@@ -25,6 +26,9 @@ const pages = [
 export function SearchBar() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+
+  const { data: trends } = useOsdkObjects(marketTrend, { pageSize: 50 });
+  const { data: recs } = useOsdkObjects(marketRecommendation, { pageSize: 50 });
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -75,43 +79,49 @@ export function SearchBar() {
             ))}
           </CommandGroup>
 
-          <CommandSeparator />
+          {trends.length > 0 && (
+            <>
+              <CommandSeparator />
+              <CommandGroup heading="Trends">
+                {(trends as MockTrend[]).map(trend => (
+                  <CommandItem
+                    key={trend.trendId}
+                    value={`${trend.title} ${trend.topKeywords} ${trend.industry}`}
+                    onSelect={() => go(`/trends/${trend.trendId}`)}
+                    className="cursor-pointer"
+                  >
+                    <TrendingUp className="w-4 h-4 text-slate-400" />
+                    <div className="flex flex-col">
+                      <span>{trend.title}</span>
+                      <span className="text-xs text-slate-400">{getIndustryLabel(trend.industry)}</span>
+                    </div>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </>
+          )}
 
-          <CommandGroup heading="Trends">
-            {MOCK_TRENDS.map(trend => (
-              <CommandItem
-                key={trend.trendId}
-                value={`${trend.title} ${trend.topKeywords} ${trend.industry}`}
-                onSelect={() => go(`/trends/${trend.trendId}`)}
-                className="cursor-pointer"
-              >
-                <TrendingUp className="w-4 h-4 text-slate-400" />
-                <div className="flex flex-col">
-                  <span>{trend.title}</span>
-                  <span className="text-xs text-slate-400">{getIndustryLabel(trend.industry)}</span>
-                </div>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-
-          <CommandSeparator />
-
-          <CommandGroup heading="Recommendations">
-            {MOCK_RECOMMENDATIONS.map(rec => (
-              <CommandItem
-                key={rec.recommendationId}
-                value={`${rec.title} ${rec.productCategory} ${rec.targetDemographic}`}
-                onSelect={() => go("/recommendations")}
-                className="cursor-pointer"
-              >
-                <Lightbulb className="w-4 h-4 text-slate-400" />
-                <div className="flex flex-col">
-                  <span>{rec.title}</span>
-                  <span className="text-xs text-slate-400">{rec.productCategory}</span>
-                </div>
-              </CommandItem>
-            ))}
-          </CommandGroup>
+          {recs.length > 0 && (
+            <>
+              <CommandSeparator />
+              <CommandGroup heading="Recommendations">
+                {(recs as MockRecommendation[]).map(rec => (
+                  <CommandItem
+                    key={rec.recommendationId}
+                    value={`${rec.title} ${rec.productCategory} ${rec.targetDemographic}`}
+                    onSelect={() => go("/recommendations")}
+                    className="cursor-pointer"
+                  >
+                    <Lightbulb className="w-4 h-4 text-slate-400" />
+                    <div className="flex flex-col">
+                      <span>{rec.title}</span>
+                      <span className="text-xs text-slate-400">{rec.productCategory}</span>
+                    </div>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </>
+          )}
         </CommandList>
       </CommandDialog>
     </>

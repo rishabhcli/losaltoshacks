@@ -8,6 +8,16 @@ function hoursAgo(h: number): string {
   return new Date(Date.now() - h * 60 * 60 * 1000).toISOString();
 }
 
+export interface TrendSource {
+  url: string;
+  thumbnail?: string | null;
+  platform: string;
+  keywords: string;
+  likes?: number;
+  views?: number;
+  comments?: number;
+}
+
 export interface MockTrend {
   $primaryKey: string;
   trendId: string;
@@ -22,6 +32,7 @@ export interface MockTrend {
   sentimentScore: number;
   topKeywords: string;
   detectedAt: string;
+  sources?: TrendSource[];
 }
 
 export interface MockInsight {

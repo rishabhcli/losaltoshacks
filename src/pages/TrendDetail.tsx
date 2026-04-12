@@ -1,21 +1,22 @@
 import { useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useOsdkObject, useOsdkAction, useLinks, $Actions, marketTrend } from "@/lib/osdk-shims";
+import type { TrendSource } from "@/lib/mockData";
 import {
   ArrowLeft,
   Bookmark,
   Globe,
-  Users,
   Lightbulb,
   ArrowUpRight,
   ArrowDownRight,
-  Instagram,
-  Facebook,
-  Tv,
   Newspaper,
   MessageCircle,
   Info,
   Sparkles,
+  ExternalLink,
+  ThumbsUp,
+  Eye,
+  Youtube,
 } from "lucide-react";
 import { getTrendForecast, forecastColors } from "@/lib/trendForecast";
 import { Button } from "@/components/ui/button";
@@ -53,10 +54,6 @@ export function TrendDetail() {
 
   // Load linked data
   const { links: sources, isLoading: sourcesLoading } = useLinks(trend, "trendToSourcesSources", {
-    pageSize: 20,
-  });
-
-  const { links: demographics, isLoading: demosLoading } = useLinks(trend, "trendToDemographicsDemographics", {
     pageSize: 20,
   });
 
@@ -216,35 +213,16 @@ export function TrendDetail() {
             <Globe className="w-4 h-4 text-blue-600" />
             <h2 className="font-semibold text-lg text-slate-900">Sources</h2>
           </div>
-          {sourcesLoading && !sources ? (
+          {trend.sources && trend.sources.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {trend.sources.map((src, idx) => (
+                <LiveSourceCard key={`${src.url}-${idx}`} source={src} />
+              ))}
+            </div>
+          ) : sourcesLoading ? (
             <LoadingState label="Loading sources" />
-          ) : sources && sources.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {sources.map(src => (
-                <SourceCard key={src.$primaryKey} source={src} />
-              ))}
-            </div>
           ) : (
-            <p className="text-slate-300 text-sm py-4">No source data available</p>
-          )}
-        </section>
-
-        {/* Demographics */}
-        <section>
-          <div className="flex items-center gap-2 mb-4">
-            <Users className="w-4 h-4 text-blue-600" />
-            <h2 className="font-semibold text-lg text-slate-900">Demographics</h2>
-          </div>
-          {demosLoading && !demographics ? (
-            <LoadingState label="Loading demographics" />
-          ) : demographics && demographics.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {demographics.map(demo => (
-                <DemographicCard key={demo.$primaryKey} demo={demo} />
-              ))}
-            </div>
-          ) : (
-            <p className="text-slate-300 text-sm py-4">No demographic data available</p>
+            <p className="text-slate-400 text-sm py-4">No source links captured for this trend yet.</p>
           )}
         </section>
 
@@ -299,109 +277,90 @@ function MetricBlock({
   );
 }
 
-const platformIcons: Record<string, React.ReactNode> = {
-  instagram: <Instagram className="w-4 h-4" />,
-  tiktok: <Tv className="w-4 h-4" />,
-  facebook: <Facebook className="w-4 h-4" />,
-  twitter: <MessageCircle className="w-4 h-4" />,
-  news: <Newspaper className="w-4 h-4" />,
+const livePlatformIcons: Record<string, React.ReactNode> = {
+  youtube: <Youtube className="w-3.5 h-3.5" />,
+  x: <MessageCircle className="w-3.5 h-3.5" />,
+  reddit: <MessageCircle className="w-3.5 h-3.5" />,
+  substack: <Newspaper className="w-3.5 h-3.5" />,
+  market_research: <Globe className="w-3.5 h-3.5" />,
 };
 
-interface SourceObj {
-  $primaryKey: string | number;
-  platform: string | undefined;
-  mentionCount: number | undefined;
-  engagementRate: number | undefined;
-  sentimentBreakdown: string | undefined;
-  collectedAt: string | undefined;
-}
+const livePlatformColors: Record<string, string> = {
+  youtube: "bg-red-50 text-red-600 border-red-100",
+  x: "bg-slate-50 text-slate-700 border-slate-200",
+  reddit: "bg-orange-50 text-orange-600 border-orange-100",
+  substack: "bg-amber-50 text-amber-700 border-amber-100",
+  market_research: "bg-blue-50 text-blue-600 border-blue-100",
+};
 
-function SourceCard({ source }: { source: SourceObj }) {
+function LiveSourceCard({ source }: { source: TrendSource }) {
   const platform = (source.platform ?? "unknown").toLowerCase();
+  const badgeClass = livePlatformColors[platform] ?? "bg-slate-50 text-slate-700 border-slate-200";
+  const icon = livePlatformIcons[platform] ?? <Globe className="w-3.5 h-3.5" />;
+
   return (
-    <div className="border border-slate-200 glass rounded-xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-blue-600">{platformIcons[platform] ?? <Globe className="w-4 h-4" />}</span>
-        <span className="font-semibold text-sm text-slate-800 capitalize">{source.platform}</span>
-      </div>
-      <div className="grid grid-cols-2 gap-3 text-xs">
-        <div>
-          <p className="text-slate-400 font-medium uppercase tracking-wider text-[10px]">Mentions</p>
-          <p className="font-semibold text-slate-800 text-lg">{formatNumber(source.mentionCount ?? 0)}</p>
+    <a
+      href={source.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group block border border-slate-200 glass rounded-xl overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_16px_rgba(0,0,0,0.10)] hover:border-blue-300 transition-all"
+    >
+      {/* Thumbnail */}
+      {source.thumbnail ? (
+        <div className="relative w-full aspect-video bg-slate-100 overflow-hidden">
+          <img
+            src={source.thumbnail}
+            alt={source.keywords}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
         </div>
-        <div>
-          <p className="text-slate-400 font-medium uppercase tracking-wider text-[10px]">Engagement</p>
-          <p className="font-semibold text-slate-800 text-lg">
-            {source.engagementRate != null ? `${source.engagementRate.toFixed(1)}%` : "--"}
-          </p>
+      ) : (
+        <div className="w-full aspect-video bg-gradient-to-br from-blue-50 to-slate-100 flex items-center justify-center">
+          <Globe className="w-8 h-8 text-slate-300" />
         </div>
-      </div>
-      {source.sentimentBreakdown && (
-        <p className="text-[10px] text-slate-300 mt-2 truncate">{source.sentimentBreakdown}</p>
       )}
-    </div>
-  );
-}
 
-interface DemoObj {
-  $primaryKey: string | number;
-  ageGroup: string | undefined;
-  gender: string | undefined;
-  location: string | undefined;
-  affinityScore: number | undefined;
-  engagementIndex: number | undefined;
-  purchaseIntent: number | undefined;
-  topInterests: string | undefined;
-}
-
-function DemographicCard({ demo }: { demo: DemoObj }) {
-  return (
-    <div className="border border-slate-200 glass rounded-xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="font-medium text-xs border border-slate-200 text-slate-700 px-2 py-0.5 rounded-md">
-          {demo.ageGroup}
-        </span>
-        {demo.gender && (
-          <span className="font-medium text-xs border border-slate-200 text-slate-700 px-2 py-0.5 rounded-md">
-            {demo.gender}
+      {/* Content */}
+      <div className="p-3">
+        {/* Platform badge */}
+        <div className="flex items-center justify-between mb-2">
+          <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded border ${badgeClass}`}>
+            {icon}
+            {platform === "market_research" ? "Research" : platform}
           </span>
+          <ExternalLink className="w-3.5 h-3.5 text-slate-300 group-hover:text-blue-500 transition-colors" />
+        </div>
+
+        {/* Keywords */}
+        {source.keywords && (
+          <p className="text-xs text-slate-600 font-medium line-clamp-2 mb-2">{source.keywords}</p>
         )}
-        {demo.location && <span className="text-[10px] text-slate-400">{demo.location}</span>}
+
+        {/* Engagement */}
+        <div className="flex items-center gap-3 text-[10px] text-slate-400">
+          {(source.likes ?? 0) > 0 && (
+            <span className="flex items-center gap-1">
+              <ThumbsUp className="w-3 h-3" />
+              {formatNumber(source.likes ?? 0)}
+            </span>
+          )}
+          {(source.views ?? 0) > 0 && (
+            <span className="flex items-center gap-1">
+              <Eye className="w-3 h-3" />
+              {formatNumber(source.views ?? 0)}
+            </span>
+          )}
+          {(source.comments ?? 0) > 0 && (
+            <span className="flex items-center gap-1">
+              <MessageCircle className="w-3 h-3" />
+              {formatNumber(source.comments ?? 0)}
+            </span>
+          )}
+        </div>
       </div>
-      <div className="grid grid-cols-3 gap-2 text-xs">
-        <div>
-          <p className="text-slate-400 font-medium uppercase tracking-wider text-[10px]">Affinity</p>
-          <p className="font-semibold text-blue-600 text-lg">
-            {demo.affinityScore != null ? `${(demo.affinityScore * 100).toFixed(0)}%` : "--"}
-          </p>
-        </div>
-        <div>
-          <p className="text-slate-400 font-medium uppercase tracking-wider text-[10px]">Engagement</p>
-          <p className="font-semibold text-slate-800 text-lg">{demo.engagementIndex?.toFixed(1) ?? "--"}</p>
-        </div>
-        <div>
-          <p className="text-slate-400 font-medium uppercase tracking-wider text-[10px]">Purchase</p>
-          <p className="font-semibold text-slate-800 text-lg">
-            {demo.purchaseIntent != null ? `${(demo.purchaseIntent * 100).toFixed(0)}%` : "--"}
-          </p>
-        </div>
-      </div>
-      {demo.topInterests && (
-        <div className="flex flex-wrap gap-1.5 mt-3">
-          {demo.topInterests
-            .split(",")
-            .slice(0, 3)
-            .map(interest => (
-              <span
-                key={interest.trim()}
-                className="text-[11px] font-medium text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-md"
-              >
-                {interest.trim()}
-              </span>
-            ))}
-        </div>
-      )}
-    </div>
+    </a>
   );
 }
 
