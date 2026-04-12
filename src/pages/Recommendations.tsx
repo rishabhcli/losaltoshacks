@@ -6,10 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { StatusBadge } from "@/components/market/StatusBadge";
 import { LoadingState } from "@/components/market/LoadingState";
 import { RecDetailModal, type RecObj } from "@/components/market/RecDetailModal";
-import { usePreferences } from "@/hooks/usePreferences";
-
 export function Recommendations() {
-  const { preferences } = usePreferences();
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [selectedRec, setSelectedRec] = useState<RecObj | null>(null);
@@ -50,14 +47,6 @@ export function Recommendations() {
     // Only show recommendations the user hasn't acted on
     result = result.filter(r => r.status === "new" || r.status === "reviewed" || r.status === "active");
 
-    // Filter by user's preferred industry (cross-reference via trend)
-    if (preferences.industry !== "All") {
-      result = result.filter(r => {
-        const linked = trendMap.get(r.trendId ?? "");
-        return linked ? linked.industry === preferences.industry : true;
-      });
-    }
-
     if (priorityFilter !== "all") {
       result = result.filter(r => r.priority === priorityFilter);
     }
@@ -65,7 +54,7 @@ export function Recommendations() {
       result = result.filter(r => r.productCategory === categoryFilter);
     }
     return result;
-  }, [recommendations, priorityFilter, categoryFilter, preferences.industry, trendMap]);
+  }, [recommendations, priorityFilter, categoryFilter]);
 
   if (isLoading && !recommendations) {
     return <LoadingState label="Loading recommendations" />;
