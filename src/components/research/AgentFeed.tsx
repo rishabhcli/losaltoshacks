@@ -104,12 +104,12 @@ export function AgentFeed({ thoughts, signals, logs }: Props) {
             variant={filter === f ? "default" : "outline"}
             size="sm"
             onClick={() => setFilter(f)}
-            className={`h-7 text-xs capitalize ${filter === f ? "bg-blue-600 text-white" : "text-slate-600 border-slate-200"}`}
+            className={`h-7 text-xs capitalize ${filter === f ? "bg-blue-600 text-white" : "text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"}`}
           >
             {f}
           </Button>
         ))}
-        <Badge variant="secondary" className="ml-auto text-xs bg-slate-100 text-slate-500">
+        <Badge variant="secondary" className="ml-auto text-xs bg-slate-100 dark:bg-slate-800 text-slate-500">
           {filteredItems.length} events
         </Badge>
       </div>
@@ -129,7 +129,7 @@ export function AgentFeed({ thoughts, signals, logs }: Props) {
             return (
               <div
                 key={item.id}
-                className="flex items-start gap-3 rounded-lg border border-slate-100 bg-white p-3 text-sm"
+                className="flex items-start gap-3 rounded-lg border border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 text-sm"
                 style={{ borderLeftWidth: 3, borderLeftColor: agent?.color ?? "#cbd5e1" }}
               >
                 <Icon className="w-4 h-4 mt-0.5 text-slate-400 shrink-0" />

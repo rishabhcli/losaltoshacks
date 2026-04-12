@@ -46,7 +46,7 @@ export function AgentStatusGrid({ agents, discoveries }: Props) {
         const platformColor = PLATFORM_COLORS[def.platform] ?? def.color;
 
         return (
-          <Card key={def.id} className="border-slate-200 bg-white shadow-sm">
+          <Card key={def.id} className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm dark:shadow-black/20">
             <CardContent className="p-4 flex flex-col items-center gap-2">
               {/* Status dot */}
               <div className="flex items-center gap-2 w-full">
@@ -76,7 +76,7 @@ export function AgentStatusGrid({ agents, discoveries }: Props) {
 
               {/* Discovery count */}
               {count > 0 && (
-                <div className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                <div className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
                   {count} found
                 </div>
               )}

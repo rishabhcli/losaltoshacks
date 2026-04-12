@@ -53,13 +53,13 @@ export function DiscoveryGrid({ discoveries }: Props) {
             size="sm"
             onClick={() => setFilter(f)}
             className={`h-7 text-xs capitalize ${
-              filter === f ? "bg-blue-600 text-white" : "text-slate-600 border-slate-200"
+              filter === f ? "bg-blue-600 text-white" : "text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
             }`}
           >
             {f === "all" ? "All" : f}
           </Button>
         ))}
-        <Badge variant="secondary" className="ml-auto text-xs bg-slate-100 text-slate-500">
+        <Badge variant="secondary" className="ml-auto text-xs bg-slate-100 dark:bg-slate-800 text-slate-500">
           {filtered.length}
         </Badge>
       </div>
@@ -73,10 +73,10 @@ export function DiscoveryGrid({ discoveries }: Props) {
             const color = PLATFORM_COLORS[platform] ?? "#64748b";
 
             return (
-              <Card key={d._id} className="border-slate-200 bg-white shadow-sm overflow-hidden">
+              <Card key={d._id} className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm dark:shadow-black/20 overflow-hidden">
                 {/* Thumbnail */}
                 {d.thumbnail && (
-                  <div className="h-28 bg-slate-100 overflow-hidden">
+                  <div className="h-28 bg-slate-100 dark:bg-slate-800 overflow-hidden">
                     <img
                       src={d.thumbnail}
                       alt=""

@@ -27,7 +27,7 @@ export function FinalOptionsPanel({ finalOptions }: Props) {
     <div className="space-y-4">
       {/* Market Research Summary */}
       {marketResearch.summary && (
-        <Card className="border-blue-200 bg-blue-50/30">
+        <Card className="border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-900/30">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-blue-800 flex items-center gap-2">
               <Globe className="w-4 h-4" />
@@ -39,7 +39,7 @@ export function FinalOptionsPanel({ finalOptions }: Props) {
             {marketResearch.signals.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-3">
                 {marketResearch.signals.map((signal, i) => (
-                  <Badge key={i} variant="secondary" className="text-xs bg-blue-100 text-blue-700">
+                  <Badge key={i} variant="secondary" className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
                     {signal}
                   </Badge>
                 ))}
@@ -56,14 +56,14 @@ export function FinalOptionsPanel({ finalOptions }: Props) {
           return (
             <Card
               key={option.id}
-              className={`${isPrimary ? "border-green-300 bg-green-50/30 ring-1 ring-green-200" : "border-slate-200 bg-white"}`}
+              className={`${isPrimary ? "border-green-300 dark:border-green-800 bg-green-50/30 dark:bg-green-900/30 ring-1 ring-green-200 dark:ring-green-800" : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"}`}
             >
               <CardContent className="p-4">
                 <div className="flex items-start gap-2 mb-2">
                   {isPrimary && <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />}
                   <div>
                     <div className="text-sm font-semibold text-slate-800">{option.title}</div>
-                    {isPrimary && <Badge className="mt-1 text-[10px] bg-green-100 text-green-700 border-0">Recommended</Badge>}
+                    {isPrimary && <Badge className="mt-1 text-[10px] bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-0">Recommended</Badge>}
                   </div>
                 </div>
                 <p className="text-xs text-slate-600 leading-relaxed mb-2">{option.concept}</p>
@@ -72,7 +72,7 @@ export function FinalOptionsPanel({ finalOptions }: Props) {
                   <div><span className="font-medium text-slate-600">Format:</span> {option.recommendedFormat}</div>
                 </div>
                 {option.evidence.length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-slate-100">
+                  <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700">
                     <span className="text-[10px] text-slate-400 uppercase tracking-wider">Evidence ({option.evidence.length})</span>
                   </div>
                 )}
@@ -84,7 +84,7 @@ export function FinalOptionsPanel({ finalOptions }: Props) {
 
       {/* Implementation Plan */}
       {implementationPlan.title && (
-        <Card className="border-slate-200 bg-white">
+        <Card className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-slate-800 flex items-center gap-2">
               <Target className="w-4 h-4 text-blue-600" />
@@ -100,7 +100,7 @@ export function FinalOptionsPanel({ finalOptions }: Props) {
                 <div className="text-xs font-semibold text-slate-600 mb-1">Screens</div>
                 <div className="grid grid-cols-2 gap-2">
                   {implementationPlan.screens.map((s, i) => (
-                    <div key={i} className="rounded border border-slate-100 p-2">
+                    <div key={i} className="rounded border border-slate-100 dark:border-slate-700 p-2">
                       <div className="text-xs font-medium text-slate-700">{s.name}</div>
                       <div className="text-[11px] text-slate-400">{s.purpose}</div>
                     </div>
@@ -127,7 +127,7 @@ export function FinalOptionsPanel({ finalOptions }: Props) {
 
       {/* Lovable Handoff */}
       {lovableHandoff.prompt && (
-        <Card className="border-purple-200 bg-purple-50/30">
+        <Card className="border-purple-200 dark:border-purple-800 bg-purple-50/30 dark:bg-purple-900/30">
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">

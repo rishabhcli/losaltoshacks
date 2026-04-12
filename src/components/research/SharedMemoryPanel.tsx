@@ -32,8 +32,8 @@ export function SharedMemoryPanel({ memory }: Props) {
             onClick={() => setSelected(m.filename)}
             className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-sm transition-colors ${
               active?.filename === m.filename
-                ? "bg-blue-50 text-blue-700 font-medium"
-                : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+                ? "bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium"
+                : "text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-700"
             }`}
           >
             <FileText className="w-3.5 h-3.5 shrink-0" />
@@ -44,10 +44,10 @@ export function SharedMemoryPanel({ memory }: Props) {
       </div>
 
       {/* Content pane */}
-      <div className="flex-1 rounded-lg border border-slate-200 bg-slate-50 overflow-hidden flex flex-col">
+      <div className="flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 overflow-hidden flex flex-col">
         {active ? (
           <>
-            <div className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-200 bg-white">
+            <div className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
               <span className="text-sm font-semibold text-slate-700">{active.filename}</span>
               <span className="text-[11px] text-slate-400">
                 v{active.version} &middot; {active.updated_by ?? "system"} &middot; {new Date(active.timestamp).toLocaleTimeString()}

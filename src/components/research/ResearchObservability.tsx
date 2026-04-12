@@ -22,23 +22,23 @@ export function ResearchObservability({
 }: Props) {
   return (
     <Tabs defaultValue="feed" className="flex flex-col h-full">
-      <TabsList className="bg-slate-100/80 border border-slate-200 shrink-0 w-fit">
-        <TabsTrigger value="feed" className="text-xs gap-1.5 data-[state=active]:bg-white data-[state=active]:text-blue-600">
+      <TabsList className="bg-slate-100/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 shrink-0 w-fit">
+        <TabsTrigger value="feed" className="text-xs gap-1.5 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-900 data-[state=active]:text-blue-600">
           Agent Feed
           {thoughts.length > 0 && (
-            <Badge variant="secondary" className="text-[9px] px-1.5 bg-blue-100 text-blue-600">{thoughts.length}</Badge>
+            <Badge variant="secondary" className="text-[9px] px-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600">{thoughts.length}</Badge>
           )}
         </TabsTrigger>
-        <TabsTrigger value="plan" className="text-xs gap-1.5 data-[state=active]:bg-white data-[state=active]:text-blue-600">
+        <TabsTrigger value="plan" className="text-xs gap-1.5 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-900 data-[state=active]:text-blue-600">
           Business Plan
           {businessPlans.length > 0 && (
-            <Badge variant="secondary" className="text-[9px] px-1.5 bg-green-100 text-green-600">v{businessPlans[0].version}</Badge>
+            <Badge variant="secondary" className="text-[9px] px-1.5 bg-green-100 dark:bg-green-900/30 text-green-600">v{businessPlans[0].version}</Badge>
           )}
         </TabsTrigger>
-        <TabsTrigger value="memory" className="text-xs gap-1.5 data-[state=active]:bg-white data-[state=active]:text-blue-600">
+        <TabsTrigger value="memory" className="text-xs gap-1.5 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-900 data-[state=active]:text-blue-600">
           Shared Memory
           {memory.length > 0 && (
-            <Badge variant="secondary" className="text-[9px] px-1.5 bg-slate-200 text-slate-500">{memory.length}</Badge>
+            <Badge variant="secondary" className="text-[9px] px-1.5 bg-slate-200 dark:bg-slate-700 text-slate-500">{memory.length}</Badge>
           )}
         </TabsTrigger>
       </TabsList>

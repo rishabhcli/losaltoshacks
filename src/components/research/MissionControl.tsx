@@ -39,7 +39,7 @@ export function MissionControl({
   };
 
   return (
-    <div className="border-t border-slate-200/60 bg-white/80 backdrop-blur-xl px-5 py-3.5">
+    <div className="border-t border-slate-200/60 dark:border-slate-700/60 glass px-5 py-3.5">
       {/* Status line */}
       {(isRunning || error || (missionPrompt && missionStatus === "stopped")) && (
         <div className="flex items-center gap-2 mb-2.5 px-1">
@@ -64,14 +64,14 @@ export function MissionControl({
 
       {/* Input bar */}
       <div className="flex items-center gap-2.5">
-        <div className="flex-1 flex items-center gap-3 bg-slate-50/80 border border-slate-200 rounded-2xl px-4 py-2.5">
+        <div className="flex-1 flex items-center gap-3 bg-slate-50/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-2.5">
           <Search className="w-4 h-4 text-slate-400 shrink-0" />
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Describe a market to research... e.g., AI-powered wellness apps for Gen Z"
-            className="flex-1 bg-transparent text-sm text-slate-800 placeholder:text-slate-400 outline-none"
+            className="flex-1 bg-transparent text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 outline-none"
             disabled={isCreatingMission}
           />
         </div>
@@ -103,7 +103,7 @@ export function MissionControl({
           <Button
             onClick={onResetAll}
             variant="outline"
-            className="h-10 px-3 rounded-2xl text-slate-500 border-slate-200 shrink-0"
+            className="h-10 px-3 rounded-2xl text-slate-500 border-slate-200 dark:border-slate-700 shrink-0"
           >
             <RotateCcw className="w-4 h-4" />
           </Button>

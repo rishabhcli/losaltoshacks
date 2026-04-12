@@ -28,7 +28,7 @@ function statusColor(status: AgentData["status"]) {
     case "found_trend": return "bg-blue-500 text-white";
     case "weak": case "reassigning": return "bg-yellow-500 text-white";
     case "error": return "bg-red-500 text-white";
-    default: return "bg-slate-300 text-slate-600";
+    default: return "bg-slate-300 dark:bg-slate-600 text-slate-600 dark:text-slate-300";
   }
 }
 
@@ -76,10 +76,10 @@ export function AgentBrowserCards({ agents, discoveries }: Props) {
           return (
             <div
               key={def.id}
-              className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm"
+              className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden shadow-sm dark:shadow-black/20"
             >
               {/* Preview image */}
-              <div className="relative aspect-video bg-slate-100 overflow-hidden">
+              <div className="relative aspect-video bg-slate-100 dark:bg-slate-800 overflow-hidden">
                 <img
                   src={`${API_BASE}/api/agent-stream/${def.agentId}/frame?t=${refreshKey}`}
                   alt={`Agent ${def.name} preview`}
@@ -101,7 +101,7 @@ export function AgentBrowserCards({ agents, discoveries }: Props) {
                 </Badge>
                 {/* Discovery count */}
                 {count > 0 && (
-                  <Badge className="absolute bottom-2 right-2 text-[10px] bg-white/90 text-slate-700 border-0">
+                  <Badge className="absolute bottom-2 right-2 text-[10px] bg-white/90 dark:bg-slate-800/90 text-slate-700 border-0">
                     {count} found
                   </Badge>
                 )}
