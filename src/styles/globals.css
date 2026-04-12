@@ -1,0 +1,155 @@
+@import "tailwindcss" source("..");
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Clear Day — Light only */
+:root {
+  --background: #fafbfd;
+  --foreground: #334155;
+  --card: #ffffff;
+  --card-foreground: #334155;
+  --popover: #ffffff;
+  --popover-foreground: #334155;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #334155;
+  --muted: #f1f5f9;
+  --muted-foreground: #94a3b8;
+  --accent: #eff6ff;
+  --accent-foreground: #2563eb;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #2563eb;
+  --chart-1: #2563eb;
+  --chart-2: #93c5fd;
+  --chart-3: #e2e8f0;
+  --chart-4: #2563eb;
+  --chart-5: #93c5fd;
+  --radius: 0.75rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #334155;
+  --sidebar-primary: #2563eb;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eff6ff;
+  --sidebar-accent-foreground: #2563eb;
+  --sidebar-border: #e2e8f0;
+  --sidebar-ring: #2563eb;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Clear Day custom palette */
+  --color-obsidian: #fafbfd;
+  --color-coral: #2563eb;
+  --color-bone: #0f172a;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f1f5f9;
+  --color-divider: #e2e8f0;
+  --color-grid: #e2e8f0;
+  --color-tag-bg: #eff6ff;
+
+  /* Font families */
+  --font-display: "DM Sans", sans-serif;
+  --font-body: "DM Sans", sans-serif;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    background: linear-gradient(135deg, #eef2ff 0%, #f0f9ff 50%, #f5f3ff 100%);
+    background-attachment: fixed;
+    color: #334155;
+    font-family: "DM Sans", sans-serif;
+    font-size: 15px;
+    line-height: 1.65;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: "DM Sans", sans-serif;
+    font-weight: 600;
+    color: #0f172a;
+    letter-spacing: -0.01em;
+  }
+
+  /* Custom scrollbar — Clear Day */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #f1f5f9;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #93c5fd;
+    border-radius: 3px;
+  }
+}
+
+/* Bubble floating animation — drifts top-left to bottom-right on scroll */
+@keyframes bubble-float {
+  0% {
+    transform: translate(calc(var(--scroll-y, 0) * 0.15px), calc(var(--scroll-y, 0) * 0.2px)) scale(1);
+  }
+  25% {
+    transform: translate(calc(var(--scroll-y, 0) * 0.15px + 25px), calc(var(--scroll-y, 0) * 0.2px + 30px)) scale(1.04);
+  }
+  50% {
+    transform: translate(calc(var(--scroll-y, 0) * 0.15px - 15px), calc(var(--scroll-y, 0) * 0.2px - 20px)) scale(0.97);
+  }
+  75% {
+    transform: translate(calc(var(--scroll-y, 0) * 0.15px + 20px), calc(var(--scroll-y, 0) * 0.2px + 15px)) scale(1.02);
+  }
+  100% {
+    transform: translate(calc(var(--scroll-y, 0) * 0.15px), calc(var(--scroll-y, 0) * 0.2px)) scale(1);
+  }
+}
+
+.bubble-float {
+  animation: bubble-float infinite ease-in-out;
+}

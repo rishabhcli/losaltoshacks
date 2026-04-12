@@ -1,0 +1,6 @@
+{
+  "parentTemplateId" : "pilot-template",
+  "childTemplatesByPath" : { },
+  "parentTemplateVersion" : "0.34.0",
+  "childTemplateVersionsByPath" : { }
+}

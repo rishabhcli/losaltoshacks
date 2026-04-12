@@ -1,0 +1,10 @@
+{
+  "temporaryCsp": {
+    "STYLE_SRC": [
+      "https://fonts.googleapis.com"
+    ],
+    "FONT_SRC": [
+      "https://fonts.gstatic.com"
+    ]
+  }
+}
