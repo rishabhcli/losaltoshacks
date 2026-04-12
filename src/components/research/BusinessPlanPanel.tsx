@@ -17,7 +17,7 @@ interface Props {
   missionPrompt: string;
   isRunning: boolean;
   finalOptions: FinalOptionsPayload | null;
-  onStopAll: () => void;
+  onStopAll?: () => void;
 }
 
 const PLAN_SECTIONS: { key: keyof Pick<BusinessPlan, "market_opportunity" | "competitive_landscape" | "revenue_models" | "user_acquisition" | "risk_analysis">; label: string; icon: string }[] = [
@@ -62,22 +62,22 @@ function renderMarkdownLight(text: string): React.ReactNode[] {
     const key = `md-${i}`;
 
     if (line.trim() === "") { nodes.push(<div key={key} className="h-2" />); continue; }
-    if (line.startsWith("# ")) { nodes.push(<div key={key} className="text-base font-bold text-slate-900 mt-4 mb-1">{line.slice(2)}</div>); continue; }
-    if (line.startsWith("## ")) { nodes.push(<div key={key} className="text-xs font-semibold text-blue-600 uppercase tracking-wide mt-3 mb-1">{line.slice(3)}</div>); continue; }
-    if (line.startsWith("### ")) { nodes.push(<div key={key} className="text-sm font-semibold text-slate-700 mt-2 mb-0.5">{line.slice(4)}</div>); continue; }
+    if (line.startsWith("# ")) { nodes.push(<div key={key} className="text-base font-bold text-slate-900 dark:text-slate-50 mt-4 mb-1">{line.slice(2)}</div>); continue; }
+    if (line.startsWith("## ")) { nodes.push(<div key={key} className="text-xs font-semibold text-blue-600 dark:text-blue-300 uppercase tracking-wide mt-3 mb-1">{line.slice(3)}</div>); continue; }
+    if (line.startsWith("### ")) { nodes.push(<div key={key} className="text-sm font-semibold text-slate-700 dark:text-slate-100 mt-2 mb-0.5">{line.slice(4)}</div>); continue; }
 
     if (line.trimStart().startsWith("- ")) {
       const indent = line.length - line.trimStart().length;
       nodes.push(
-        <div key={key} className="text-sm text-slate-600 leading-relaxed" style={{ paddingLeft: 16 + indent * 8 }}>
-          <span className="text-slate-400 mr-1.5">&bull;</span>
+        <div key={key} className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed" style={{ paddingLeft: 16 + indent * 8 }}>
+          <span className="text-slate-400 dark:text-slate-500 mr-1.5">&bull;</span>
           {renderInline(line.trimStart().slice(2))}
         </div>
       );
       continue;
     }
 
-    nodes.push(<div key={key} className="text-sm text-slate-600 leading-relaxed">{renderInline(line)}</div>);
+    nodes.push(<div key={key} className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{renderInline(line)}</div>);
   }
 
   return nodes;
@@ -90,7 +90,7 @@ function renderInline(text: string): React.ReactNode {
   let match: RegExpExecArray | null;
   while ((match = regex.exec(text)) !== null) {
     if (match.index > last) parts.push(text.slice(last, match.index));
-    parts.push(<span key={match.index} className="font-semibold text-slate-800">{match[1]}</span>);
+    parts.push(<span key={match.index} className="font-semibold text-slate-800 dark:text-slate-100">{match[1]}</span>);
     last = regex.lastIndex;
   }
   if (last < text.length) parts.push(text.slice(last));
@@ -135,7 +135,7 @@ export function BusinessPlanPanel({ plans, agents, discoveries, missionPrompt, i
   // ── Empty states ──
   if (!missionPrompt) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-slate-400 py-16 gap-3">
+      <div className="flex flex-col items-center justify-center h-full text-slate-400 dark:text-slate-500 py-16 gap-3">
         <BarChart3 className="w-8 h-8 opacity-40" />
         <span className="text-sm">Launch a mission to generate a business report</span>
       </div>
@@ -143,16 +143,16 @@ export function BusinessPlanPanel({ plans, agents, discoveries, missionPrompt, i
   }
   if (plans.length === 0 && isRunning) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-slate-400 py-16 gap-3">
+      <div className="flex flex-col items-center justify-center h-full text-slate-400 dark:text-slate-500 py-16 gap-3">
         <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
         <span className="text-sm">Synthesizing report from agent discoveries...</span>
-        <span className="text-xs text-slate-300">{discoveries.length} discoveries collected</span>
+        <span className="text-xs text-slate-300 dark:text-slate-500">{discoveries.length} discoveries collected</span>
       </div>
     );
   }
   if (plans.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-slate-400 py-16 gap-3">
+      <div className="flex flex-col items-center justify-center h-full text-slate-400 dark:text-slate-500 py-16 gap-3">
         <BarChart3 className="w-8 h-8 opacity-40" />
         <span className="text-sm">No business plan synthesized yet</span>
       </div>
@@ -162,12 +162,12 @@ export function BusinessPlanPanel({ plans, agents, discoveries, missionPrompt, i
   return (
     <div className="flex flex-col h-full gap-0 overflow-hidden">
       {/* ── PIPELINE FLOWCHART (top ~45%) ── */}
-      <div className="flex-shrink-0 overflow-auto p-3 border-b border-slate-100 dark:border-slate-700 space-y-0">
+      <div className="flex-shrink-0 overflow-auto p-3 border-b border-slate-100 dark:border-slate-800/80 space-y-0">
         {/* Mission node */}
-        <Card className="border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/80">
+        <Card className="border-slate-200/80 dark:border-slate-800/80 bg-slate-50/80 dark:bg-slate-950/80 shadow-sm dark:shadow-[0_16px_40px_rgba(2,6,23,0.35)]">
           <CardContent className="p-2.5">
             <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Mission</div>
-            <div className="text-xs text-slate-700 line-clamp-2 leading-snug">{missionPrompt}</div>
+            <div className="text-xs text-slate-700 dark:text-slate-100 line-clamp-2 leading-snug">{missionPrompt}</div>
           </CardContent>
         </Card>
 
@@ -180,13 +180,13 @@ export function BusinessPlanPanel({ plans, agents, discoveries, missionPrompt, i
             const meta = agentStatusMeta(data?.status ?? "idle");
             const count = agentDiscCounts[def.agentId] ?? 0;
             return (
-              <div key={def.id} className="flex flex-col items-center gap-0.5 flex-1 min-w-[48px] max-w-[68px] px-1.5 py-1.5 rounded-md border border-slate-100 dark:border-slate-700 bg-white/60 dark:bg-slate-800/60">
+              <div key={def.id} className="flex flex-col items-center gap-0.5 flex-1 min-w-[48px] max-w-[68px] px-1.5 py-1.5 rounded-md border border-slate-100 dark:border-slate-800/80 bg-white/60 dark:bg-slate-950/80">
                 <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass} ${meta.glow ? "animate-pulse" : ""}`} />
                 <span className="text-[9px] font-semibold truncate" style={{ color: PLATFORM_COLORS[def.platform] }}>{def.name}</span>
                 <span className="text-[7px] text-slate-400 uppercase tracking-wider">
                   {def.platform === "market_research" ? "MKT" : def.platform}
                 </span>
-                {count > 0 && <span className="text-[8px] text-slate-500 bg-slate-100 dark:bg-slate-700 px-1 rounded">{count}</span>}
+                {count > 0 && <span className="text-[8px] text-slate-500 dark:text-slate-200 bg-slate-100 dark:bg-slate-950 px-1 rounded">{count}</span>}
               </div>
             );
           })}
@@ -196,14 +196,14 @@ export function BusinessPlanPanel({ plans, agents, discoveries, missionPrompt, i
 
         {/* Synthesis status */}
         {latest && (
-          <Card className={`border ${latest.is_final ? "border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-900/30" : "border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-900/30"}`}>
+          <Card className={`border ${latest.is_final ? "border-green-200 dark:border-green-800/80 bg-green-50/50 dark:bg-emerald-950/30" : "border-blue-200 dark:border-blue-800/80 bg-blue-50/30 dark:bg-blue-950/30"}`}>
             <CardContent className="p-2.5">
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-1.5">
                   {latest.is_final ? <CheckCircle2 className="w-3 h-3 text-green-600" /> : <TrendingUp className="w-3 h-3 text-blue-600" />}
-                  <span className="text-[10px] font-semibold text-slate-600">{latest.is_final ? "Final" : `v${latest.version}`}</span>
+                  <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-200">{latest.is_final ? "Final" : `v${latest.version}`}</span>
                 </div>
-                <span className="text-[10px] text-slate-400">{latest.discovery_count} disc</span>
+                <span className="text-[10px] text-slate-400 dark:text-slate-500">{latest.discovery_count} disc</span>
               </div>
               <Progress value={Math.min(100, latest.confidence_score)} className={`h-1 ${confidenceProgressColor(latest.confidence_score)}`} />
               <div className={`text-[10px] text-right mt-0.5 font-medium ${confidenceColor(latest.confidence_score)}`}>{latest.confidence_score}%</div>
@@ -220,12 +220,12 @@ export function BusinessPlanPanel({ plans, agents, discoveries, missionPrompt, i
               const content = latest[section.key] ?? "";
               const filled = content.length > 0 && !content.startsWith("Pending");
               return (
-                <div key={section.key} className={`rounded-md border p-2 ${filled ? "border-blue-200/80 dark:border-blue-800/80 bg-white dark:bg-slate-800" : "border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50"}`}>
+                <div key={section.key} className={`rounded-md border p-2 ${filled ? "border-blue-200/80 dark:border-blue-800/80 bg-white dark:bg-slate-950/85" : "border-slate-100 dark:border-slate-800/70 bg-slate-50/50 dark:bg-slate-950/55"}`}>
                   <div className="flex items-center gap-1 mb-0.5">
-                    {filled ? <CheckCircle2 className="w-2.5 h-2.5 text-blue-500" /> : <div className="w-2.5 h-2.5 rounded-full border border-slate-300" />}
-                    <span className={`text-[9px] font-semibold uppercase tracking-wider ${filled ? "text-slate-600" : "text-slate-400"}`}>{section.label}</span>
+                    {filled ? <CheckCircle2 className="w-2.5 h-2.5 text-blue-500 dark:text-blue-300" /> : <div className="w-2.5 h-2.5 rounded-full border border-slate-300 dark:border-slate-600" />}
+                    <span className={`text-[9px] font-semibold uppercase tracking-wider ${filled ? "text-slate-600 dark:text-slate-200" : "text-slate-400 dark:text-slate-500"}`}>{section.label}</span>
                   </div>
-                  {filled && <div className="text-[10px] text-slate-500 line-clamp-2 leading-snug">{content}</div>}
+                  {filled && <div className="text-[10px] text-slate-500 dark:text-slate-300 line-clamp-2 leading-snug">{content}</div>}
                 </div>
               );
             })}
@@ -235,23 +235,23 @@ export function BusinessPlanPanel({ plans, agents, discoveries, missionPrompt, i
 
       {/* ── LIVE REPORT (bottom ~55%) ── */}
       <div className="flex-1 flex flex-col min-h-0">
-        <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 dark:border-slate-700 shrink-0">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 dark:border-slate-800/80 shrink-0 bg-transparent dark:bg-slate-950/45">
           <div className="flex items-center gap-2">
             <BarChart3 className="w-3.5 h-3.5 text-blue-600" />
-            <span className="text-xs font-semibold text-slate-700">Live Report</span>
-            {latest && <Badge variant="secondary" className="text-[9px] bg-blue-50 dark:bg-blue-900/30 text-blue-600">v{latest.version}</Badge>}
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-100">Live Report</span>
+            {latest && <Badge variant="secondary" className="text-[9px] bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-300">v{latest.version}</Badge>}
           </div>
           {latest?.raw_plan && (
-            <Button variant="ghost" size="sm" onClick={handleCopy} className="h-6 text-[10px] text-slate-400 gap-1">
+            <Button variant="ghost" size="sm" onClick={handleCopy} className="h-6 text-[10px] text-slate-400 dark:text-slate-300 gap-1">
               <Copy className="w-3 h-3" />
               {copied ? "Copied" : "Copy"}
             </Button>
           )}
         </div>
 
-        <ScrollArea className="flex-1 px-3 py-2" ref={reportRef}>
+        <ScrollArea className="flex-1 px-3 py-2 dark:bg-slate-950/35" ref={reportRef}>
           {reportNodes && reportNodes.length > 0 ? reportNodes : (
-            <div className="text-sm text-slate-400 text-center pt-8">
+            <div className="text-sm text-slate-400 dark:text-slate-500 text-center pt-8">
               {isRunning ? "Report will appear as agents gather data..." : "No raw report data available."}
             </div>
           )}
@@ -259,10 +259,10 @@ export function BusinessPlanPanel({ plans, agents, discoveries, missionPrompt, i
 
         {/* Version history */}
         {history.length > 0 && (
-          <div className="flex items-center gap-1.5 px-3 py-1.5 border-t border-slate-100 dark:border-slate-700 shrink-0 flex-wrap">
-            <span className="text-[9px] text-slate-400 uppercase tracking-wider mr-0.5">History</span>
+          <div className="flex items-center gap-1.5 px-3 py-1.5 border-t border-slate-100 dark:border-slate-800/80 shrink-0 flex-wrap bg-transparent dark:bg-slate-950/45">
+            <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase tracking-wider mr-0.5">History</span>
             {history.map((plan) => (
-              <Badge key={plan._id} variant="outline" className="text-[9px] text-slate-500 border-slate-200 dark:border-slate-700 py-0">
+              <Badge key={plan._id} variant="outline" className="text-[9px] text-slate-500 dark:text-slate-300 border-slate-200 dark:border-slate-800/80 py-0">
                 v{plan.version} <span className={`ml-0.5 ${confidenceColor(plan.confidence_score)}`}>{plan.confidence_score}%</span>
               </Badge>
             ))}
@@ -270,7 +270,7 @@ export function BusinessPlanPanel({ plans, agents, discoveries, missionPrompt, i
         )}
 
         {/* Action buttons */}
-        <div className="px-3 py-2 shrink-0 flex gap-2 border-t border-slate-100 dark:border-slate-700">
+        <div className="px-3 py-2 shrink-0 flex gap-2 border-t border-slate-100 dark:border-slate-800/80 bg-transparent dark:bg-slate-950/55">
           {lovableReady && !isRunning && (
             <a
               href={lovableUrl}
@@ -285,7 +285,7 @@ export function BusinessPlanPanel({ plans, agents, discoveries, missionPrompt, i
           {isRunning && (
             <button
               onClick={() => {
-                onStopAll();
+                onStopAll?.();
                 if (lovableUrl) window.open(lovableUrl, "_blank", "noopener,noreferrer");
               }}
               className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs font-medium hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"

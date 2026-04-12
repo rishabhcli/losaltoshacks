@@ -22,20 +22,20 @@ export function ResearchObservability({
 }: Props) {
   return (
     <Tabs defaultValue="feed" className="flex flex-col h-full">
-      <TabsList className="bg-slate-100/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 shrink-0 w-fit">
-        <TabsTrigger value="feed" className="text-xs gap-1.5 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-900 data-[state=active]:text-blue-600">
+      <TabsList className="bg-slate-100/80 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800/80 shrink-0 w-fit">
+        <TabsTrigger value="feed" className="text-xs gap-1.5 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-blue-600 dark:data-[state=active]:text-[#f8fafc] dark:data-[state=active]:border-slate-800">
           Agent Feed
           {thoughts.length > 0 && (
             <Badge variant="secondary" className="text-[9px] px-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600">{thoughts.length}</Badge>
           )}
         </TabsTrigger>
-        <TabsTrigger value="plan" className="text-xs gap-1.5 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-900 data-[state=active]:text-blue-600">
+        <TabsTrigger value="plan" className="text-xs gap-1.5 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-blue-600 dark:data-[state=active]:text-[#f8fafc] dark:data-[state=active]:border-slate-800">
           Business Plan
           {businessPlans.length > 0 && (
             <Badge variant="secondary" className="text-[9px] px-1.5 bg-green-100 dark:bg-green-900/30 text-green-600">v{businessPlans[0].version}</Badge>
           )}
         </TabsTrigger>
-        <TabsTrigger value="memory" className="text-xs gap-1.5 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-900 data-[state=active]:text-blue-600">
+        <TabsTrigger value="memory" className="text-xs gap-1.5 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-blue-600 dark:data-[state=active]:text-[#f8fafc] dark:data-[state=active]:border-slate-800">
           Shared Memory
           {memory.length > 0 && (
             <Badge variant="secondary" className="text-[9px] px-1.5 bg-slate-200 dark:bg-slate-700 text-slate-500">{memory.length}</Badge>

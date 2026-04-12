@@ -14,10 +14,10 @@ export function SharedMemoryPanel({ memory }: Props) {
 
   if (sorted.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-slate-400 py-16 gap-3">
+      <div className="flex flex-col items-center justify-center h-full text-slate-400 dark:text-slate-500 py-16 gap-3">
         <FileText className="w-8 h-8 opacity-40" />
         <span className="text-sm">No memory files yet</span>
-        <span className="text-xs text-slate-300">Agents will write shared context here during research</span>
+        <span className="text-xs text-slate-300 dark:text-slate-500">Agents will write shared context here during research</span>
       </div>
     );
   }
@@ -33,7 +33,7 @@ export function SharedMemoryPanel({ memory }: Props) {
             className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-sm transition-colors ${
               active?.filename === m.filename
                 ? "bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium"
-                : "text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-700"
+                : "text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-900 hover:text-slate-700 dark:hover:text-slate-200"
             }`}
           >
             <FileText className="w-3.5 h-3.5 shrink-0" />
@@ -44,23 +44,23 @@ export function SharedMemoryPanel({ memory }: Props) {
       </div>
 
       {/* Content pane */}
-      <div className="flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 overflow-hidden flex flex-col">
+      <div className="flex-1 rounded-lg border border-slate-200 dark:border-slate-800/80 bg-slate-50 dark:bg-slate-950/90 overflow-hidden flex flex-col">
         {active ? (
           <>
-            <div className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-              <span className="text-sm font-semibold text-slate-700">{active.filename}</span>
-              <span className="text-[11px] text-slate-400">
+            <div className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-200 dark:border-slate-800/80 bg-white dark:bg-slate-950/80">
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-100">{active.filename}</span>
+              <span className="text-[11px] text-slate-400 dark:text-slate-500">
                 v{active.version} &middot; {active.updated_by ?? "system"} &middot; {new Date(active.timestamp).toLocaleTimeString()}
               </span>
             </div>
             <ScrollArea className="flex-1 p-4">
-              <pre className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed font-mono">
+              <pre className="text-sm text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed font-mono">
                 {active.content || "(empty)"}
               </pre>
             </ScrollArea>
           </>
         ) : (
-          <div className="flex items-center justify-center h-full text-sm text-slate-400">
+          <div className="flex items-center justify-center h-full text-sm text-slate-400 dark:text-slate-500">
             Select a memory file to view
           </div>
         )}

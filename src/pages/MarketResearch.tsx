@@ -64,15 +64,15 @@ export function MarketResearch() {
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden bg-transparent dark:bg-[radial-gradient(circle_at_top,_rgba(37,99,235,0.12),transparent_28%),linear-gradient(180deg,rgba(2,6,23,0.82),rgba(2,6,23,0.96))]">
       {/* ── Top Header Bar ────────────────────────────────────── */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200/60 dark:border-slate-700/60 glass shrink-0">
         <div className="flex items-center gap-3">
-          <h1 className="text-lg font-semibold text-slate-900 tracking-tight">
+          <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50 tracking-tight">
             Market Research
           </h1>
-          {activeAgentCount > 0 && (
-            <Badge className="bg-green-100 text-green-700 border-0 gap-1.5 text-[11px] font-medium">
+          {isRunning && activeAgentCount > 0 && (
+            <Badge className="bg-green-100 dark:bg-emerald-950/70 text-green-700 dark:text-emerald-300 border-0 gap-1.5 text-[11px] font-medium">
               <span className="relative flex h-1.5 w-1.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75" />
                 <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500" />
@@ -81,7 +81,7 @@ export function MarketResearch() {
             </Badge>
           )}
           {!isRunning && discoveries.length > 0 && (
-            <Badge variant="secondary" className="text-[11px] bg-slate-100 text-slate-500">
+            <Badge variant="secondary" className="text-[11px] bg-slate-100 dark:bg-slate-800/80 text-slate-500 dark:text-slate-300">
               {discoveries.length} discoveries
             </Badge>
           )}
@@ -109,13 +109,13 @@ export function MarketResearch() {
         )}
 
         {/* View mode toggle */}
-        <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 border border-slate-200/60 dark:border-slate-700/60">
+        <div className="flex items-center bg-slate-100 dark:bg-slate-950/70 rounded-lg p-0.5 border border-slate-200/60 dark:border-slate-800/80">
           <button
             onClick={() => setViewMode("command")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
               viewMode === "command"
-                ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm"
-                : "text-slate-500 hover:text-slate-700"
+                ? "bg-white dark:bg-slate-950 text-blue-600 dark:text-[#f8fafc] dark:border dark:border-slate-800 shadow-sm"
+                : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
             }`}
           >
             <BarChart3 className="w-3.5 h-3.5" />
@@ -125,8 +125,8 @@ export function MarketResearch() {
             onClick={() => setViewMode("observe")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
               viewMode === "observe"
-                ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm"
-                : "text-slate-500 hover:text-slate-700"
+                ? "bg-white dark:bg-slate-950 text-blue-600 dark:text-[#f8fafc] dark:border dark:border-slate-800 shadow-sm"
+                : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
             }`}
           >
             <Eye className="w-3.5 h-3.5" />
@@ -145,7 +145,7 @@ export function MarketResearch() {
           /* Right: Agent grid + Discovery grid (stacked)         */
           <>
             {/* Left Panel */}
-            <div className="w-[400px] min-w-[320px] border-r border-slate-200/60 dark:border-slate-700/60 flex flex-col overflow-hidden bg-slate-50/30 dark:bg-slate-900/30">
+            <div className="w-[400px] min-w-[320px] border-r border-slate-200/60 dark:border-slate-800/80 flex flex-col overflow-hidden bg-slate-50/30 dark:bg-slate-950/55">
               <div className="flex-1 overflow-hidden">
                 <BusinessPlanPanel
                   plans={businessPlans}
@@ -160,30 +160,30 @@ export function MarketResearch() {
             </div>
 
             {/* Right Panel */}
-            <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="flex-1 flex flex-col overflow-hidden dark:bg-slate-950/20">
               {/* Agent browser preview cards */}
               <div className="shrink-0 px-4 pt-4 pb-2">
-                <AgentBrowserCards agents={agents} discoveries={discoveries} />
+                <AgentBrowserCards agents={agents} discoveries={discoveries} isRunning={isRunning} />
               </div>
 
               {/* Discovery grid + Mission logs side by side */}
               <div className="flex-1 flex overflow-hidden min-h-0">
                 {/* Discoveries */}
                 <div className="flex-1 flex flex-col overflow-hidden px-4 pb-3">
-                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Discoveries</h3>
+                  <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-300 uppercase tracking-wider mb-2">Discoveries</h3>
                   <div className="flex-1 overflow-hidden">
                     <DiscoveryGrid discoveries={discoveries} />
                   </div>
                 </div>
 
                 {/* Mission Logs (floating-style right sidebar) */}
-                <div className="w-[300px] shrink-0 border-l border-slate-200/40 dark:border-slate-700/40 bg-slate-50/50 dark:bg-slate-900/50 flex flex-col overflow-hidden">
-                  <div className="px-3 py-2.5 border-b border-slate-200/40">
+                <div className="w-[300px] shrink-0 border-l border-slate-200/40 dark:border-slate-800/70 bg-slate-50/50 dark:bg-slate-950/70 flex flex-col overflow-hidden">
+                  <div className="px-3 py-2.5 border-b border-slate-200/40 dark:border-slate-800/70">
                     <div className="flex items-center gap-1.5">
                       <Radio className="w-3.5 h-3.5 text-slate-400" />
-                      <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Live Feed</span>
+                      <span className="text-xs font-semibold text-slate-500 dark:text-slate-200 uppercase tracking-wider">Live Feed</span>
                       {logs.length > 0 && (
-                        <Badge variant="secondary" className="text-[9px] ml-auto bg-slate-200/60 text-slate-500">{logs.length}</Badge>
+                        <Badge variant="secondary" className="text-[9px] ml-auto bg-slate-200/60 dark:bg-slate-800/80 text-slate-500 dark:text-slate-300">{logs.length}</Badge>
                       )}
                     </div>
                   </div>
@@ -214,13 +214,13 @@ export function MarketResearch() {
                           return (
                             <div
                               key={item.id}
-                              className="text-[11px] leading-relaxed text-slate-600 px-2 py-1.5 rounded-md hover:bg-white/60 dark:hover:bg-white/10 transition-colors"
+                              className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300 px-2 py-1.5 rounded-md hover:bg-white/60 dark:hover:bg-slate-900/80 transition-colors"
                             >
                               <span className="text-[10px] text-slate-400">
                                 {new Date(item.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                               </span>
                               {" "}
-                              <span className="text-slate-700 line-clamp-2">{item.message}</span>
+                              <span className="text-slate-700 dark:text-slate-100 line-clamp-2">{item.message}</span>
                             </div>
                           );
                         })}
@@ -251,11 +251,11 @@ export function MarketResearch() {
             </div>
 
             {/* Right Panel — Discoveries */}
-            <div className="w-[420px] shrink-0 border-l border-slate-200/60 flex flex-col overflow-hidden p-4">
+            <div className="w-[420px] shrink-0 border-l border-slate-200/60 dark:border-slate-800/80 flex flex-col overflow-hidden p-4 dark:bg-slate-950/45">
               <div className="flex items-center gap-2 mb-3">
-                <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Discoveries</h3>
+                <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-300 uppercase tracking-wider">Discoveries</h3>
                 {discoveries.length > 0 && (
-                  <Badge variant="secondary" className="text-[9px] bg-slate-100 text-slate-500">{discoveries.length}</Badge>
+                  <Badge variant="secondary" className="text-[9px] bg-slate-100 dark:bg-slate-800/80 text-slate-500 dark:text-slate-300">{discoveries.length}</Badge>
                 )}
               </div>
               <div className="flex-1 overflow-hidden">
@@ -284,10 +284,10 @@ export function MarketResearch() {
           {/* Backdrop */}
           <div className="absolute inset-0 bg-black/20 dark:bg-black/50 backdrop-blur-sm" onClick={() => setShowFinalOptions(false)} />
           {/* Modal */}
-          <div className="relative w-[min(760px,calc(100vw-400px))] max-h-[calc(100vh-160px)] bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xl overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 dark:border-slate-700 shrink-0">
+          <div className="relative w-[min(760px,calc(100vw-400px))] max-h-[calc(100vh-160px)] bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-xl overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 dark:border-slate-800/80 shrink-0 bg-slate-50 dark:bg-slate-950">
               <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Market Research Results</h2>
-              <button onClick={() => setShowFinalOptions(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+              <button onClick={() => setShowFinalOptions(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>

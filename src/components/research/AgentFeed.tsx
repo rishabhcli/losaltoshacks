@@ -82,8 +82,6 @@ export function AgentFeed({ thoughts, signals, logs }: Props) {
     return all;
   }, [thoughts, signals, logs]);
 
-  const filtered = filter === "all" ? items : items.filter((i) => i.kind === filter.slice(0, -1) as FeedItem["kind"] || (filter === "thoughts" && i.kind === "thought") || (filter === "signals" && i.kind === "signal") || (filter === "logs" && i.kind === "log"));
-
   const filteredItems = useMemo(() => {
     if (filter === "all") return items;
     return items.filter((i) => {
@@ -118,7 +116,7 @@ export function AgentFeed({ thoughts, signals, logs }: Props) {
       <ScrollArea className="flex-1">
         <div className="space-y-2 pr-3">
           {filteredItems.length === 0 && (
-            <div className="text-center text-sm text-slate-400 py-10">
+            <div className="text-center text-sm text-slate-400 dark:text-slate-500 py-10">
               No events yet. Launch a research mission to see agent activity.
             </div>
           )}
@@ -129,7 +127,7 @@ export function AgentFeed({ thoughts, signals, logs }: Props) {
             return (
               <div
                 key={item.id}
-                className="flex items-start gap-3 rounded-lg border border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 text-sm"
+                className="flex items-start gap-3 rounded-lg border border-slate-100 dark:border-slate-800/80 bg-white dark:bg-slate-950/90 p-3 text-sm shadow-sm dark:shadow-[0_18px_42px_rgba(2,6,23,0.28)]"
                 style={{ borderLeftWidth: 3, borderLeftColor: agent?.color ?? "#cbd5e1" }}
               >
                 <Icon className="w-4 h-4 mt-0.5 text-slate-400 shrink-0" />
@@ -147,9 +145,9 @@ export function AgentFeed({ thoughts, signals, logs }: Props) {
                       {new Date(item.timestamp).toLocaleTimeString()}
                     </span>
                   </div>
-                  <div className="text-slate-700 leading-snug line-clamp-2">{item.title}</div>
+                  <div className="text-slate-700 dark:text-slate-100 leading-snug line-clamp-2">{item.title}</div>
                   {item.detail && (
-                    <div className="text-xs text-slate-400 mt-0.5 truncate">{item.detail}</div>
+                    <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5 truncate">{item.detail}</div>
                   )}
                 </div>
               </div>

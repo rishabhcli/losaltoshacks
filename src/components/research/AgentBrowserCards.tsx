@@ -5,6 +5,7 @@ import { AGENTS, PLATFORM_COLORS, type AgentData, type DiscoveredContent } from 
 interface Props {
   agents: AgentData[];
   discoveries: DiscoveredContent[];
+  isRunning: boolean;
 }
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
@@ -32,10 +33,10 @@ function statusColor(status: AgentData["status"]) {
   }
 }
 
-export function AgentBrowserCards({ agents, discoveries }: Props) {
+export function AgentBrowserCards({ agents, discoveries, isRunning }: Props) {
   // Refresh preview images periodically when agents are active
   const [refreshKey, setRefreshKey] = useState(0);
-  const hasActiveAgents = agents.some((a) =>
+  const hasActiveAgents = isRunning && agents.some((a) =>
     ["searching", "exploiting", "found_trend"].includes(a.status)
   );
 
@@ -57,11 +58,11 @@ export function AgentBrowserCards({ agents, discoveries }: Props) {
   return (
     <div>
       <div className="flex items-center justify-between mb-3 px-1">
-        <h2 className="text-sm font-semibold text-slate-800">
+        <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
           Browser Sessions
         </h2>
-        <span className="text-xs text-slate-400">
-          {agents.filter((a) => ["searching", "exploiting"].includes(a.status)).length} active
+        <span className="text-xs text-slate-400 dark:text-slate-500">
+          {isRunning ? `${agents.filter((a) => ["searching", "exploiting"].includes(a.status)).length} active` : "Stopped"}
         </span>
       </div>
 
@@ -76,7 +77,7 @@ export function AgentBrowserCards({ agents, discoveries }: Props) {
           return (
             <div
               key={def.id}
-              className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden shadow-sm dark:shadow-black/20"
+              className="rounded-xl border border-slate-200 dark:border-slate-800/80 bg-white dark:bg-slate-950/90 overflow-hidden shadow-sm dark:shadow-[0_18px_42px_rgba(2,6,23,0.35)]"
             >
               {/* Preview image */}
               <div className="relative aspect-video bg-slate-100 dark:bg-slate-800 overflow-hidden">
@@ -101,24 +102,24 @@ export function AgentBrowserCards({ agents, discoveries }: Props) {
                 </Badge>
                 {/* Discovery count */}
                 {count > 0 && (
-                  <Badge className="absolute bottom-2 right-2 text-[10px] bg-white/90 dark:bg-slate-800/90 text-slate-700 border-0">
+                  <Badge className="absolute bottom-2 right-2 text-[10px] bg-white/90 dark:bg-slate-950/90 text-slate-700 dark:text-slate-100 border-0">
                     {count} found
                   </Badge>
                 )}
               </div>
 
               {/* Agent info */}
-              <div className="px-3 py-2">
+              <div className="px-3 py-2 dark:bg-slate-950/70">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-semibold" style={{ color }}>
                     {def.name}
                   </span>
-                  <span className="text-[10px] text-slate-400 uppercase tracking-wider">
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider">
                     {def.baseRole}
                   </span>
                 </div>
                 {currentUrl && (
-                  <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                  <div className="text-[10px] text-slate-400 dark:text-slate-500 truncate mt-0.5">
                     {currentUrl}
                   </div>
                 )}

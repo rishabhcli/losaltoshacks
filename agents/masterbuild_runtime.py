@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import signal
+import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -675,6 +676,7 @@ class InsForgeRuntimeClient:
                 "Authorization": f"Bearer {token}",
             },
         )
+        self._rate_limited_until = 0.0
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -682,6 +684,15 @@ class InsForgeRuntimeClient:
     @staticmethod
     def _is_rate_limited_error(error: Exception) -> bool:
         return isinstance(error, httpx.HTTPStatusError) and error.response is not None and error.response.status_code == 429
+
+    def _rate_limit_error(self, method: str, path: str) -> httpx.HTTPStatusError:
+        request = self._client.build_request(method, path)
+        response = httpx.Response(
+            429,
+            request=request,
+            json={"message": "Too many requests from this IP"},
+        )
+        return httpx.HTTPStatusError("Too many requests from this IP", request=request, response=response)
 
     async def _request(
         self,
@@ -693,13 +704,25 @@ class InsForgeRuntimeClient:
         **kwargs: Any,
     ) -> httpx.Response:
         last_response: httpx.Response | None = None
+
+        if self._rate_limited_until > time.monotonic():
+            remaining = self._rate_limited_until - time.monotonic()
+            if retry_on_429:
+                if max_retry_seconds is not None and remaining > max_retry_seconds:
+                    raise self._rate_limit_error(method, path)
+                await asyncio.sleep(remaining)
+            else:
+                raise self._rate_limit_error(method, path)
+
         for attempt in range(5):
             response = await self._client.request(method, path, **kwargs)
             if response.status_code == 429:
                 if not retry_on_429:
+                    self._rate_limited_until = max(self._rate_limited_until, time.monotonic() + 5)
                     response.raise_for_status()
                 retry_after = response.headers.get("Retry-After", "").strip()
-                wait = int(float(retry_after)) if retry_after else 2 ** (attempt + 1)
+                wait = float(retry_after) if retry_after else 2 ** (attempt + 1)
+                self._rate_limited_until = max(self._rate_limited_until, time.monotonic() + wait)
                 if max_retry_seconds is not None and wait > max_retry_seconds:
                     response.raise_for_status()
                 print(f"[insforge] rate limited on {path}, retrying in {wait}s")

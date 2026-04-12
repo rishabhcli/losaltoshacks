@@ -34,10 +34,10 @@ export function DiscoveryGrid({ discoveries }: Props) {
 
   if (discoveries.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-slate-400 py-16 gap-3">
+      <div className="flex flex-col items-center justify-center h-full text-slate-400 dark:text-slate-500 py-16 gap-3">
         <Eye className="w-8 h-8 opacity-40" />
         <span className="text-sm">No discoveries yet</span>
-        <span className="text-xs text-slate-300">Agents will report findings here once the mission starts</span>
+        <span className="text-xs text-slate-300 dark:text-slate-500">Agents will report findings here once the mission starts</span>
       </div>
     );
   }
@@ -73,7 +73,7 @@ export function DiscoveryGrid({ discoveries }: Props) {
             const color = PLATFORM_COLORS[platform] ?? "#64748b";
 
             return (
-              <Card key={d._id} className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm dark:shadow-black/20 overflow-hidden">
+              <Card key={d._id} className="border-slate-200 dark:border-slate-800/80 bg-white dark:bg-slate-950/90 shadow-sm dark:shadow-[0_18px_42px_rgba(2,6,23,0.35)] overflow-hidden">
                 {/* Thumbnail */}
                 {d.thumbnail && (
                   <div className="h-28 bg-slate-100 dark:bg-slate-800 overflow-hidden">
@@ -95,18 +95,18 @@ export function DiscoveryGrid({ discoveries }: Props) {
                     >
                       {platform === "market_research" ? "Research" : platform}
                     </Badge>
-                    <span className="text-[10px] text-slate-400">{agent.name}</span>
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500">{agent.name}</span>
                   </div>
 
                   {/* Keywords */}
                   {d.keywords && (
-                    <div className="text-xs text-slate-700 font-medium line-clamp-2 mb-2 leading-snug">
+                    <div className="text-xs text-slate-700 dark:text-slate-100 font-medium line-clamp-2 mb-2 leading-snug">
                       {d.keywords}
                     </div>
                   )}
 
                   {/* Stats */}
-                  <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                  <div className="flex items-center gap-3 text-[11px] text-slate-400 dark:text-slate-500">
                     {(d.likes ?? 0) > 0 && (
                       <span className="flex items-center gap-1">
                         <Heart className="w-3 h-3" />
@@ -130,7 +130,7 @@ export function DiscoveryGrid({ discoveries }: Props) {
                         href={d.video_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="ml-auto text-blue-500 hover:text-blue-700"
+                        className="ml-auto text-blue-500 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
                       >
                         <ExternalLink className="w-3 h-3" />
                       </a>

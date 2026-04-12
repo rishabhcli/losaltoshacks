@@ -1,0 +1,9 @@
+{
+  "agentId": 5,
+  "status": "searching",
+  "title": "Waiting for discoveries",
+  "currentUrl": "",
+  "updatedAt": "2026-04-12T05:32:48.206685+00:00",
+  "heartbeatAt": "2026-04-12T05:32:48.206708+00:00",
+  "note": "Validated platforms: 3/4. Missing: x."
+}

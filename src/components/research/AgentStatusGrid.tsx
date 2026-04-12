@@ -46,14 +46,14 @@ export function AgentStatusGrid({ agents, discoveries }: Props) {
         const platformColor = PLATFORM_COLORS[def.platform] ?? def.color;
 
         return (
-          <Card key={def.id} className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm dark:shadow-black/20">
+          <Card key={def.id} className="border-slate-200 dark:border-slate-800/80 bg-white dark:bg-slate-950/90 shadow-sm dark:shadow-[0_18px_42px_rgba(2,6,23,0.28)]">
             <CardContent className="p-4 flex flex-col items-center gap-2">
               {/* Status dot */}
               <div className="flex items-center gap-2 w-full">
                 <span
                   className={`h-2 w-2 rounded-full ${meta.color} ${meta.ring ? `ring-4 ${meta.ring}` : ""}`}
                 />
-                <span className="text-xs text-slate-500 capitalize">{meta.label}</span>
+                <span className="text-xs text-slate-500 dark:text-slate-300 capitalize">{meta.label}</span>
               </div>
 
               {/* Agent name + platform */}

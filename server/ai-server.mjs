@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { inferWithOpenAI } from "./lib/openai.mjs";
 import { generateSpeechWithElevenLabs } from "./lib/elevenlabs.mjs";
+import { generateSpeechWithMiniMax } from "./lib/minimax.mjs";
 import { loadProjectEnv } from "./lib/env.mjs";
 import { createServerInsforgeClient } from "./lib/insforge-server.mjs";
 
@@ -430,6 +431,44 @@ const server = http.createServer(async (request, response) => {
       writeJson(response, 500, {
         ok: false,
         error: error instanceof Error ? error.message : "Unknown AI server error.",
+      });
+    }
+    return;
+  }
+
+  // Text-to-Speech (MiniMax)
+  if (request.method === "POST" && url.pathname === "/api/ai/tts-minimax") {
+    try {
+      const body = await readJsonBody(request);
+      if (!body.text) {
+        writeJson(response, 400, { error: "Text is required" });
+        return;
+      }
+
+      const audioStream = await generateSpeechWithMiniMax(body.text, {
+        voiceId: body.voiceId,
+        speed: body.speed,
+        volume: body.volume,
+        pitch: body.pitch,
+      });
+
+      response.writeHead(200, {
+        "Access-Control-Allow-Origin": "*",
+        "Content-Type": "audio/mpeg",
+      });
+
+      const reader = audioStream.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        response.write(value);
+      }
+      response.end();
+    } catch (error) {
+      console.error("[ai-server] MiniMax TTS error:", error);
+      writeJson(response, 500, {
+        ok: false,
+        error: error instanceof Error ? error.message : "Unknown TTS error.",
       });
     }
     return;

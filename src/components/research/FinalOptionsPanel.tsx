@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { FinalOptionsPayload } from "@/hooks/useMasterBuildDashboard";
+import { useTheme } from "@/lib/theme";
 
 interface Props {
   finalOptions: FinalOptionsPayload;
@@ -11,6 +12,8 @@ interface Props {
 
 export function FinalOptionsPanel({ finalOptions }: Props) {
   const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
 
   const { marketResearch, options, primaryOptionId, implementationPlan, lovableHandoff, coverage } = finalOptions;
   const primaryOption = options.find((o) => o.id === primaryOptionId) ?? options[0];
@@ -27,7 +30,7 @@ export function FinalOptionsPanel({ finalOptions }: Props) {
     <div className="space-y-4">
       {/* Market Research Summary */}
       {marketResearch.summary && (
-        <Card className="border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-900/30">
+        <Card className={isDark ? "border-blue-800/80 bg-slate-950/95" : "border-blue-200 bg-blue-50/30"}>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-blue-800 dark:text-blue-300 flex items-center gap-2">
               <Globe className="w-4 h-4" />
@@ -35,7 +38,7 @@ export function FinalOptionsPanel({ finalOptions }: Props) {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
-            <p className="text-sm text-slate-700 leading-relaxed">{marketResearch.summary}</p>
+            <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed">{marketResearch.summary}</p>
             {marketResearch.signals.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-3">
                 {marketResearch.signals.map((signal, i) => (
@@ -56,20 +59,28 @@ export function FinalOptionsPanel({ finalOptions }: Props) {
           return (
             <Card
               key={option.id}
-              className={`${isPrimary ? "border-green-300 dark:border-green-800 bg-green-50/30 dark:bg-green-900/30 ring-1 ring-green-200 dark:ring-green-800" : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"}`}
+              className={
+                isPrimary
+                  ? (isDark
+                    ? "border-green-800 bg-slate-950/95 ring-1 ring-green-800/80"
+                    : "border-green-300 bg-green-50/30 ring-1 ring-green-200")
+                  : (isDark
+                    ? "border-slate-800/80 bg-slate-950/90"
+                    : "border-slate-200 bg-white")
+              }
             >
               <CardContent className="p-4">
                 <div className="flex items-start gap-2 mb-2">
                   {isPrimary && <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />}
                   <div>
-                    <div className="text-sm font-semibold text-slate-800">{option.title}</div>
+                    <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{option.title}</div>
                     {isPrimary && <Badge className="mt-1 text-[10px] bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-0">Recommended</Badge>}
                   </div>
                 </div>
-                <p className="text-xs text-slate-600 leading-relaxed mb-2">{option.concept}</p>
-                <div className="space-y-1 text-xs text-slate-500">
-                  <div><span className="font-medium text-slate-600">Audience:</span> {option.audience}</div>
-                  <div><span className="font-medium text-slate-600">Format:</span> {option.recommendedFormat}</div>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-2">{option.concept}</p>
+                <div className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                  <div><span className="font-medium text-slate-600 dark:text-slate-200">Audience:</span> {option.audience}</div>
+                  <div><span className="font-medium text-slate-600 dark:text-slate-200">Format:</span> {option.recommendedFormat}</div>
                 </div>
                 {option.evidence.length > 0 && (
                   <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700">
@@ -84,25 +95,25 @@ export function FinalOptionsPanel({ finalOptions }: Props) {
 
       {/* Implementation Plan */}
       {implementationPlan.title && (
-        <Card className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+        <Card className={isDark ? "border-slate-800/80 bg-slate-950/90" : "border-slate-200 bg-white"}>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+            <CardTitle className="text-sm font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
               <Target className="w-4 h-4 text-blue-600" />
               Implementation Plan: {implementationPlan.title}
             </CardTitle>
             {implementationPlan.oneLiner && (
-              <p className="text-xs text-slate-500">{implementationPlan.oneLiner}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{implementationPlan.oneLiner}</p>
             )}
           </CardHeader>
           <CardContent className="pt-0 space-y-3">
             {implementationPlan.screens.length > 0 && (
               <div>
-                <div className="text-xs font-semibold text-slate-600 mb-1">Screens</div>
+                <div className="text-xs font-semibold text-slate-600 dark:text-slate-200 mb-1">Screens</div>
                 <div className="grid grid-cols-2 gap-2">
                   {implementationPlan.screens.map((s, i) => (
-                    <div key={i} className="rounded border border-slate-100 dark:border-slate-700 p-2">
-                      <div className="text-xs font-medium text-slate-700">{s.name}</div>
-                      <div className="text-[11px] text-slate-400">{s.purpose}</div>
+                    <div key={i} className="rounded border border-slate-100 dark:border-slate-800/70 p-2 bg-transparent dark:bg-slate-950/65">
+                      <div className="text-xs font-medium text-slate-700 dark:text-slate-100">{s.name}</div>
+                      <div className="text-[11px] text-slate-400 dark:text-slate-500">{s.purpose}</div>
                     </div>
                   ))}
                 </div>
@@ -110,11 +121,11 @@ export function FinalOptionsPanel({ finalOptions }: Props) {
             )}
             {implementationPlan.successMetrics.length > 0 && (
               <div>
-                <div className="text-xs font-semibold text-slate-600 mb-1">Success Metrics</div>
+                <div className="text-xs font-semibold text-slate-600 dark:text-slate-200 mb-1">Success Metrics</div>
                 <ul className="space-y-0.5">
                   {implementationPlan.successMetrics.map((m, i) => (
-                    <li key={i} className="text-xs text-slate-500 flex items-start gap-1.5">
-                      <span className="text-slate-400 mt-0.5">&bull;</span>
+                    <li key={i} className="text-xs text-slate-500 dark:text-slate-300 flex items-start gap-1.5">
+                      <span className="text-slate-400 dark:text-slate-500 mt-0.5">&bull;</span>
                       {m}
                     </li>
                   ))}
@@ -127,7 +138,7 @@ export function FinalOptionsPanel({ finalOptions }: Props) {
 
       {/* Lovable Handoff */}
       {lovableHandoff.prompt && (
-        <Card className="border-purple-200 dark:border-purple-800 bg-purple-50/30 dark:bg-purple-900/30">
+        <Card className={isDark ? "border-purple-800/80 bg-slate-950/95" : "border-purple-200 bg-purple-50/30"}>
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
@@ -155,7 +166,7 @@ export function FinalOptionsPanel({ finalOptions }: Props) {
               </div>
             </div>
             {!coverage.readyForLovable && coverage.missingPlatforms.length > 0 && (
-              <div className="text-xs text-purple-500">
+              <div className="text-xs text-purple-500 dark:text-purple-300">
                 Waiting for: {coverage.missingPlatforms.join(", ")}
               </div>
             )}
