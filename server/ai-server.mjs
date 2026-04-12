@@ -389,7 +389,26 @@ async function handleDashboard(_request, response) {
 /* ------------------------------------------------------------------ */
 
 const PLATFORM_BY_AGENT_ID = { 1: "youtube", 2: "x", 3: "reddit", 4: "substack", 5: "market_research" };
-const STOP_WORDS = new Set(["the", "and", "for", "with", "that", "this", "from", "have", "are", "its", "can", "will", "not", "but", "our"]);
+const STOP_WORDS = new Set([
+  // articles, prepositions, conjunctions
+  "the","and","for","with","that","this","from","have","are","its","can","will",
+  "not","but","our","was","were","been","being","has","had","does","did","make",
+  "into","onto","over","under","about","above","after","before","between","through",
+  "more","most","some","just","even","only","other","also","than","then","when",
+  "them","they","their","here","how","why","what","where","who","which","while",
+  // generic content words that add no signal
+  "trend","trends","trending","best","top","list","tips","ways","guide","year",
+  "time","like","your","into","made","take","find","look","know","show","work",
+  "need","want","help","good","great","news","week","month","post","blog","site",
+  "read","seen","said","says","now","new","get","got","see","say","use","used",
+  "latest","viral","right","full","free","very","ever","well","many","much",
+  "such","both","last","next","each","same","long","high","came","come","said",
+  // platforms / companies (too common across all queries to be signal)
+  "reddit","tiktok","youtube","twitter","instagram","facebook","google","apple",
+  "amazon","microsoft","linkedin","snapchat","pinterest","spotify","netflix",
+  // years
+  "2024","2025","2026","2023","2022",
+]);
 
 function synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId) {
   if (!discoveries.length) return [];
@@ -434,14 +453,27 @@ function synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId) 
   }
 
   const sorted = [...keywordGroups.entries()]
-    .sort((a, b) => (b[1].count * 3 + b[1].engagement) - (a[1].count * 3 + a[1].engagement))
-    .slice(0, 15);
+    .sort((a, b) => (b[1].count * 3 + b[1].engagement) - (a[1].count * 3 + a[1].engagement));
 
-  return sorted.map(([keyword, data], i) => {
+  // Deduplicate: if a bigram appears, drop its component unigrams
+  const kept = [];
+  const suppressedTokens = new Set();
+  for (const entry of sorted) {
+    const [kw] = entry;
+    if (suppressedTokens.has(kw)) continue;
+    kept.push(entry);
+    // If this keyword is a bigram (has a space), suppress its individual words
+    if (kw.includes(" ")) {
+      kw.split(" ").forEach(tok => suppressedTokens.add(tok));
+    }
+    if (kept.length >= 15) break;
+  }
+
+  return kept.map(([keyword, data], i) => {
     const score = Math.min(99, 40 + data.count * 4 + Math.floor(data.engagement / 50));
     const mentionCount = data.count * 5000 + data.engagement * 100;
     const growthRate = parseFloat(Math.min(99, 12 + (data.count / discoveries.length) * 80).toFixed(1));
-    const title = keyword.replace(/\b\w/g, (l) => l.toUpperCase());
+    const title = keyword.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 
     return {
       $primaryKey: `live-${missionId}-${i}`,
@@ -845,12 +877,26 @@ function detectAgentId(url) {
 }
 
 function extractKeywordsFromResult(title, description) {
+  // Prefer title over description for signal quality
   const text = `${title ?? ""} ${description ?? ""}`.toLowerCase();
-  const words = text
+  const tokens = text
     .split(/[\s,;:'"!?.|()\[\]{}<>\/\\–—]+/)
     .map(w => w.replace(/[^a-z0-9]/g, ""))
-    .filter(w => w.length > 3 && !STOP_WORDS.has(w));
-  return [...new Set(words)].slice(0, 6).join(", ");
+    .filter(w => w.length > 3 && !STOP_WORDS.has(w) && !/^\d+$/.test(w)); // drop pure numbers
+
+  if (!tokens.length) return "";
+
+  // Build bigrams where both tokens are meaningful (prefer these as they're more specific)
+  const bigrams = [];
+  for (let i = 0; i < tokens.length - 1; i++) {
+    if (tokens[i].length > 3 && tokens[i + 1].length > 3) {
+      bigrams.push(`${tokens[i]} ${tokens[i + 1]}`);
+    }
+  }
+
+  // Return up to 2 bigrams + up to 2 unigrams for variety
+  const chosen = [...bigrams.slice(0, 2), ...tokens.slice(0, 2)];
+  return [...new Set(chosen)].slice(0, 4).join(", ");
 }
 
 async function runBraveSearch(query, retries = 2) {
@@ -954,11 +1000,13 @@ async function runBackgroundDataRefresh(force = false) {
       if (!r.url) continue;
       const keywords = extractKeywordsFromResult(r.title, r.description);
       if (!keywords) continue;
+      const agentId = detectAgentId(r.url);
       discoveries.push({
         mission_id:    missionId,
-        agent_id:      detectAgentId(r.url),
+        agent_id:      agentId,
+        platform:      PLATFORM_BY_AGENT_ID[agentId] ?? "market_research",
         source_url:    r.url,
-        thumbnail_url: r.thumbnail?.src ?? r.thumbnail?.original ?? null,
+        thumbnail_url: r.thumbnail?.src ?? r.thumbnail?.original ?? "",
         keywords,
         likes:    0,
         views:    0,
@@ -970,10 +1018,17 @@ async function runBackgroundDataRefresh(force = false) {
   }
 
   // Insert discoveries in batches of 50
+  let insertedCount = 0;
   for (let i = 0; i < discoveries.length; i += 50) {
-    await insforge.database.from("discoveries").insert(discoveries.slice(i, i + 50));
+    const batch = discoveries.slice(i, i + 50);
+    const result = await insforge.database.from("discoveries").insert(batch);
+    if (result.error) {
+      console.error("[bg-job] Discovery insert error:", JSON.stringify(result.error));
+    } else {
+      insertedCount += batch.length;
+    }
   }
-  console.log(`[bg-job] Inserted ${discoveries.length} discoveries`);
+  console.log(`[bg-job] Inserted ${insertedCount}/${discoveries.length} discoveries`);
 
   // Generate business plan via AI so /api/recommendations has real data to work with
   const topKws = discoveries
