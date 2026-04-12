@@ -2,6 +2,7 @@ import http from "node:http";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { MongoClient } from "mongodb";
 import { inferWithOpenAI } from "./lib/openai.mjs";
 import { generateSpeechWithElevenLabs } from "./lib/elevenlabs.mjs";
 import { generateSpeechWithMiniMax } from "./lib/minimax.mjs";
@@ -1369,6 +1370,125 @@ const server = http.createServer(async (request, response) => {
       await handleRecommendations(request, response);
     } catch (error) {
       writeJson(response, 500, { error: error instanceof Error ? error.message : "Failed to load recommendations." });
+    }
+    return;
+  }
+
+  // ── MongoDB Atlas Vector Search ─────────────────────────────────────────
+  if (request.method === "POST" && url.pathname === "/api/search/semantic") {
+    try {
+      const body = await readJsonBody(request);
+      const query = typeof body?.query === "string" ? body.query.trim() : "";
+      if (!query) {
+        writeJson(response, 400, { error: "query is required" });
+        return;
+      }
+      const limit = Math.min(Number(body?.limit) || 12, 50);
+
+      // Generate embedding for the query
+      const embedRes = await fetch("https://api.openai.com/v1/embeddings", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ input: query, model: "text-embedding-3-small" }),
+      });
+      if (!embedRes.ok) throw new Error(`OpenAI embed error: ${embedRes.status}`);
+      const embedJson = await embedRes.json();
+      const queryVector = embedJson.data[0].embedding;
+
+      // Run Atlas $vectorSearch aggregation
+      const mongoClient = new MongoClient(process.env.MONGODB_URI);
+      await mongoClient.connect();
+      const db = mongoClient.db(process.env.MONGODB_DB_NAME || "losaltoshacks");
+      const results = await db.collection("discoveries").aggregate([
+        {
+          $vectorSearch: {
+            index: "discoveries_vector_index",
+            path: "embedding",
+            queryVector,
+            numCandidates: limit * 10,
+            limit,
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            keywords: 1,
+            source_url: 1,
+            thumbnail_url: 1,
+            agent_id: 1,
+            likes: 1,
+            views: 1,
+            comments: 1,
+            created_at: 1,
+            score: { $meta: "vectorSearchScore" },
+          },
+        },
+      ]).toArray();
+      await mongoClient.close();
+
+      writeJson(response, 200, { results, query });
+    } catch (error) {
+      console.error("[ai-server] Semantic search error:", error.message);
+      writeJson(response, 500, { error: error.message ?? "Semantic search failed" });
+    }
+    return;
+  }
+
+  // ── GPT-4o Deep Trend Analysis ───────────────────────────────────────────
+  if (request.method === "POST" && url.pathname === "/api/ai/analyze") {
+    try {
+      const body = await readJsonBody(request);
+      if (!body?.title) {
+        writeJson(response, 400, { error: "title is required" });
+        return;
+      }
+
+      const systemPrompt = `You are an expert market strategist and business analyst with deep expertise in emerging trends and market opportunities. Provide sharp, specific, data-grounded analysis. Be direct and actionable — avoid generic advice. Format your response in clear sections.`;
+
+      const userPrompt = `Perform a deep strategic analysis of this emerging market trend:
+
+**Trend:** ${body.title}
+**Industry:** ${body.industry ?? "Not specified"}
+**Description:** ${body.description ?? "N/A"}
+**Keywords:** ${body.keywords ?? "N/A"}
+**Trend Score:** ${body.trendScore ?? "N/A"}/100
+**Growth Rate:** ${body.growthRate != null ? `${Number(body.growthRate).toFixed(1)}%` : "N/A"}
+**Mention Volume:** ${body.mentionCount ?? "N/A"}
+
+Provide your analysis in exactly these sections:
+
+## Why This Trend Matters Now
+2-3 sentences on what's driving it and why the timing is significant.
+
+## Market Opportunity
+Specific size estimate, who is underserved, and the most compelling entry angle.
+
+## Competitive Landscape
+Who are the existing players (or lack thereof), and what gaps exist.
+
+## Fastest Path to Revenue
+The single highest-leverage action a founder could take in the next 30 days.
+
+## Key Risks
+2-3 specific risks with brief mitigation strategies.
+
+## 90-Day Outlook
+Will this trend accelerate, plateau, or fade? Why?`;
+
+      const result = await inferWithOpenAI({
+        systemPrompt,
+        userPrompt,
+        model: process.env.OPENAI_MODEL || "gpt-4o",
+        temperature: 0.4,
+      });
+
+      writeJson(response, 200, { ok: true, analysis: result.text, model: result.model ?? "gpt-4o" });
+    } catch (error) {
+      console.error("[ai-server] Analyze error:", error.message);
+      writeJson(response, 500, { ok: false, error: error.message ?? "Analysis failed" });
     }
     return;
   }

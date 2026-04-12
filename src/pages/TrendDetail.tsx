@@ -17,6 +17,8 @@ import {
   ThumbsUp,
   Eye,
   Youtube,
+  Loader2,
+  BrainCircuit,
 } from "lucide-react";
 import { getTrendForecast, forecastColors } from "@/lib/trendForecast";
 import { Button } from "@/components/ui/button";
@@ -41,6 +43,8 @@ import { ChartControls } from "@/components/market/ChartControls";
 import { StabilityBadge } from "@/components/market/StabilityBadge";
 import { useChartZoom } from "@/hooks/useChartZoom";
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
+
 export function TrendDetail() {
   const { trendId } = useParams<{ trendId: string }>();
   const navigate = useNavigate();
@@ -49,6 +53,38 @@ export function TrendDetail() {
   const isDark = theme === "dark";
 
   const [timeFrame, setTimeFrame] = useState<TimeFrame>("7d");
+  const [claudeAnalysis, setClaudeAnalysis] = useState<string | null>(null);
+  const [claudeLoading, setClaudeLoading] = useState(false);
+  const [claudeModel, setClaudeModel] = useState<string | null>(null);
+
+  const runClaudeAnalysis = async () => {
+    if (!trend || claudeLoading) return;
+    setClaudeLoading(true);
+    setClaudeAnalysis(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: trend.title,
+          description: trend.description,
+          keywords: trend.topKeywords,
+          trendScore: trend.trendScore,
+          growthRate: trend.growthRate,
+          mentionCount: trend.mentionCount,
+          industry: trend.industry,
+        }),
+      });
+      if (!res.ok) throw new Error("Analysis failed");
+      const data = await res.json();
+      setClaudeAnalysis(data.analysis ?? "");
+      setClaudeModel(data.model ?? null);
+    } catch {
+      setClaudeAnalysis("Analysis unavailable. Check that ANTHROPIC_API_KEY is set in the server environment.");
+    } finally {
+      setClaudeLoading(false);
+    }
+  };
 
   const { object: trend, isLoading: trendLoading } = useOsdkObject(marketTrend, trendId ?? "");
 
@@ -135,14 +171,28 @@ export function TrendDetail() {
               <h1 className="text-3xl lg:text-4xl font-semibold text-slate-900">{trend.title}</h1>
               <p className="text-slate-500 mt-2 max-w-2xl">{trend.description}</p>
             </div>
-            <Button
-              onClick={() => handleBookmark(trend.status === "emerging" ? "growing" : "emerging")}
-              disabled={bookmarking}
-              className="bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 rounded-lg hover:shadow-[0_0_0_3px_rgba(37,99,235,0.12)]"
-            >
-              <Bookmark className="w-4 h-4 mr-1" />
-              {bookmarking ? "Saving..." : "Bookmark"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={runClaudeAnalysis}
+                disabled={claudeLoading}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white text-sm font-semibold transition-colors"
+              >
+                {claudeLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <BrainCircuit className="w-4 h-4" />
+                )}
+                {claudeLoading ? "Analyzing…" : "AI Deep Dive"}
+              </button>
+              <Button
+                onClick={() => handleBookmark(trend.status === "emerging" ? "growing" : "emerging")}
+                disabled={bookmarking}
+                className="bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 rounded-lg hover:shadow-[0_0_0_3px_rgba(37,99,235,0.12)]"
+              >
+                <Bookmark className="w-4 h-4 mr-1" />
+                {bookmarking ? "Saving..." : "Bookmark"}
+              </Button>
+            </div>
           </div>
 
           {/* Metric strip */}
@@ -206,6 +256,40 @@ export function TrendDetail() {
           trendScore={trend.trendScore}
           sentimentScore={trend.sentimentScore}
         />
+
+        {/* Claude AI Deep Dive */}
+        {(claudeLoading || claudeAnalysis) && (
+          <section className="border border-violet-200 dark:border-violet-800 rounded-xl overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+            <div className="flex items-center gap-2.5 px-6 py-4 bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-950/40 dark:to-purple-950/30 border-b border-violet-200 dark:border-violet-800">
+              <BrainCircuit className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+              <span className="font-semibold text-sm text-violet-800 dark:text-violet-300">AI Deep Dive</span>
+              <span className="text-[10px] font-medium text-violet-500 bg-violet-100 dark:bg-violet-900/50 px-2 py-0.5 rounded-full ml-auto">
+                Powered by {claudeModel ?? "GPT-4o"}
+              </span>
+            </div>
+            <div className="p-6 bg-white dark:bg-slate-900">
+              {claudeLoading ? (
+                <div className="flex items-center gap-3 text-slate-400 text-sm">
+                  <Loader2 className="w-4 h-4 animate-spin text-violet-500" />
+                  Claude is analyzing this trend…
+                </div>
+              ) : (
+                <div className="prose prose-sm prose-slate dark:prose-invert max-w-none">
+                  {claudeAnalysis?.split("\n").map((line, i) => {
+                    if (line.startsWith("## ")) {
+                      return <h3 key={i} className="text-sm font-semibold text-slate-800 dark:text-slate-200 mt-5 mb-2 first:mt-0">{line.slice(3)}</h3>;
+                    }
+                    if (line.startsWith("**") && line.endsWith("**")) {
+                      return <p key={i} className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">{line.slice(2, -2)}</p>;
+                    }
+                    if (line.trim() === "") return <div key={i} className="h-1" />;
+                    return <p key={i} className="text-sm text-slate-600 dark:text-slate-400 mb-1 leading-relaxed">{line}</p>;
+                  })}
+                </div>
+              )}
+            </div>
+          </section>
+        )}
 
         {/* Sources breakdown */}
         <section>

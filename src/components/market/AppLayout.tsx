@@ -131,6 +131,22 @@ export function AppLayout() {
             </div>
           </div>
 
+          {/* Sponsor badges */}
+          <div className="px-4 pb-2 flex flex-col gap-1.5">
+            <div className="flex items-center justify-center gap-1.5 text-[10px] font-medium text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800/50 px-2 py-1 rounded-md">
+              <svg viewBox="0 0 24 24" className="w-3 h-3 fill-current text-slate-400" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
+              Voice by ElevenLabs
+            </div>
+            <div className="flex items-center justify-center gap-1.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-500 bg-emerald-50 dark:bg-emerald-950/30 px-2 py-1 rounded-md">
+              <svg viewBox="0 0 24 24" className="w-3 h-3 fill-current" aria-hidden="true"><path d="M17.193 9.555c-1.264-5.58-4.252-7.507-4.573-8.227-.277-.60-.6-1.328-1.062-1.328-.44 0-.712.688-1.045 1.336-.325.618-3.355 2.633-4.553 8.226-.422 1.96-.617 4.408-.617 6.438 0 4.953 2.808 7.88 6.215 7.88s6.215-2.927 6.215-7.88c0-2.03-.195-4.478-.58-6.445z"/></svg>
+              Data by MongoDB Atlas
+            </div>
+            <div className="flex items-center justify-center gap-1.5 text-[10px] font-medium text-violet-600 dark:text-violet-500 bg-violet-50 dark:bg-violet-950/30 px-2 py-1 rounded-md">
+              <svg viewBox="0 0 24 24" className="w-3 h-3 fill-current" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm-1-5h2v2h-2zm0-8h2v6h-2z"/></svg>
+              AI by Claude &amp; OpenAI
+            </div>
+          </div>
+
           {/* Search */}
           <div className="px-3 pb-1">
             <SearchBar />
