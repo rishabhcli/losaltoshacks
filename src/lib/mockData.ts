@@ -94,7 +94,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t1", trendId: "t1",
     title: "Quiet Luxury Minimalism",
-    description: "A shift toward understated, high-quality fashion that signals wealth through subtle craftsmanship rather than overt branding. Consumers are moving away from logo-heavy pieces toward timeless silhouettes and premium fabrics.",
+    description: "Logo-free luxury is winning. Shoppers are choosing understated cashmere sweaters, unlined leather bags, and minimal wool coats over flashy designer labels. The look signals wealth through quality fabrics and clean silhouettes rather than obvious branding.",
     industry: "fashion-retail", category: "Apparel", status: "growing",
     trendScore: 92, mentionCount: 845000, growthRate: 34.2,
     sentimentScore: 0.72, topKeywords: "quiet luxury, old money, stealth wealth, minimalism, cashmere",
@@ -103,7 +103,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t2", trendId: "t2",
     title: "Workcation-Ready Travel Bundles",
-    description: "Remote workers are blending business travel with leisure, demanding hotels and airlines that offer seamlessly integrated workspaces, high-speed connectivity, and extended-stay packages.",
+    description: "Hotels are reimagining rooms for remote workers. Think standing desks, dual monitors, and flexible check-in for week-long stays. Co-living spaces in cities like Lisbon and Bali are bundling Wi-Fi, workspace access, and community events for digital nomads.",
     industry: "travel-hospitality", category: "Hotels & Lodging", status: "emerging",
     trendScore: 87, mentionCount: 620000, growthRate: 28.5,
     sentimentScore: 0.65, topKeywords: "workcation, bleisure, remote work, digital nomad, extended stay",
@@ -112,7 +112,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t3", trendId: "t3",
     title: "Adaptogenic Wellness Beverages",
-    description: "Consumer interest in stress-relief drinks featuring adaptogens like ashwagandha, reishi, and lion's mane is skyrocketing, driven by wellness culture and the 'slow living' movement.",
+    description: "Functional drinks that claim to reduce stress and boost focus are flooding shelves. Mushroom-based coffee alternatives, ashwagandha lattes, and lion's mane energy shots are replacing traditional energy drinks. Even Coca-Cola is launching 'calm' beverages with adaptogenic ingredients.",
     industry: "food-beverage", category: "Beverages", status: "growing",
     trendScore: 85, mentionCount: 512000, growthRate: 41.3,
     sentimentScore: 0.78, topKeywords: "adaptogens, ashwagandha, functional beverages, wellness, nootropics",
@@ -121,7 +121,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t4", trendId: "t4",
     title: "Resale & Recommerce Acceleration",
-    description: "Second-hand luxury platforms are experiencing explosive growth as Gen Z drives circular fashion values. Brands are launching in-house recommerce programs to capture margin and reduce returns.",
+    description: "Buying secondhand is now mainstream luxury. Major brands like Gucci and Patagonia run their own pre-owned programs. Gen Z shoppers fuel demand for authenticated vintage handbags, retro sneakers, and vintage denim through apps like Depop and The RealReal.",
     industry: "fashion-retail", category: "Recommerce", status: "growing",
     trendScore: 83, mentionCount: 730000, growthRate: 29.1,
     sentimentScore: 0.63, topKeywords: "resale, recommerce, circular fashion, thrift, depop",
@@ -130,7 +130,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t5", trendId: "t5",
     title: "Hyper-Local Culinary Experiences",
-    description: "Travelers are increasingly seeking curated food-and-culture experiences that highlight local ingredients, heritage recipes, and artisan producers — moving away from generic hotel dining.",
+    description: "Travelers want authentic, local food experiences over tourist traps. Farm-to-table cooking classes, chef-led market tours, and hyper-local tasting menus are booking faster than standard sightseeing. Hotels now highlight ingredients sourced within 50 miles of the property.",
     industry: "travel-hospitality", category: "Food & Beverage", status: "emerging",
     trendScore: 79, mentionCount: 340000, growthRate: 22.7,
     sentimentScore: 0.71, topKeywords: "farm-to-table, local cuisine, food tourism, artisan, heritage",
@@ -139,7 +139,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t6", trendId: "t6",
     title: "AI-Curated Skincare Personalization",
-    description: "Beauty brands are deploying AI diagnostics that analyze skin profiles to deliver bespoke formulations and routines. DTC brands are winning loyalty through data-driven personalization.",
+    description: "Skincare is going bespoke. AI-powered apps analyze your skin through phone cameras and create custom serums matched to your concerns. Beauty retailers now use smart kiosks to recommend products based on your actual skin data rather than guesswork.",
     industry: "beauty-skincare", category: "Beauty & Skincare", status: "emerging",
     trendScore: 77, mentionCount: 490000, growthRate: 38.9,
     sentimentScore: 0.69, topKeywords: "AI skincare, personalization, custom formulation, beauty tech, skin analysis",
@@ -148,7 +148,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t7", trendId: "t7",
     title: "Chromatic Maximalism in Accessories",
-    description: "A backlash against quiet luxury is emerging, with bold color-blocking and oversized statement accessories dominating runway previews and social media. Younger consumers are leaning into joyful self-expression.",
+    description: "After years of minimalism, loud accessories are back. Chunky resin earrings, neon sunglasses, and color-blocked bags are dominating social feeds. It's a rebellion against quiet luxury — think bright fuchsia, cobalt blue, and anything that stands out in a crowd.",
     industry: "fashion-retail", category: "Accessories", status: "emerging",
     trendScore: 72, mentionCount: 280000, growthRate: 18.4,
     sentimentScore: 0.55, topKeywords: "color blocking, maximalism, statement accessories, bold fashion, Y2K",
@@ -157,7 +157,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t8", trendId: "t8",
     title: "Wellness Retreat & Digital Detox Packages",
-    description: "Demand for no-phone, high-nature wellness retreats is surging among high-income millennials experiencing burnout. Spas converting to tech-free sanctuaries report 60%+ occupancy boosts.",
+    description: "Burned-out professionals are paying premium prices to disconnect. Wellness retreats with phone lockboxes, silent meditation programs, and cold plunge therapy are booked weeks in advance. The goal: forced digital detox with structured recovery activities.",
     industry: "wellness-fitness", category: "Wellness", status: "growing",
     trendScore: 81, mentionCount: 412000, growthRate: 31.6,
     sentimentScore: 0.82, topKeywords: "digital detox, wellness retreat, mindfulness, burnout recovery, spa",
@@ -166,7 +166,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t9", trendId: "t9",
     title: "Regenerative Ingredient Sourcing",
-    description: "Consumer products companies are pivoting to regenerative agriculture sourcing to meet rising sustainability expectations. Brands marketing regenerative practices report 22% higher NPS vs. organic-only claims.",
+    description: "Clean beauty is evolving beyond 'organic' to 'regenerative.' Brands now highlight ingredients from farms that actively restore soil health. Shoppers are seeking out products with regenerative seals and transparent supply chains, even at higher price points.",
     industry: "beauty-skincare", category: "Sustainability", status: "growing",
     trendScore: 76, mentionCount: 375000, growthRate: 26.4,
     sentimentScore: 0.74, topKeywords: "regenerative agriculture, sustainability, carbon-neutral, clean label, B-corp",
@@ -175,7 +175,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t10", trendId: "t10",
     title: "Capsule Wardrobe Tech-Wear",
-    description: "Performance fabrics engineered for urban commuting are crossing into mainstream fashion. Gore-Tex blazers, self-cleaning textiles, and UV-protective streetwear are forming a new functional-fashion segment.",
+    description: "Performance clothing is leaving the gym. Waterproof blazers, wrinkle-resistant commuter pants, and breathable UV hoodies now work in offices too. The appeal: clothes that handle sweat, rain, and stains while still looking professional.",
     industry: "fashion-retail", category: "Technical Apparel", status: "emerging",
     trendScore: 68, mentionCount: 210000, growthRate: 15.2,
     sentimentScore: 0.58, topKeywords: "techwear, performance fabric, functional fashion, urban commuting, Gore-Tex",
@@ -185,7 +185,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t11", trendId: "t11",
     title: "AI-Powered Code Review Tools",
-    description: "Developer teams are adopting AI code reviewers that catch bugs, security vulnerabilities, and style issues before human review. Adoption rates doubled in Q1 among mid-market SaaS companies.",
+    description: "GitHub Copilot's code review feature, Sourcegraph's Cody, and CodeRabbit's automated PR reviewer are now used by 40% of mid-market SaaS engineering teams. Snyk's DeepCode AI catches security vulnerabilities in JavaScript, Python, and Go. Cursor IDE and Windsurf offer real-time AI pair programming. Key metric: teams using AI reviewers report 35% fewer production bugs and 2.1x faster PR merge times. Pricing runs $19–$39/seat/month.",
     industry: "tech-saas", category: "Developer Tools", status: "growing",
     trendScore: 91, mentionCount: 720000, growthRate: 52.1,
     sentimentScore: 0.81, topKeywords: "AI code review, developer productivity, DevOps, static analysis, copilot",
@@ -194,7 +194,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t12", trendId: "t12",
     title: "Vertical SaaS for Niche Industries",
-    description: "Horizontal SaaS fatigue is driving demand for deeply specialized software built for specific trades — HVAC scheduling, dental practice management, trucking compliance — with 3x higher NPS than generic alternatives.",
+    description: "ServiceTitan (HVAC & plumbing, $9.5B valuation), Housecall Pro (home services scheduling), Toast (restaurant POS), and Jobber (lawn care management) prove the model. Newer entrants: Clio for law firms, Owner.com for local restaurant websites, and Boulevard for salon bookings. These tools handle industry-specific workflows — dispatching, licensing compliance, tip pooling — that Salesforce and HubSpot ignore. Average NPS: 72 vs 24 for horizontal CRMs in the same verticals.",
     industry: "tech-saas", category: "Vertical SaaS", status: "emerging",
     trendScore: 78, mentionCount: 340000, growthRate: 29.8,
     sentimentScore: 0.69, topKeywords: "vertical SaaS, niche software, industry-specific, SMB, automation",
@@ -203,7 +203,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t13", trendId: "t13",
     title: "Remote Patient Monitoring Wearables",
-    description: "FDA-cleared wearables for continuous glucose, blood pressure, and ECG monitoring are moving from hospital pilots to direct-to-consumer channels, enabled by reimbursement changes.",
+    description: "Dexcom G7 and Abbott FreeStyle Libre 3 continuous glucose monitors are now sold direct-to-consumer ($75–$299/month). Apple Watch Series 10's FDA-cleared blood pressure monitoring and Samsung Galaxy Ring's sleep apnea detection drive consumer interest. Withings' BPM Connect tracks hypertension with auto-sharing to patient portals. CMS expanded RPM reimbursement codes (CPT 99457/99458), making insurance coverage possible for 60M+ chronic patients.",
     industry: "healthcare", category: "Wearables", status: "growing",
     trendScore: 88, mentionCount: 580000, growthRate: 38.7,
     sentimentScore: 0.76, topKeywords: "RPM, wearables, CGM, telehealth, remote monitoring, FDA",
@@ -212,7 +212,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t14", trendId: "t14",
     title: "AI Scribes for Clinical Documentation",
-    description: "Ambient listening AI that auto-generates clinical notes during patient visits is reducing physician burnout and saving 2+ hours/day. Major EHR vendors are racing to integrate.",
+    description: "Nuance DAX Copilot (Microsoft) auto-generates SOAP notes during patient visits and is integrated into Epic EHR at 14 health systems. Abridge's ambient AI scribe is deployed across 200+ clinics and auto-codes ICD-10 billing entries. Nabla and DeepScribe offer $299/month per-provider plans. Physicians using these tools save 2.3 hours/day on documentation. Oracle Health (Cerner) just announced native AI scribe integration for 2026.",
     industry: "healthcare", category: "MedTech", status: "emerging",
     trendScore: 84, mentionCount: 410000, growthRate: 44.2,
     sentimentScore: 0.73, topKeywords: "AI scribe, clinical documentation, EHR, physician burnout, ambient AI",
@@ -221,7 +221,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t15", trendId: "t15",
     title: "Embedded Finance in Non-Financial Apps",
-    description: "SaaS platforms, marketplaces, and gig economy apps are embedding lending, insurance, and payments directly into their UX, generating new revenue streams with 60%+ margins.",
+    description: "Shopify Capital has issued $5B+ in merchant cash advances; Uber embeds instant-pay via Stripe Treasury; DoorDash offers driver insurance through Buckle. Stripe's BaaS stack (Issuing, Treasury, Connect) powers buy-now-pay-later in 40+ platforms. Unit and Bond provide embedded checking accounts for apps like Mercury and Relay. Mindbody launched in-app lending for gym owners. Revenue share on embedded finance generates 60–80% gross margins for platform hosts.",
     industry: "finance-fintech", category: "Payments", status: "growing",
     trendScore: 89, mentionCount: 650000, growthRate: 36.5,
     sentimentScore: 0.70, topKeywords: "embedded finance, BaaS, payments API, lending, insurance",
@@ -230,7 +230,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t16", trendId: "t16",
     title: "AI-Driven Personal Finance Coaches",
-    description: "Chatbot-based financial advisors using LLMs to provide personalized budgeting, tax optimization, and investment guidance are seeing 5x user engagement vs traditional robo-advisors.",
+    description: "Cleo AI ($6.99/month) roasts users into better spending habits with Gen Z-friendly tone; Monarch Money's AI advisor auto-categorizes and suggests budget cuts. Wealthfront launched GPT-powered tax-loss harvesting explanations. Bright Money's AI debt payoff planner reduced average user debt by $2,400/year. Engagement: users chat with AI coaches 14x/month vs 3x/month for Betterment's static dashboards. Key features: natural-language tax Q&A, subscription audit, and automated savings sweeps.",
     industry: "finance-fintech", category: "Personal Finance", status: "emerging",
     trendScore: 75, mentionCount: 290000, growthRate: 31.0,
     sentimentScore: 0.67, topKeywords: "AI financial advisor, personal finance, budgeting, robo-advisor, LLM",
@@ -239,7 +239,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t17", trendId: "t17",
     title: "PropTech Virtual Staging & Tours",
-    description: "AI-generated virtual staging and 3D property tours are cutting listing times by 40% and reducing staging costs from $3K to under $100 per property.",
+    description: "Apply Design's AI staging fills empty rooms with photorealistic furniture for $29/image vs $2,500 for physical staging. Matterport's 3D walkthroughs are standard on Zillow and Redfin listings; homes with virtual tours get 87% more views. REimagineHome generates exterior renovation renders using AI. BoxBrownie and VirtualStagingSolutions process 50,000+ images/month. Realtors report 38% faster sales closing on listings with AI staging and interactive floor plans.",
     industry: "real-estate", category: "PropTech", status: "growing",
     trendScore: 82, mentionCount: 380000, growthRate: 27.3,
     sentimentScore: 0.71, topKeywords: "virtual staging, 3D tour, PropTech, AI real estate, listing optimization",
@@ -248,7 +248,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t18", trendId: "t18",
     title: "Fractional Real Estate Investing Platforms",
-    description: "Tokenized and fractional ownership platforms are democratizing commercial real estate investing with $50 minimums, attracting Gen Z and millennial investors priced out of traditional markets.",
+    description: "Fundrise ($10 minimum, $3.3B AUM), Arrived Homes (buy shares of single-family rentals for $100), and Lofty.ai (blockchain-tokenized property tokens at $50) lead the space. RealT offers tokenized rental income in Detroit and Chicago properties. Yieldstreet expanded into commercial warehouse fractional ownership. Target audience: 22–38-year-olds locked out of $400K+ home prices. Average platform return: 7.2–11.4% annualized. SEC's Reg A+ and Reg CF enable these offerings without accredited-investor gates.",
     industry: "real-estate", category: "Investing", status: "emerging",
     trendScore: 72, mentionCount: 250000, growthRate: 22.8,
     sentimentScore: 0.63, topKeywords: "fractional investing, tokenized real estate, REIT, Gen Z investing",
@@ -257,7 +257,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t19", trendId: "t19",
     title: "AI Tutoring That Adapts in Real-Time",
-    description: "Adaptive AI tutors that adjust difficulty, pacing, and teaching style based on student performance are showing 2x improvement in test scores vs static online courses.",
+    description: "Khan Academy's Khanmigo (GPT-4 tutor, $44/year) adapts math problem difficulty based on error patterns. Duolingo Max uses GPT-4 for conversational language practice with real-time feedback. Photomath (acquired by Google) solves handwritten equations with step-by-step AI explanations. Synthesis (from SpaceX school alumni) teaches collaborative problem-solving via AI. Results: students using Khanmigo improved SAT math scores by 120 points on average. College Board is piloting AI-tutored AP exam prep.",
     industry: "education", category: "EdTech", status: "growing",
     trendScore: 86, mentionCount: 520000, growthRate: 40.1,
     sentimentScore: 0.79, topKeywords: "AI tutor, adaptive learning, personalized education, EdTech, LLM",
@@ -266,7 +266,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t20", trendId: "t20",
     title: "Micro-Credentials Over Degrees",
-    description: "Employers are increasingly accepting industry micro-credentials and skill badges over traditional degrees, with 68% of hiring managers saying certifications matter more than diplomas for tech roles.",
+    description: "Google Career Certificates (IT Support, Data Analytics, UX Design at $49/month) are accepted by 150+ employers including Walmart, Infosys, and Deloitte. AWS, Salesforce, and CompTIA certifications now appear in 34% of job postings that previously required degrees. Coursera's Professional Certificates grew 47% YoY. IBM's SkillsBuild and Microsoft's LinkedIn Learning Pathways offer free micro-credentials. States including Maryland, Colorado, and Utah removed degree requirements from 70%+ of government job postings.",
     industry: "education", category: "Credentialing", status: "emerging",
     trendScore: 74, mentionCount: 310000, growthRate: 25.6,
     sentimentScore: 0.66, topKeywords: "micro-credentials, skill badges, certification, upskilling, hiring",
@@ -275,7 +275,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t21", trendId: "t21",
     title: "AI-Generated Short-Form Content at Scale",
-    description: "Creator tools using AI to batch-produce TikTok, Reels, and Shorts content are enabling solo creators to publish 10x more, with AI handling editing, captioning, and A/B testing thumbnails.",
+    description: "Opus Clip auto-slices long YouTube videos into viral TikTok/Reels clips with AI-chosen highlights. CapCut's AI features (auto-captions, background removal, voice cloning) are used by 200M+ creators. Eleven Labs + HeyGen enable AI avatars speaking in any language for faceless channels. Vidyo.ai and Descript let solo creators batch 30 Shorts from a single podcast episode. Viral hooks, B-roll, and thumbnails are A/B-tested by tools like Thumbly and TubeBuddy AI. One-person content studios now publish 5–10x daily.",
     industry: "entertainment-media", category: "Creator Economy", status: "growing",
     trendScore: 90, mentionCount: 810000, growthRate: 48.3,
     sentimentScore: 0.77, topKeywords: "AI content creation, short-form video, creator tools, TikTok, automation",
@@ -284,7 +284,7 @@ export const MOCK_TRENDS: MockTrend[] = [
   {
     $primaryKey: "t22", trendId: "t22",
     title: "Interactive Live Shopping Events",
-    description: "Live commerce combining entertainment, influencer hosting, and real-time purchasing is generating 10x higher conversion rates than traditional e-commerce in fashion and beauty categories.",
+    description: "TikTok Shop's live events generate $100M+/month in the U.S., led by beauty and fashion. Amazon Live partners with influencers for real-time product demos with one-click purchasing. Whatnot dominates collectibles (Pokémon cards, sneakers, vintage clothing) with auction-style live streams. ShopShops connects Chinese livestreamers with U.S. luxury boutiques. Instagram's 'Live Shopping' feature is used by Sephora, Revolve, and Fenty Beauty for launch-day events. Conversion rate: 15–30% during live events vs 2.5% on static product pages.",
     industry: "entertainment-media", category: "Live Commerce", status: "emerging",
     trendScore: 79, mentionCount: 430000, growthRate: 33.7,
     sentimentScore: 0.72, topKeywords: "live shopping, social commerce, livestream, influencer, conversion",

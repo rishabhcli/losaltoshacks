@@ -33,18 +33,18 @@ function statusColor(status: AgentData["status"]) {
   }
 }
 
-export function AgentBrowserCards({ agents, discoveries, isRunning }: Props) {
-  // Refresh preview images periodically when agents are active
-  const [refreshKey, setRefreshKey] = useState(0);
-  const hasActiveAgents = isRunning && agents.some((a) =>
-    ["searching", "exploiting", "found_trend"].includes(a.status)
-  );
+/** Poll interval (ms) — align with agents/masterbuild_runtime.py MASTERBUILD_PREVIEW_STREAM_SEC (~280ms) for livestream feel */
+const PREVIEW_POLL_MS = 280;
 
+export function AgentBrowserCards({ agents, discoveries, isRunning }: Props) {
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  // While the mission is running, poll frames at high frequency (local JPEGs from browser-use / preview stream).
   useEffect(() => {
-    if (!hasActiveAgents) return;
-    const interval = setInterval(() => setRefreshKey((k) => k + 1), 3000);
+    if (!isRunning) return;
+    const interval = setInterval(() => setRefreshKey((k) => k + 1), PREVIEW_POLL_MS);
     return () => clearInterval(interval);
-  }, [hasActiveAgents]);
+  }, [isRunning]);
 
   const discoveryCounts = useMemo(() => {
     const counts: Record<number, number> = {};

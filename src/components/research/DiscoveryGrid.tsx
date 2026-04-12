@@ -3,7 +3,6 @@ import { ExternalLink, Eye, Heart, MessageCircle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { getAgentById, PLATFORM_COLORS, type DiscoveredContent } from "@/hooks/useAgentData";
 
 interface Props {
@@ -65,8 +64,8 @@ export function DiscoveryGrid({ discoveries }: Props) {
       </div>
 
       {/* Grid */}
-      <ScrollArea className="flex-1">
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 pr-3">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 pr-2 pb-3">
           {filtered.map((d) => {
             const agent = getAgentById(d.found_by_agent_id);
             const platform = platformFromAgentId(d.found_by_agent_id);
@@ -141,7 +140,7 @@ export function DiscoveryGrid({ discoveries }: Props) {
             );
           })}
         </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 }

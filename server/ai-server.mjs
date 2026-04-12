@@ -2,12 +2,12 @@ import http from "node:http";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { MongoClient } from "mongodb";
 import { inferWithOpenAI } from "./lib/openai.mjs";
 import { generateSpeechWithElevenLabs } from "./lib/elevenlabs.mjs";
 import { generateSpeechWithMiniMax } from "./lib/minimax.mjs";
 import { loadProjectEnv } from "./lib/env.mjs";
 import { createServerInsforgeClient } from "./lib/insforge-server.mjs";
+import { vectorSearch, storeDiscoveriesWithEmbeddings } from "./lib/mongodb-vector.mjs";
 
 loadProjectEnv();
 
@@ -21,6 +21,26 @@ process.on("uncaughtException", (err) => {
 });
 
 const port = Number.parseInt(process.env.AI_SERVER_PORT || "3001", 10);
+
+function resolveMasterbuildRuntimeDir() {
+  const envRuntime = process.env.MASTERBUILD_RUNTIME_DIR;
+  return envRuntime
+    ? (path.isAbsolute(envRuntime) ? envRuntime : path.join(process.cwd(), "agents", envRuntime))
+    : path.join(process.cwd(), "agents", "runtime");
+}
+
+/** Clear local JPEG previews for browser-use agents (default 1–4). */
+function clearBrowserAgentPreviewFrames(agentIds = [1, 2, 3, 4]) {
+  try {
+    const runtimeDir = resolveMasterbuildRuntimeDir();
+    for (const aid of agentIds) {
+      const framePath = path.join(runtimeDir, "previews", `agent-${aid}`, "latest.jpg");
+      if (fs.existsSync(framePath)) fs.unlinkSync(framePath);
+    }
+  } catch (err) {
+    console.warn("[ai-server] clearBrowserAgentPreviewFrames:", err?.message ?? err);
+  }
+}
 
 function writeJson(response, statusCode, body) {
   response.writeHead(statusCode, {
@@ -205,6 +225,31 @@ async function handleMissionStop(request, response) {
     .eq("mission_id", targetId);
   if (agentUpdate.error) throw agentUpdate.error;
 
+  // Immediate UX: blank the four browser preview tiles; Python runtime will also wind down.
+  clearBrowserAgentPreviewFrames([1, 2, 3, 4]);
+
+  const stoppedAt = new Date().toISOString();
+  const missionStopped = await insforge.database
+    .from("missions")
+    .update({ status: "stopped", stopped_at: stoppedAt })
+    .eq("id", targetId);
+  if (missionStopped.error) throw missionStopped.error;
+
+  // Persist latest synthesized plan into history as the saved checkpoint for this stop.
+  const latestPlan = await insforge.database
+    .from("business_plans")
+    .select("id")
+    .eq("mission_id", targetId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!latestPlan.error && latestPlan.data?.id) {
+    await insforge.database
+      .from("business_plans")
+      .update({ is_final: true })
+      .eq("id", latestPlan.data.id);
+  }
+
   invalidateDashboardSnapshot();
 
   writeJson(response, 200, { ok: true, missionId: targetId });
@@ -263,17 +308,7 @@ async function handleMissionReset(request, response) {
     .eq("mission_id", targetId);
   if (agentReset.error) throw agentReset.error;
 
-  // Clear browser preview screenshots
-  try {
-    const envRuntime = process.env.MASTERBUILD_RUNTIME_DIR;
-    const runtimeDir = envRuntime
-      ? (path.isAbsolute(envRuntime) ? envRuntime : path.join(process.cwd(), "agents", envRuntime))
-      : path.join(process.cwd(), "agents", "runtime");
-    for (let aid = 1; aid <= 5; aid++) {
-      const framePath = path.join(runtimeDir, "previews", `agent-${aid}`, "latest.jpg");
-      if (fs.existsSync(framePath)) fs.unlinkSync(framePath);
-    }
-  } catch { /* ignore cleanup errors */ }
+  clearBrowserAgentPreviewFrames([1, 2, 3, 4, 5]);
 
   // Reset mission to stopped
   const missionReset = await insforge.database
@@ -434,7 +469,7 @@ function synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId) 
 
     for (const kw of keywords.slice(0, 4)) {
       if (!keywordGroups.has(kw)) {
-        keywordGroups.set(kw, { count: 0, engagement: 0, platforms: new Set(), sources: [], industries: {} });
+        keywordGroups.set(kw, { count: 0, engagement: 0, platforms: new Set(), sources: [], industries: {}, allKeywords: new Set() });
       }
       const g = keywordGroups.get(kw);
       g.count++;
@@ -442,6 +477,8 @@ function synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId) 
       g.platforms.add(platform);
       // Track industry vote counts to pick the dominant industry for this trend
       g.industries[discIndustry] = (g.industries[discIndustry] ?? 0) + 1;
+      // Collect all keywords for description generation
+      keywords.forEach(k => g.allKeywords.add(k));
       // Collect up to 8 clickable sources per keyword group
       if (disc.source_url && g.sources.length < 8) {
         g.sources.push({
@@ -484,11 +521,14 @@ function synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId) 
     const dominantIndustry = Object.entries(data.industries ?? {})
       .sort((a, b) => b[1] - a[1])[0]?.[0] ?? "All";
 
+    // Generate humanized description from keyword context
+    const description = generateTrendDescription(keyword, data, missionPrompt);
+
     return {
       $primaryKey: `live-${missionId}-${i}`,
       trendId: `live-${missionId}-${i}`,
       title,
-      description: `Trending across ${[...data.platforms].join(", ")} — found in ${data.count} source(s) from research on "${missionPrompt}".`,
+      description,
       industry: dominantIndustry,
       category: "Live Research",
       status: score > 72 ? "growing" : "emerging",
@@ -501,6 +541,54 @@ function synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId) 
       sources: [...data.sources],
     };
   });
+}
+
+// Generate humanized trend descriptions from keyword patterns
+function generateTrendDescription(keyword, data, missionPrompt) {
+  const platforms = [...data.platforms];
+  const platformStr = platforms.slice(0, 2).join(" and ");
+  const relatedTerms = [...data.allKeywords].filter(k => k !== keyword).slice(0, 3);
+  
+  // Category-specific description templates based on keyword patterns
+  const kw = keyword.toLowerCase();
+  
+  // Product/Tech patterns
+  if (kw.includes("ai") || kw.includes("app") || kw.includes("software") || kw.includes("tool")) {
+    return `New ${keyword} solutions are gaining traction on ${platformStr}. ${relatedTerms.length > 0 ? `Related interest in ${relatedTerms.join(", ")} shows growing demand for smarter automation.` : "Teams are actively adopting these to streamline workflows."}`;
+  }
+  
+  // Fashion/Apparel patterns
+  if (kw.includes("wear") || kw.includes("fashion") || kw.includes("style") || kw.includes("clothing") || kw.includes("dress")) {
+    return `${keyword} is catching on across ${platformStr}. ${relatedTerms.length > 0 ? `Often mentioned alongside ${relatedTerms.join(" and ")}.` : "Shoppers are actively seeking these items."}`;
+  }
+  
+  // Food/Beverage patterns
+  if (kw.includes("food") || kw.includes("drink") || kw.includes("coffee") || kw.includes("tea") || kw.includes("wine")) {
+    return `${keyword} is trending on ${platformStr} as consumers explore new flavors. ${relatedTerms.length > 0 ? `Frequently paired with discussions of ${relatedTerms.join(", ")}.` : "Early adopters are driving word-of-mouth."}`;
+  }
+  
+  // Travel patterns
+  if (kw.includes("travel") || kw.includes("hotel") || kw.includes("trip") || kw.includes("vacation") || kw.includes("stay")) {
+    return `${keyword} is generating buzz on ${platformStr}. ${relatedTerms.length > 0 ? `Travelers are also researching ${relatedTerms.join(" and ")}.` : "Bookings and searches are up significantly."}`;
+  }
+  
+  // Wellness/Fitness patterns
+  if (kw.includes("health") || kw.includes("fitness") || kw.includes("wellness") || kw.includes("gym") || kw.includes("yoga")) {
+    return `${keyword} is picking up steam on ${platformStr}. ${relatedTerms.length > 0 ? `Enthusiasts are combining this with ${relatedTerms.join(", ")}.` : "Communities are forming around shared routines."}`;
+  }
+  
+  // Business/Money patterns
+  if (kw.includes("startup") || kw.includes("funding") || kw.includes("revenue") || kw.includes("market") || kw.includes("invest")) {
+    return `Discussions around ${keyword} are heating up on ${platformStr}. ${relatedTerms.length > 0 ? `Founders are connecting this with ${relatedTerms.join(" and ")}.` : "Industry watchers are taking note."}`;
+  }
+  
+  // Default pattern for general trends
+  const contextHints = missionPrompt.toLowerCase();
+  if (contextHints.includes("product") || contextHints.includes("service")) {
+    return `${keyword} is gaining attention on ${platformStr}. ${relatedTerms.length > 0 ? `Users often mention ${relatedTerms.join(" and ")} together.` : "Engagement suggests genuine interest, not just buzz."}`;
+  }
+  
+  return `${keyword} is trending on ${platformStr} with ${data.count}x more mentions than average. ${relatedTerms.length > 0 ? `Related topics include ${relatedTerms.join(", ")}.` : "This represents a genuine shift in what people are talking about."}`;
 }
 
 function synthesizeTrendsFromOptions(finalOptions, missionPrompt, missionId) {
@@ -681,16 +769,37 @@ async function handleTrends(_request, response) {
 /* ------------------------------------------------------------------ */
 
 const RECS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+/** @type {{ focusIndustry: string; payload: { recommendations: unknown[]; missionId?: string } } | null} */
 let recsCache = null;
 let recsCachedAt = 0;
-let recsInFlight = null;
+/** @type {Map<string, Promise<{ recommendations: unknown[]; missionId?: string }>>} */
+const recsInflightByKey = new Map();
 
 function invalidateRecsCache() {
   recsCache = null;
   recsCachedAt = 0;
+  recsInflightByKey.clear();
 }
 
-async function generateLiveRecommendations() {
+const REC_INDUSTRY_SLUGS = [
+  "beauty-skincare", "fashion-retail", "food-beverage", "travel-hospitality",
+  "wellness-fitness", "tech-saas", "healthcare", "finance-fintech",
+  "real-estate", "education", "entertainment-media", "All",
+];
+
+function normalizeRecIndustry(value) {
+  const v = typeof value === "string" ? value.trim() : "";
+  return REC_INDUSTRY_SLUGS.includes(v) ? v : "All";
+}
+
+function industryRankForSort(industry, focusIndustry) {
+  if (!focusIndustry || focusIndustry === "All") return 0;
+  if (industry === focusIndustry) return 0;
+  if (industry === "All") return 2;
+  return 1;
+}
+
+async function generateLiveRecommendations(focusIndustry = null) {
   const insforge = createServerInsforgeClient();
 
   // Use the most recent business plan regardless of which mission generated it
@@ -729,9 +838,16 @@ async function generateLiveRecommendations() {
     .slice(0, 20)
     .join(", ");
 
+  const industryFocusLine =
+    focusIndustry && focusIndustry !== "All"
+      ? `User's selected industry (prioritize this): "${focusIndustry}". Each item must include "industry" — use "${focusIndustry}" when the idea clearly serves that sector; use "All" only for ideas that are genuinely cross-industry. Do not assign unrelated industries just to diversify.`
+      : `Each item must include "industry" — one of: ${REC_INDUSTRY_SLUGS.join(", ")}.`;
+
   const systemPrompt = `You are a strategic market analyst. Given real scraped research data, generate actionable business recommendations with specific, data-grounded revenue estimates. Output only a valid JSON array — no markdown, no prose.`;
 
   const userPrompt = `Generate 6 actionable business recommendations with realistic revenue potential.
+
+${industryFocusLine}
 
 Research Topic: ${missionPrompt}
 Confidence Score: ${plan.confidence_score ?? 0}%
@@ -758,6 +874,7 @@ Return a JSON array with exactly this shape (no extra keys):
   {
     "title": "Short action title (max 8 words)",
     "description": "1-2 sentence description of the opportunity and why it matters now",
+    "industry": "One of: ${REC_INDUSTRY_SLUGS.join(", ")}",
     "productCategory": "One of: Product, Service, Platform, Partnership, Content, Community",
     "targetDemographic": "Specific target audience (e.g. Gen Z shoppers 18-24, B2B SaaS teams)",
     "confidenceScore": 0.82,
@@ -768,6 +885,7 @@ Return a JSON array with exactly this shape (no extra keys):
 ]
 
 Rules:
+- industry must be an exact slug from the list above
 - Revenue estimates must be specific dollar amounts derived from the data, not vague ranges
 - Scale estimates to match the research scope and discovery count
 - priority must be "high", "medium", or "low"
@@ -792,58 +910,90 @@ Rules:
     return { recommendations: [] };
   }
 
-  const recommendations = rawRecs.slice(0, 8).map((rec, i) => ({
-    $primaryKey: `live-rec-${missionId}-${i}`,
-    recommendationId: `live-rec-${missionId}-${i}`,
-    trendId: `live-${missionId}-${i % 8}`,
-    title: rec.title ?? "Recommendation",
-    description: rec.description ?? "",
-    productCategory: rec.productCategory ?? "Product",
-    targetDemographic: rec.targetDemographic ?? "",
-    confidenceScore: typeof rec.confidenceScore === "number" ? rec.confidenceScore : 0.7,
-    estimatedRevenuePotential: rec.estimatedRevenuePotential ?? "",
-    priority: ["high", "medium", "low"].includes(rec.priority) ? rec.priority : "medium",
-    status: "new",
-    actionPlan: rec.actionPlan ?? "",
-    createdAt: new Date().toISOString(),
-  }));
+  const recommendations = rawRecs.slice(0, 8).map((rec, i) => {
+    const ind = normalizeRecIndustry(rec.industry);
+    return {
+      $primaryKey: `live-rec-${missionId}-${i}`,
+      recommendationId: `live-rec-${missionId}-${i}`,
+      trendId: `live-${missionId}-${i % 8}`,
+      title: rec.title ?? "Recommendation",
+      description: rec.description ?? "",
+      industry: ind,
+      productCategory: rec.productCategory ?? "Product",
+      targetDemographic: rec.targetDemographic ?? "",
+      confidenceScore: typeof rec.confidenceScore === "number" ? rec.confidenceScore : 0.7,
+      estimatedRevenuePotential: rec.estimatedRevenuePotential ?? "",
+      priority: ["high", "medium", "low"].includes(rec.priority) ? rec.priority : "medium",
+      status: "new",
+      actionPlan: rec.actionPlan ?? "",
+      createdAt: new Date().toISOString(),
+    };
+  });
+
+  const focus = focusIndustry && focusIndustry !== "All" ? focusIndustry : null;
+  if (focus) {
+    recommendations.sort((a, b) => {
+      const dr = industryRankForSort(a.industry, focus) - industryRankForSort(b.industry, focus);
+      if (dr !== 0) return dr;
+      return (b.confidenceScore ?? 0) - (a.confidenceScore ?? 0);
+    });
+  }
 
   return { recommendations, missionId };
 }
 
-async function handleRecommendations(_request, response) {
+async function handleRecommendations(request, response) {
+  const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+  const rawIndustry = url.searchParams.get("industry")?.trim();
+  const cacheKey = rawIndustry && rawIndustry.length > 0 ? rawIndustry : "__all__";
+  const focusIndustry = cacheKey === "__all__" ? null : cacheKey;
+
   const now = Date.now();
-  if (recsCache && now - recsCachedAt < RECS_CACHE_TTL_MS) {
-    writeJson(response, 200, recsCache);
+  if (
+    recsCache &&
+    now - recsCachedAt < RECS_CACHE_TTL_MS &&
+    recsCache.focusIndustry === cacheKey
+  ) {
+    writeJson(response, 200, recsCache.payload);
     return;
   }
 
-  if (!recsInFlight) {
-    recsInFlight = generateLiveRecommendations()
+  let flight = recsInflightByKey.get(cacheKey);
+  if (!flight) {
+    flight = generateLiveRecommendations(focusIndustry)
       .then((result) => {
-        // Only cache non-empty results — a transient OpenAI failure should not
-        // poison the cache and serve empty recs for the next 5 minutes
         if (result.recommendations && result.recommendations.length > 0) {
-          recsCache = result;
+          recsCache = { focusIndustry: cacheKey, payload: result };
           recsCachedAt = Date.now();
         }
         return result;
       })
-      .finally(() => { recsInFlight = null; });
+      .finally(() => {
+        recsInflightByKey.delete(cacheKey);
+      });
+    recsInflightByKey.set(cacheKey, flight);
   }
 
   try {
-    const result = await recsInFlight;
-    // If fresh generation returned empty but we have stale cached recs, serve those instead
-    if ((!result.recommendations || result.recommendations.length === 0) && recsCache) {
-      writeJson(response, 200, recsCache);
+    const result = await flight;
+    const cacheOk =
+      recsCache &&
+      recsCache.focusIndustry === cacheKey &&
+      recsCache.payload?.recommendations?.length > 0;
+
+    if ((!result.recommendations || result.recommendations.length === 0) && cacheOk) {
+      writeJson(response, 200, recsCache.payload);
     } else {
       writeJson(response, 200, result);
     }
   } catch (error) {
     console.error("[ai-server] handleRecommendations error:", error);
-    if (recsCache) {
-      writeJson(response, 200, recsCache);
+    const cacheOk =
+      recsCache &&
+      recsCache.focusIndustry === cacheKey &&
+      recsCache.payload?.recommendations?.length > 0;
+    if (cacheOk) {
+      writeJson(response, 200, recsCache.payload);
       return;
     }
     writeJson(response, 200, { recommendations: [] });
@@ -1044,6 +1194,7 @@ async function runBackgroundDataRefresh(force = false) {
       if (!keywords) continue;
       const agentId = detectAgentId(r.url);
       discoveries.push({
+        id: crypto.randomUUID(),
         mission_id:    missionId,
         agent_id:      agentId,
         platform:      PLATFORM_BY_AGENT_ID[agentId] ?? "market_research",
@@ -1072,6 +1223,15 @@ async function runBackgroundDataRefresh(force = false) {
     }
   }
   console.log(`[bg-job] Inserted ${insertedCount}/${discoveries.length} discoveries`);
+
+  if (insertedCount > 0 && (process.env.MONGODB_URI || process.env.MONGODB_ATLAS_URI)) {
+    try {
+      const sync = await storeDiscoveriesWithEmbeddings(discoveries);
+      console.log(`[bg-job] MongoDB vector sync: ${sync.synced} stored, ${sync.errors} errors`);
+    } catch (mongoErr) {
+      console.warn("[bg-job] MongoDB vector sync failed:", mongoErr?.message ?? mongoErr);
+    }
+  }
 
   // Generate business plan via AI so /api/recommendations has real data to work with
   const topKws = discoveries
@@ -1420,50 +1580,36 @@ const server = http.createServer(async (request, response) => {
         return;
       }
       const limit = Math.min(Number(body?.limit) || 12, 50);
+      const mission_id =
+        typeof body?.mission_id === "string" && body.mission_id.trim()
+          ? body.mission_id.trim()
+          : null;
+      const industry =
+        typeof body?.industry === "string" && body.industry.trim()
+          ? body.industry.trim()
+          : null;
+      const platform =
+        typeof body?.platform === "string" && body.platform.trim()
+          ? body.platform.trim()
+          : null;
+      const agent_id =
+        body?.agent_id != null && body.agent_id !== ""
+          ? Number(body.agent_id)
+          : null;
 
-      // Generate embedding for the query
-      const embedRes = await fetch("https://api.openai.com/v1/embeddings", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ input: query, model: "text-embedding-3-small" }),
+      const { results, error } = await vectorSearch({
+        query,
+        limit,
+        mission_id,
+        industry,
+        platform,
+        agent_id: Number.isFinite(agent_id) ? agent_id : null,
       });
-      if (!embedRes.ok) throw new Error(`OpenAI embed error: ${embedRes.status}`);
-      const embedJson = await embedRes.json();
-      const queryVector = embedJson.data[0].embedding;
 
-      // Run Atlas $vectorSearch aggregation
-      const mongoClient = new MongoClient(process.env.MONGODB_URI);
-      await mongoClient.connect();
-      const db = mongoClient.db(process.env.MONGODB_DB_NAME || "losaltoshacks");
-      const results = await db.collection("discoveries").aggregate([
-        {
-          $vectorSearch: {
-            index: "discoveries_vector_index",
-            path: "embedding",
-            queryVector,
-            numCandidates: limit * 10,
-            limit,
-          },
-        },
-        {
-          $project: {
-            _id: 0,
-            keywords: 1,
-            source_url: 1,
-            thumbnail_url: 1,
-            agent_id: 1,
-            likes: 1,
-            views: 1,
-            comments: 1,
-            created_at: 1,
-            score: { $meta: "vectorSearchScore" },
-          },
-        },
-      ]).toArray();
-      await mongoClient.close();
+      if (error) {
+        writeJson(response, 500, { error, results: [] });
+        return;
+      }
 
       writeJson(response, 200, { results, query });
     } catch (error) {

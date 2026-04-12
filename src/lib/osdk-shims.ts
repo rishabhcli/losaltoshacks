@@ -3,15 +3,62 @@
  *
  * Drop-in replacements for @osdk/react/experimental hooks.
  * Fetches live data from the AI server (derived from scraped discoveries + business plans).
- * Falls back to mock data when no live mission data is available.
  */
 
-import { useEffect, useMemo, useState, useSyncExternalStore, useCallback } from "react";
-import {
-  type MockTrend,
-  type MockInsight,
-  type MockRecommendation,
-} from "./mockData";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+
+// Type definitions for live data from AI server
+interface Trend {
+  $primaryKey: string;
+  trendId: string;
+  title: string;
+  description: string;
+  industry: string;
+  category: string;
+  status: string;
+  trendScore: number;
+  mentionCount: number;
+  growthRate: number;
+  sentimentScore: number;
+  topKeywords: string;
+  detectedAt: string;
+  sources?: unknown[];
+  [key: string]: unknown;
+}
+
+interface Insight {
+  $primaryKey: string;
+  insightId: string;
+  title: string;
+  summary: string;
+  insightType: string;
+  industry: string;
+  generatedAt: string;
+  relatedTrendIds: string;
+  metricValue?: number;
+  metricUnit?: string;
+  changePercent?: number;
+  period?: string;
+  [key: string]: unknown;
+}
+
+interface Recommendation {
+  $primaryKey: string;
+  recommendationId: string;
+  trendId: string;
+  title: string;
+  description: string;
+  industry: string;
+  productCategory: string;
+  targetDemographic: string;
+  confidenceScore: number;
+  estimatedRevenuePotential: string;
+  priority: string;
+  status: string;
+  actionPlan: string;
+  createdAt: string;
+  [key: string]: unknown;
+}
 
 // ─── Type tokens (replacing @osdk/src exports) ────────────────────────────────
 export const marketTrend = "marketTrend";
@@ -25,17 +72,20 @@ const LIVE_CACHE_TTL = 60_000; // 1 minute
 const RECS_CACHE_TTL = 5 * 60_000; // 5 minutes (matches server-side cache)
 
 interface LiveData {
-  trends: MockTrend[];
-  insights: MockInsight[];
+  trends: Trend[];
+  insights: Insight[];
 }
 
 let _liveData: LiveData | null = null;
 let _liveFetchedAt = 0;
 let _liveFetchPromise: Promise<void> | null = null;
 
-let _liveRecs: MockRecommendation[] | null = null;
+let _liveRecs: Recommendation[] | null = null;
 let _liveRecsFetchedAt = 0;
-let _liveRecsFetchPromise: Promise<void> | null = null;
+/** In-flight fetches keyed by industry cache key (avoids cross-industry promise races) */
+const _liveRecsFetchByKey = new Map<string, Promise<void>>();
+/** Cache key for recommendations: industry slug or "__all__" */
+let _liveRecsKey = "__all__";
 
 function fetchLiveData(): Promise<void> {
   const now = Date.now();
@@ -48,55 +98,76 @@ function fetchLiveData(): Promise<void> {
       return r.json() as Promise<{ trends?: unknown[]; insights?: unknown[] }>;
     })
     .then((data) => {
-      const trends = (data.trends ?? []) as MockTrend[];
-      const insights = (data.insights ?? []) as MockInsight[];
+      const trends = (data.trends ?? []) as Trend[];
+      const insights = (data.insights ?? []) as Insight[];
       if (trends.length > 0 || insights.length > 0) {
         _liveData = { trends, insights };
         _liveFetchedAt = Date.now();
         _notify();
       }
     })
-    .catch(() => { /* silently fall back to mock data */ })
+    .catch(() => { /* no fallback - real data only */ })
     .finally(() => { _liveFetchPromise = null; });
 
   return _liveFetchPromise;
 }
 
-function fetchLiveRecommendations(): Promise<void> {
+function fetchLiveRecommendations(opts?: { industry?: string }): Promise<void> {
+  const key =
+    opts?.industry && opts.industry !== "All"
+      ? opts.industry
+      : "__all__";
+
   const now = Date.now();
-  if (_liveRecs && now - _liveRecsFetchedAt < RECS_CACHE_TTL) return Promise.resolve();
-  if (_liveRecsFetchPromise) return _liveRecsFetchPromise;
+  if (
+    _liveRecs &&
+    _liveRecsKey === key &&
+    now - _liveRecsFetchedAt < RECS_CACHE_TTL
+  ) {
+    return Promise.resolve();
+  }
 
-  _liveRecsFetchPromise = fetch(`${API_BASE}/api/recommendations`, { cache: "no-store" })
-    .then((r) => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json() as Promise<{ recommendations?: unknown[] }>;
-    })
-    .then((data) => {
-      const recs = (data.recommendations ?? []) as MockRecommendation[];
-      if (recs.length > 0) {
-        _liveRecs = recs;
-        _liveRecsFetchedAt = Date.now();
-        _notify();
-      }
-    })
-    .catch(() => { /* silently fall back to mock data */ })
-    .finally(() => { _liveRecsFetchPromise = null; });
+  let inflight = _liveRecsFetchByKey.get(key);
+  if (!inflight) {
+    const qs = key === "__all__" ? "" : `?industry=${encodeURIComponent(key)}`;
+    const requestedKey = key;
 
-  return _liveRecsFetchPromise;
+    inflight = fetch(`${API_BASE}/api/recommendations${qs}`, { cache: "no-store" })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise<{ recommendations?: unknown[] }>;
+      })
+      .then((data) => {
+        const recs = (data.recommendations ?? []) as Recommendation[];
+        if (recs.length > 0) {
+          _liveRecs = recs;
+          _liveRecsKey = requestedKey;
+          _liveRecsFetchedAt = Date.now();
+          _notify();
+        }
+      })
+      .catch(() => { /* no fallback - real data only */ })
+      .finally(() => {
+        _liveRecsFetchByKey.delete(key);
+      });
+
+    _liveRecsFetchByKey.set(key, inflight);
+  }
+
+  return inflight;
 }
 
 function applyOpts(
-  items: (MockTrend | MockInsight | MockRecommendation)[],
+  items: (Trend | Insight | Recommendation)[],
   opts?: Record<string, unknown>,
-): (MockTrend | MockInsight | MockRecommendation)[] {
+): (Trend | Insight | Recommendation)[] {
   let result = [...items];
   const orderBy = (opts as { orderBy?: Record<string, string> } | undefined)?.orderBy;
   if (orderBy) {
     const [key, dir] = Object.entries(orderBy)[0];
     result.sort((a, b) => {
-      const av = (a as Record<string, unknown>)[key];
-      const bv = (b as Record<string, unknown>)[key];
+      const av = (a as unknown as Record<string, unknown>)[key];
+      const bv = (b as unknown as Record<string, unknown>)[key];
       if (typeof av === "number" && typeof bv === "number") return dir === "desc" ? bv - av : av - bv;
       return dir === "desc"
         ? String(bv ?? "").localeCompare(String(av ?? ""))
@@ -134,12 +205,12 @@ function _getVersion() {
   return _version;
 }
 
-function getRecs(): MockRecommendation[] {
+function getRecs(): Recommendation[] {
   const base = _liveRecs ?? [];
   return base.map(r => {
     const override = _statusOverrides.get(r.$primaryKey);
     return override ? { ...r, status: override } : { ...r };
-  });
+  }) as Recommendation[];
 }
 
 function getObjects(objectType: ObjectType, opts?: Record<string, unknown>): unknown[] {
@@ -153,23 +224,29 @@ function getObjects(objectType: ObjectType, opts?: Record<string, unknown>): unk
     if (orderBy) {
       const [key, dir] = Object.entries(orderBy)[0];
       result.sort((a, b) => {
-        const av = (a as Record<string, unknown>)[key] as number ?? 0;
-        const bv = (b as Record<string, unknown>)[key] as number ?? 0;
-        return dir === "desc" ? bv - av : av - bv;
+        const av = (a as Trend)[key];
+        const bv = (b as Trend)[key];
+        if (typeof av === "number" && typeof bv === "number") return dir === "desc" ? bv - av : av - bv;
+        return dir === "desc"
+          ? String(bv ?? "").localeCompare(String(av ?? ""))
+          : String(av ?? "").localeCompare(String(bv ?? ""));
       });
     }
     return result;
   }
 
   if (objectType === "marketInsight") {
-    let result = [...(_liveData?.insights ?? [])];
+    const result = [...(_liveData?.insights ?? [])];
     const orderBy = (opts as { orderBy?: Record<string, string> } | undefined)?.orderBy;
     if (orderBy) {
       const [key, dir] = Object.entries(orderBy)[0];
       result.sort((a, b) => {
-        const av = (a as Record<string, unknown>)[key] as string ?? "";
-        const bv = (b as Record<string, unknown>)[key] as string ?? "";
-        return dir === "desc" ? bv.localeCompare(av) : av.localeCompare(bv);
+        const av = (a as Insight)[key];
+        const bv = (b as Insight)[key];
+        if (typeof av === "number" && typeof bv === "number") return dir === "desc" ? bv - av : av - bv;
+        return dir === "desc"
+          ? String(bv ?? "").localeCompare(String(av ?? ""))
+          : String(av ?? "").localeCompare(String(bv ?? ""));
       });
     }
     return result;
@@ -181,13 +258,18 @@ function getObjects(objectType: ObjectType, opts?: Record<string, unknown>): unk
     if (where?.status?.$eq) {
       result = result.filter(r => r.status === where.status!.$eq);
     }
+    const industryOpt = (opts as { industry?: string } | undefined)?.industry;
     const orderBy = (opts as { orderBy?: Record<string, string> } | undefined)?.orderBy;
-    if (orderBy) {
+    // Preserve server-side ordering when industry-scoped (ranked by sector match)
+    if (orderBy && (!industryOpt || industryOpt === "All")) {
       const [key, dir] = Object.entries(orderBy)[0];
       result.sort((a, b) => {
-        const av = (a as Record<string, unknown>)[key] as number ?? 0;
-        const bv = (b as Record<string, unknown>)[key] as number ?? 0;
-        return dir === "desc" ? bv - av : av - bv;
+        const av = (a as Recommendation)[key];
+        const bv = (b as Recommendation)[key];
+        if (typeof av === "number" && typeof bv === "number") return dir === "desc" ? bv - av : av - bv;
+        return dir === "desc"
+          ? String(bv ?? "").localeCompare(String(av ?? ""))
+          : String(av ?? "").localeCompare(String(bv ?? ""));
       });
     }
     return result;
@@ -203,8 +285,13 @@ export function useOsdkObjects(objectType: ObjectType, opts?: Record<string, unk
   // Kick off live data fetch on mount; _notify() will re-render when data arrives
   useEffect(() => {
     void fetchLiveData();
-    void fetchLiveRecommendations();
-  }, []);
+    const industry =
+      objectType === marketRecommendation
+        ? (opts as { industry?: string } | undefined)?.industry
+        : undefined;
+    void fetchLiveRecommendations({ industry });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- opts serialized below
+  }, [objectType, JSON.stringify(opts)]);
 
   const data = useMemo(() => {
     if (objectType === "marketTrend" && _liveData && _liveData.trends.length > 0) {
@@ -213,7 +300,7 @@ export function useOsdkObjects(objectType: ObjectType, opts?: Record<string, unk
     if (objectType === "marketInsight" && _liveData && _liveData.insights.length > 0) {
       return applyOpts(_liveData.insights, opts);
     }
-    return getObjects(objectType, opts) as (MockTrend | MockInsight | MockRecommendation)[];
+    return getObjects(objectType, opts) as (Trend | Insight | Recommendation)[];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [objectType, JSON.stringify(opts), version]);
 
@@ -242,17 +329,18 @@ export function useOsdkObject(objectType: ObjectType, id: string) {
 
 // ─── useLinks ─────────────────────────────────────────────────────────────────
 export function useLinks(
-  obj: MockTrend | MockInsight | MockRecommendation | undefined,
+  obj: Trend | Insight | Recommendation | undefined,
   linkType: string,
-  _opts?: Record<string, unknown>
+  opts?: Record<string, unknown>,
 ) {
+  void opts;
   const links = useMemo(() => {
     if (!obj) return [];
-    const trendId = (obj as MockTrend).trendId;
+    const trendId = (obj as Trend).trendId;
     if (!trendId) return [];
 
     if (linkType.includes("Recommendations")) {
-      return getRecs().filter(r => r.trendId === trendId) as MockRecommendation[];
+      return getRecs().filter(r => r.trendId === trendId) as Recommendation[];
     }
     // Sources and Demographics have no live data pipeline — return empty
     return [];
@@ -270,14 +358,14 @@ export function useOsdkAction(actionType: string) {
     await new Promise(r => setTimeout(r, 400)); // simulate latency
 
     if (actionType === "updateRecommendationStatus") {
-      const rec = params.recommendation as MockRecommendation;
+      const rec = params.recommendation as Recommendation;
       const status = params.status as string;
       _statusOverrides.set(rec.$primaryKey, status);
       _notify();
     }
 
     if (actionType === "bookmarkTrend") {
-      // no-op for mock — trend status toggle is visual only
+      // no-op for now — trend status toggle is visual only
     }
 
     setIsPending(false);

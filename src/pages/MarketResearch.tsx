@@ -145,8 +145,8 @@ export function MarketResearch() {
           /* Right: Agent grid + Discovery grid (stacked)         */
           <>
             {/* Left Panel */}
-            <div className="w-[400px] min-w-[320px] border-r border-slate-200/60 dark:border-slate-800/80 flex flex-col overflow-hidden bg-slate-50/30 dark:bg-slate-950/55">
-              <div className="flex-1 overflow-hidden">
+            <div className="w-[400px] min-w-[320px] border-r border-slate-200/60 dark:border-slate-800/80 flex flex-col overflow-hidden min-h-0 bg-slate-50/30 dark:bg-slate-950/55">
+              <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
                 <BusinessPlanPanel
                   plans={businessPlans}
                   agents={agents}
@@ -169,9 +169,9 @@ export function MarketResearch() {
               {/* Discovery grid + Mission logs side by side */}
               <div className="flex h-[440px] border-t border-slate-200/40 dark:border-slate-800/70">
                 {/* Discoveries */}
-                <div className="flex-1 flex flex-col overflow-hidden px-4 pb-3 pt-3 min-w-0">
+                <div className="flex-1 flex flex-col overflow-hidden min-h-0 px-4 pb-3 pt-3 min-w-0">
                   <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-300 uppercase tracking-wider mb-2 shrink-0">Discoveries</h3>
-                  <div className="flex-1 overflow-hidden">
+                  <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
                     <DiscoveryGrid discoveries={discoveries} />
                   </div>
                 </div>
@@ -251,14 +251,14 @@ export function MarketResearch() {
             </div>
 
             {/* Right Panel — Discoveries */}
-            <div className="w-[420px] shrink-0 border-l border-slate-200/60 dark:border-slate-800/80 flex flex-col overflow-hidden p-4 dark:bg-slate-950/45">
-              <div className="flex items-center gap-2 mb-3">
+            <div className="w-[420px] shrink-0 border-l border-slate-200/60 dark:border-slate-800/80 flex flex-col overflow-hidden min-h-0 p-4 dark:bg-slate-950/45">
+              <div className="flex items-center gap-2 mb-3 shrink-0">
                 <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-300 uppercase tracking-wider">Discoveries</h3>
                 {discoveries.length > 0 && (
                   <Badge variant="secondary" className="text-[9px] bg-slate-100 dark:bg-slate-800/80 text-slate-500 dark:text-slate-300">{discoveries.length}</Badge>
                 )}
               </div>
-              <div className="flex-1 overflow-hidden">
+              <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
                 <DiscoveryGrid discoveries={discoveries} />
               </div>
             </div>

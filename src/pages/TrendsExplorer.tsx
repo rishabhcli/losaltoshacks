@@ -9,7 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { StatusBadge } from "@/components/market/StatusBadge";
 import { LoadingState } from "@/components/market/LoadingState";
 import { usePreferences } from "@/hooks/usePreferences";
-import { getIndustryLabel } from "@/lib/industry";
+import { getIndustryLabel, INDUSTRY_OPTIONS } from "@/lib/industry";
 import { TrendSparkline } from "@/components/market/TrendSparkline";
 import { StabilityBadge } from "@/components/market/StabilityBadge";
 
@@ -100,12 +100,7 @@ export function TrendsExplorer() {
     return result;
   }, [trends, search, industryFilter, statusFilter, sortBy]);
 
-  // Derive unique industries and statuses from data
-  const industries = useMemo(() => {
-    if (!trends) return [];
-    return [...new Set(trends.map(t => t.industry).filter(Boolean))] as string[];
-  }, [trends]);
-
+  // Derive unique statuses from data
   const statuses = useMemo(() => {
     if (!trends) return [];
     return [...new Set(trends.map(t => t.status).filter(Boolean))] as string[];
@@ -225,9 +220,9 @@ export function TrendsExplorer() {
               <SelectItem value="all" className="text-sm">
                 All Industries
               </SelectItem>
-              {industries.map(ind => (
-                <SelectItem key={ind} value={ind} className="text-sm">
-                  {getIndustryLabel(ind)}
+              {INDUSTRY_OPTIONS.filter(ind => ind.value !== "All").map(ind => (
+                <SelectItem key={ind.value} value={ind.value} className="text-sm">
+                  {ind.label}
                 </SelectItem>
               ))}
             </SelectContent>

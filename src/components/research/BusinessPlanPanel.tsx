@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3, CheckCircle2, Copy, ExternalLink, Loader2, TrendingUp,
+  BarChart3, CheckCircle2, Copy, ExternalLink, Loader2, Square, TrendingUp,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { AGENTS, PLATFORM_COLORS, type AgentData, type BusinessPlan, type DiscoveredContent } from "@/hooks/useAgentData";
 import type { FinalOptionsPayload } from "@/hooks/useMasterBuildDashboard";
+import { buildDetailedLovablePromptFromReport, buildLovableLaunchUrl } from "@/lib/lovableHandoff";
 
 interface Props {
   plans: BusinessPlan[];
@@ -110,7 +110,9 @@ function agentStatusMeta(status: AgentData["status"]) {
 
 export function BusinessPlanPanel({ plans, agents, discoveries, missionPrompt, isRunning, finalOptions, onStopAll }: Props) {
   const reportRef = useRef<HTMLDivElement>(null);
-  const [copied, setCopied] = useState(false);
+  const [copiedReport, setCopiedReport] = useState(false);
+  const [copiedLovable, setCopiedLovable] = useState(false);
+  const [copiedHistoryId, setCopiedHistoryId] = useState<string | null>(null);
   const latest = plans[0] ?? null;
   const history = plans.slice(1);
 
@@ -126,11 +128,46 @@ export function BusinessPlanPanel({ plans, agents, discoveries, missionPrompt, i
 
   const handleCopy = useCallback(() => {
     if (!latest?.raw_plan) return;
-    navigator.clipboard.writeText(latest.raw_plan).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+    navigator.clipboard.writeText(latest.raw_plan).then(() => {
+      setCopiedReport(true);
+      setTimeout(() => setCopiedReport(false), 2000);
+    });
   }, [latest?.raw_plan]);
 
-  const lovableReady = finalOptions?.coverage?.readyForLovable && finalOptions?.lovableHandoff?.launchUrl;
-  const lovableUrl = finalOptions?.lovableHandoff?.launchUrl ?? "";
+  /** Any persisted plan row can drive a Lovable brief (mission + discoveries fill gaps). */
+  const canOpenLovable = Boolean(latest);
+
+  const derivedLovablePrompt = useMemo(() => {
+    if (!latest) return "";
+    return buildDetailedLovablePromptFromReport({
+      missionPrompt,
+      plan: latest,
+      discoveries,
+      finalOptions,
+    });
+  }, [latest, missionPrompt, discoveries, finalOptions]);
+
+  const derivedLovableUrl = useMemo(() => buildLovableLaunchUrl(derivedLovablePrompt), [derivedLovablePrompt]);
+
+  const finalLovableUrl = finalOptions?.lovableHandoff?.launchUrl?.trim() ?? "";
+  /** Prefer engine-built URL when coverage is complete; always fall back to live-report prompt. */
+  const primaryLovableUrl =
+    finalOptions?.coverage?.readyForLovable && finalLovableUrl ? finalLovableUrl : derivedLovableUrl;
+
+  const handleCopyLovablePrompt = useCallback(() => {
+    if (!derivedLovablePrompt) return;
+    navigator.clipboard.writeText(derivedLovablePrompt).then(() => {
+      setCopiedLovable(true);
+      setTimeout(() => setCopiedLovable(false), 2000);
+    });
+  }, [derivedLovablePrompt]);
+
+  const copyHistoryPrompt = useCallback((planId: string, prompt: string) => {
+    navigator.clipboard.writeText(prompt).then(() => {
+      setCopiedHistoryId(planId);
+      setTimeout(() => setCopiedHistoryId(null), 2000);
+    });
+  }, []);
 
   // ── Empty states ──
   if (!missionPrompt) {
@@ -234,7 +271,7 @@ export function BusinessPlanPanel({ plans, agents, discoveries, missionPrompt, i
       </div>
 
       {/* ── LIVE REPORT (bottom ~55%) ── */}
-      <div className="flex-1 flex flex-col min-h-0">
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 dark:border-slate-800/80 shrink-0 bg-transparent dark:bg-slate-950/45">
           <div className="flex items-center gap-2">
             <BarChart3 className="w-3.5 h-3.5 text-blue-600" />
@@ -244,54 +281,102 @@ export function BusinessPlanPanel({ plans, agents, discoveries, missionPrompt, i
           {latest?.raw_plan && (
             <Button variant="ghost" size="sm" onClick={handleCopy} className="h-6 text-[10px] text-slate-400 dark:text-slate-300 gap-1">
               <Copy className="w-3 h-3" />
-              {copied ? "Copied" : "Copy"}
+              {copiedReport ? "Copied" : "Copy"}
             </Button>
           )}
         </div>
 
-        <ScrollArea className="flex-1 px-3 py-2 dark:bg-slate-950/35" ref={reportRef}>
+        <div
+          ref={reportRef}
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-2 dark:bg-slate-950/35"
+        >
           {reportNodes && reportNodes.length > 0 ? reportNodes : (
             <div className="text-sm text-slate-400 dark:text-slate-500 text-center pt-8">
               {isRunning ? "Report will appear as agents gather data..." : "No raw report data available."}
             </div>
           )}
-        </ScrollArea>
+        </div>
 
-        {/* Version history */}
+        {/* Version history — saved reports + Lovable per version */}
         {history.length > 0 && (
-          <div className="flex items-center gap-1.5 px-3 py-1.5 border-t border-slate-100 dark:border-slate-800/80 shrink-0 flex-wrap bg-transparent dark:bg-slate-950/45">
-            <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase tracking-wider mr-0.5">History</span>
-            {history.map((plan) => (
-              <Badge key={plan._id} variant="outline" className="text-[9px] text-slate-500 dark:text-slate-300 border-slate-200 dark:border-slate-800/80 py-0">
-                v{plan.version} <span className={`ml-0.5 ${confidenceColor(plan.confidence_score)}`}>{plan.confidence_score}%</span>
-              </Badge>
-            ))}
+          <div className="border-t border-slate-100 dark:border-slate-800/80 shrink-0 px-3 py-2 space-y-2 bg-transparent dark:bg-slate-950/45 max-h-[200px] overflow-y-auto">
+            <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase tracking-wider">History</span>
+            <div className="space-y-2">
+              {history.map((plan) => {
+                const histPrompt = buildDetailedLovablePromptFromReport({
+                  missionPrompt,
+                  plan,
+                  discoveries,
+                  finalOptions: null,
+                });
+                const histUrl = buildLovableLaunchUrl(histPrompt);
+                return (
+                  <div
+                    key={plan._id}
+                    className="rounded-lg border border-slate-200/80 dark:border-slate-800/80 bg-white/70 dark:bg-slate-950/80 px-2 py-1.5 flex flex-wrap items-center gap-1.5"
+                  >
+                    <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-200">
+                      v{plan.version}
+                    </span>
+                    <span className={`text-[10px] ${confidenceColor(plan.confidence_score)}`}>
+                      {plan.confidence_score}%
+                    </span>
+                    <a
+                      href={histUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ml-auto text-[10px] font-medium px-2 py-0.5 rounded-md bg-violet-600 hover:bg-violet-700 text-white"
+                    >
+                      Build in Lovable
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => copyHistoryPrompt(plan._id, histPrompt)}
+                      className="text-[10px] px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900"
+                    >
+                      {copiedHistoryId === plan._id ? "Copied" : "Copy prompt"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
-        {/* Action buttons */}
-        <div className="px-3 py-2 shrink-0 flex gap-2 border-t border-slate-100 dark:border-slate-800/80 bg-transparent dark:bg-slate-950/55">
-          {lovableReady && !isRunning && (
-            <a
-              href={lovableUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors"
-            >
-              <ExternalLink className="w-3 h-3" />
-              Build in Lovable
-            </a>
+        {/* Action buttons — Lovable stays available from live report; stop clears browsers & finalizes on server */}
+        <div className="px-3 py-2 shrink-0 flex flex-col gap-2 border-t border-slate-100 dark:border-slate-800/80 bg-transparent dark:bg-slate-950/55">
+          {canOpenLovable && primaryLovableUrl && (
+            <div className="flex flex-wrap gap-2">
+              <a
+                href={primaryLovableUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 min-w-[140px] flex items-center justify-center gap-1.5 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium transition-colors shadow-sm"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                Build in Lovable
+              </a>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleCopyLovablePrompt}
+                disabled={!derivedLovablePrompt}
+                className="h-9 text-xs border-slate-200 dark:border-slate-700"
+              >
+                <Copy className="w-3 h-3 mr-1" />
+                {copiedLovable ? "Copied prompt" : "Copy Lovable prompt"}
+              </Button>
+            </div>
           )}
           {isRunning && (
             <button
-              onClick={() => {
-                onStopAll?.();
-                if (lovableUrl) window.open(lovableUrl, "_blank", "noopener,noreferrer");
-              }}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs font-medium hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+              type="button"
+              onClick={() => onStopAll?.()}
+              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-xs font-medium hover:bg-red-100 dark:hover:bg-red-950/60 transition-colors"
             >
-              <ExternalLink className="w-3 h-3" />
-              Stop &amp; Build in Lovable
+              <Square className="w-3 h-3 fill-current" />
+              Stop session — save report &amp; clear browser previews
             </button>
           )}
         </div>

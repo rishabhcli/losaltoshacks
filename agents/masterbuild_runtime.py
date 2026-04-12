@@ -3682,6 +3682,7 @@ class MasterBuildOrchestrator:
         last_preview_key: str | None = None
         browser: BrowserSession | None = None
         x_watchdog_task: asyncio.Task[Any] | None = None
+        preview_stream_task: asyncio.Task[Any] | None = None
         step_count = 0
         primary_query = seed_queries[0] if seed_queries else mission_prompt
         x_seed_url = self._build_x_search_url(seed_queries, mission_prompt) if spec.platform == "x" else None
@@ -3877,6 +3878,33 @@ class MasterBuildOrchestrator:
             # Inject stealth scripts on every new page to suppress automation signals
             await self._inject_stealth_scripts(browser)
 
+            # High-frequency local preview frames for the UI (InsForge storage upload stays on agent steps to avoid rate limits).
+            preview_stream_interval = float(os.getenv("MASTERBUILD_PREVIEW_STREAM_SEC", "0.28"))
+
+            async def _live_preview_stream() -> None:
+                while not self.stop_event.is_set():
+                    await asyncio.sleep(preview_stream_interval)
+                    if browser is None:
+                        continue
+                    try:
+                        shot = await self._take_agent_screenshot(browser, spec)
+                        if shot:
+                            page, page_url, page_title = await self._get_browser_page_state(browser)
+                            await self.preview_manager.publish(
+                                spec.agent_id,
+                                status="searching",
+                                title=page_title or "Live",
+                                current_url=page_url,
+                                note="live preview",
+                                screenshot_path=shot,
+                            )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        pass
+
+            preview_stream_task = asyncio.create_task(_live_preview_stream())
+
             if spec.platform == "x":
                 await self.preview_manager.publish(
                     spec.agent_id,
@@ -3954,6 +3982,9 @@ class MasterBuildOrchestrator:
             )
             agent_context.log_agent_action(spec.agent_id, "error", str(error)[:200])
         finally:
+            if preview_stream_task is not None:
+                preview_stream_task.cancel()
+                await asyncio.gather(preview_stream_task, return_exceptions=True)
             if x_watchdog_task is not None:
                 x_watchdog_task.cancel()
                 await asyncio.gather(x_watchdog_task, return_exceptions=True)
