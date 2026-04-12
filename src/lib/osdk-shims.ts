@@ -70,6 +70,7 @@ export const marketRecommendation = "marketRecommendation";
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
 const LIVE_CACHE_TTL = 60_000; // 1 minute
 const RECS_CACHE_TTL = 5 * 60_000; // 5 minutes (matches server-side cache)
+const LIVE_REFRESH_INTERVAL_MS = 8_000;
 
 interface LiveData {
   trends: Trend[];
@@ -87,9 +88,26 @@ const _liveRecsFetchByKey = new Map<string, Promise<void>>();
 /** Cache key for recommendations: industry slug or "__all__" */
 let _liveRecsKey = "__all__";
 
-function fetchLiveData(): Promise<void> {
+export function invalidateLiveResearchCache(refetch = true) {
+  _liveData = null;
+  _liveFetchedAt = 0;
+  _liveFetchPromise = null;
+  _liveRecs = null;
+  _liveRecsFetchedAt = 0;
+  _liveRecsKey = "__all__";
+  _liveRecsFetchByKey.clear();
+  _notify();
+
+  if (refetch) {
+    void fetchLiveData();
+    void fetchLiveRecommendations();
+  }
+}
+
+function fetchLiveData(opts?: { force?: boolean }): Promise<void> {
+  const force = Boolean(opts?.force);
   const now = Date.now();
-  if (_liveData && now - _liveFetchedAt < LIVE_CACHE_TTL) return Promise.resolve();
+  if (!force && _liveData && now - _liveFetchedAt < LIVE_CACHE_TTL) return Promise.resolve();
   if (_liveFetchPromise) return _liveFetchPromise;
 
   _liveFetchPromise = fetch(`${API_BASE}/api/trends`, { cache: "no-store" })
@@ -100,11 +118,9 @@ function fetchLiveData(): Promise<void> {
     .then((data) => {
       const trends = (data.trends ?? []) as Trend[];
       const insights = (data.insights ?? []) as Insight[];
-      if (trends.length > 0 || insights.length > 0) {
-        _liveData = { trends, insights };
-        _liveFetchedAt = Date.now();
-        _notify();
-      }
+      _liveData = { trends, insights };
+      _liveFetchedAt = Date.now();
+      _notify();
     })
     .catch(() => { /* no fallback - real data only */ })
     .finally(() => { _liveFetchPromise = null; });
@@ -112,14 +128,16 @@ function fetchLiveData(): Promise<void> {
   return _liveFetchPromise;
 }
 
-function fetchLiveRecommendations(opts?: { industry?: string }): Promise<void> {
+function fetchLiveRecommendations(opts?: { industry?: string; force?: boolean }): Promise<void> {
   const key =
     opts?.industry && opts.industry !== "All"
       ? opts.industry
       : "__all__";
+  const force = Boolean(opts?.force);
 
   const now = Date.now();
   if (
+    !force &&
     _liveRecs &&
     _liveRecsKey === key &&
     now - _liveRecsFetchedAt < RECS_CACHE_TTL
@@ -139,12 +157,10 @@ function fetchLiveRecommendations(opts?: { industry?: string }): Promise<void> {
       })
       .then((data) => {
         const recs = (data.recommendations ?? []) as Recommendation[];
-        if (recs.length > 0) {
-          _liveRecs = recs;
-          _liveRecsKey = requestedKey;
-          _liveRecsFetchedAt = Date.now();
-          _notify();
-        }
+        _liveRecs = recs;
+        _liveRecsKey = requestedKey;
+        _liveRecsFetchedAt = Date.now();
+        _notify();
       })
       .catch(() => { /* no fallback - real data only */ })
       .finally(() => {
@@ -284,12 +300,24 @@ export function useOsdkObjects(objectType: ObjectType, opts?: Record<string, unk
 
   // Kick off live data fetch on mount; _notify() will re-render when data arrives
   useEffect(() => {
-    void fetchLiveData();
     const industry =
       objectType === marketRecommendation
         ? (opts as { industry?: string } | undefined)?.industry
         : undefined;
-    void fetchLiveRecommendations({ industry });
+
+    const refresh = (force = false) => {
+      void fetchLiveData({ force });
+      void fetchLiveRecommendations({ industry, force });
+    };
+
+    refresh();
+    const intervalId = window.setInterval(() => {
+      refresh(true);
+    }, LIVE_REFRESH_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- opts serialized below
   }, [objectType, JSON.stringify(opts)]);
 
@@ -312,8 +340,19 @@ export function useOsdkObject(objectType: ObjectType, id: string) {
   const version = useSyncExternalStore(_subscribe, _getVersion);
 
   useEffect(() => {
-    void fetchLiveData();
-    void fetchLiveRecommendations();
+    const refresh = (force = false) => {
+      void fetchLiveData({ force });
+      void fetchLiveRecommendations({ force });
+    };
+
+    refresh();
+    const intervalId = window.setInterval(() => {
+      refresh(true);
+    }, LIVE_REFRESH_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   const object = useMemo(() => {

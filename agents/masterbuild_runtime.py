@@ -1339,6 +1339,7 @@ class MasterBuildAI:
         try:
             parsed = extract_json_block(await self.generate_chat_completion(
                 system_prompt, user_prompt,
+                max_tokens=220,
                 thought_type="planning", action_label=f"generate_terms:{platform}",
             ))
             if isinstance(parsed, list):
@@ -1444,7 +1445,7 @@ class MasterBuildAI:
 
         item_lines = []
         for i, item in enumerate(items):
-            content = (item.get("content") or item.get("description") or "")[:600]
+            content = (item.get("content") or item.get("description") or "")[:400]
             item_lines.append(
                 f"[{i}] Platform: {item.get('platform', '?')} | "
                 f"Title: {item.get('title', '')} | "
@@ -1461,7 +1462,7 @@ class MasterBuildAI:
         try:
             raw = await self.generate_chat_completion(
                 system_prompt, user_prompt,
-                max_tokens=1500,
+                max_tokens=1100,
                 thought_type="refinement",
                 action_label="batch_summarize",
             )
@@ -1520,7 +1521,7 @@ class MasterBuildAI:
         try:
             parsed = extract_json_block(
                 await self.generate_chat_completion(
-                    system_prompt, user_prompt, max_tokens=1800,
+                    system_prompt, user_prompt, max_tokens=1400,
                     thought_type="refinement", action_label="market_research_report",
                 )
             )
@@ -1602,7 +1603,7 @@ class MasterBuildAI:
                 await self.generate_chat_completion(
                     system_prompt,
                     user_prompt,
-                    max_tokens=2200,
+                    max_tokens=1600,
                     thought_type="refinement",
                     action_label="finalized_implementation_plan",
                 )
@@ -1798,6 +1799,31 @@ class MasterBuildOrchestrator:
         self.headless = os.getenv("MASTERBUILD_HEADLESS", "true").lower() != "false"
         self.agent_cycle_delay = float(os.getenv("MASTERBUILD_AGENT_CYCLE_DELAY", "3"))
         self.navigation_wait = float(os.getenv("MASTERBUILD_NAVIGATION_WAIT", "2"))
+        self.watch_poll_seconds = float(os.getenv("MASTERBUILD_WATCH_POLL_SECONDS", "1"))
+        self.control_poll_seconds = float(os.getenv("MASTERBUILD_CONTROL_POLL_SECONDS", "0.25"))
+        self.strategy_initial_delay_seconds = float(os.getenv("MASTERBUILD_STRATEGY_INITIAL_DELAY_SECONDS", "45"))
+        self.strategy_poll_seconds = float(os.getenv("MASTERBUILD_STRATEGY_POLL_SECONDS", "45"))
+        self.plan_initial_threshold = int(os.getenv("MASTERBUILD_PLAN_SYNTHESIS_THRESHOLD", "3"))
+        self.plan_warmup_seconds = float(os.getenv("MASTERBUILD_PLAN_WARMUP_SECONDS", "8"))
+        self.plan_poll_seconds = float(os.getenv("MASTERBUILD_PLAN_POLL_SECONDS", "8"))
+        self.plan_threshold_growth = int(os.getenv("MASTERBUILD_PLAN_THRESHOLD_GROWTH", "1"))
+        self.plan_threshold_max = int(os.getenv("MASTERBUILD_PLAN_THRESHOLD_MAX", "6"))
+        self.market_research_poll_seconds = float(os.getenv("MASTERBUILD_MARKET_RESEARCH_POLL_SECONDS", "5"))
+        self.builder_confidence_threshold = int(os.getenv("MASTERBUILD_BUILDER_CONFIDENCE_THRESHOLD", "55"))
+        self.builder_warmup_seconds = float(os.getenv("MASTERBUILD_BUILDER_WARMUP_SECONDS", "120"))
+        self.builder_poll_seconds = float(os.getenv("MASTERBUILD_BUILDER_POLL_SECONDS", "10"))
+        self.mission_time_budget_seconds = float(os.getenv("MASTERBUILD_MISSION_TIME_BUDGET_SECONDS", "75"))
+        self.auto_complete_poll_seconds = float(os.getenv("MASTERBUILD_AUTO_COMPLETE_POLL_SECONDS", "2"))
+        self.auto_complete_min_discoveries = int(os.getenv("MASTERBUILD_AUTO_COMPLETE_MIN_DISCOVERIES", "6"))
+        self.auto_complete_sweep_grace_seconds = float(os.getenv("MASTERBUILD_AUTO_COMPLETE_SWEEP_GRACE_SECONDS", "10"))
+        self.enable_browser_showcase = os.getenv("MASTERBUILD_ENABLE_BROWSER_SHOWCASE", "false").lower() == "true"
+        self.showcase_render_wait_seconds = float(os.getenv("MASTERBUILD_SHOWCASE_RENDER_WAIT_SECONDS", "0.75"))
+        self.showcase_step_wait_seconds = float(os.getenv("MASTERBUILD_SHOWCASE_STEP_WAIT_SECONDS", "0.35"))
+        self.sweep_result_limit = int(os.getenv("MASTERBUILD_SWEEP_RESULT_LIMIT", "4"))
+        self.llm_health_cache_ttl_seconds = float(os.getenv("MASTERBUILD_LLM_HEALTH_CACHE_TTL_SECONDS", "600"))
+        self._llm_health_verified_at = 0.0
+        self._llm_health_ok = False
+        self.stop_context: dict[str, Any] | None = None
         # OpenAI config for browser-use navigation on action-heavy platforms
         self._openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
         self._openai_browser_model = os.getenv("OPENAI_BROWSER_MODEL", "gpt-4o")
@@ -1908,6 +1934,13 @@ class MasterBuildOrchestrator:
 
     async def verify_llm(self) -> bool:
         """Health-check LLMs before starting a mission."""
+        now = asyncio.get_running_loop().time()
+        if (
+            self._llm_health_verified_at
+            and (now - self._llm_health_verified_at) < self.llm_health_cache_ttl_seconds
+        ):
+            return self._llm_health_ok
+
         minimax_ok = False
         try:
             resp = await self.ai.generate_chat_completion("You are a test. Do NOT use any thinking tags. Reply with just the word OK.", "Reply OK.", max_tokens=200)
@@ -1934,7 +1967,9 @@ class MasterBuildOrchestrator:
         else:
             print("[orchestrator] ⚠ OPENAI_API_KEY not set — all browser agents will use MiniMax M2.7")
 
-        return minimax_ok or self._openai_available
+        self._llm_health_ok = minimax_ok or self._openai_available
+        self._llm_health_verified_at = now
+        return self._llm_health_ok
 
     async def close(self) -> None:
         await self.brave.close()
@@ -1963,12 +1998,14 @@ class MasterBuildOrchestrator:
                 import traceback
                 print(f"[orchestrator] watch error: {e!r}")
                 traceback.print_exc()
-            await asyncio.sleep(15)
+            await asyncio.sleep(self.watch_poll_seconds)
 
     async def run_mission(self, mission: dict[str, Any]) -> None:
         mission_id = str(mission["id"])
         prompt = str(mission.get("prompt", ""))
+        mission_started_at = asyncio.get_running_loop().time()
         self.stop_event.clear()
+        self.stop_context = None
         self.blackboard.clear()
 
         # ── Initialize shared MD context ───────────────────────────────
@@ -2013,12 +2050,16 @@ class MasterBuildOrchestrator:
             "reddit": "Reddit discussions",
             "substack": "Substack essays",
         }
-        platform_terms = {
-            platform: await self.ai.generate_terms(prompt, platform_labels[platform], 3)
+        platform_term_results = await asyncio.gather(*[
+            self.ai.generate_terms(prompt, platform_labels[platform], 3)
             for platform in BROWSING_PLATFORMS
+        ])
+        platform_terms = {
+            platform: terms
+            for platform, terms in zip(BROWSING_PLATFORMS, platform_term_results, strict=False)
         }
         curated_links = {
-            platform: await self.brave.curate_links(platform, platform_terms[platform], max_results=6)
+            platform: await self.brave.curate_links(platform, platform_terms[platform], max_results=self.sweep_result_limit)
             for platform in BROWSING_PLATFORMS
         }
 
@@ -2059,19 +2100,30 @@ class MasterBuildOrchestrator:
         strategy_task = asyncio.create_task(self.periodic_strategy_update(mission_id))
         business_plan_task = asyncio.create_task(self.periodic_business_plan_synthesis(mission_id, prompt))
         builder_trigger_task = asyncio.create_task(self.monitor_builder_trigger(mission_id, prompt))
+        completion_task = asyncio.create_task(
+            self.monitor_auto_completion(
+                mission_id,
+                mission_started_at=mission_started_at,
+                sweep_tasks=sweep_tasks,
+            )
+        )
 
         # ── Phase 2: Browser showcase (launches after sweep finishes) ──
         showcase_task: asyncio.Task[Any] | None = None
 
         try:
-            pending = tasks + [control_task]
+            pending = tasks + [control_task, completion_task]
             while pending and not self.stop_event.is_set():
                 done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-                if control_task in done:
+                if control_task in done or completion_task in done:
                     break
 
                 # Check if all sweep agents are done → launch browser showcase
-                if showcase_task is None and all(t.done() for t in sweep_tasks):
+                if (
+                    self.enable_browser_showcase
+                    and showcase_task is None
+                    and all(t.done() for t in sweep_tasks)
+                ):
                     print("[orchestrator] API sweep complete — launching browser showcase")
                     await self.client.append_log(
                         mission_id, agent_id=None, log_type="status",
@@ -2082,6 +2134,15 @@ class MasterBuildOrchestrator:
                         self.run_browser_showcase(mission_id=mission_id, mission_prompt=prompt)
                     )
                     tasks.append(showcase_task)
+                elif not self.enable_browser_showcase and showcase_task is None and all(t.done() for t in sweep_tasks):
+                    showcase_task = asyncio.create_task(asyncio.sleep(0))
+                    await self.client.append_log(
+                        mission_id,
+                        agent_id=None,
+                        log_type="status",
+                        message="Skipping browser showcase to prioritize fast research completion.",
+                        metadata={"showcase_enabled": False},
+                    )
 
                 pending = [task for task in pending if not task.done()]
                 if all(task.done() for task in tasks):
@@ -2091,14 +2152,40 @@ class MasterBuildOrchestrator:
             strategy_task.cancel()
             business_plan_task.cancel()
             builder_trigger_task.cancel()
+            completion_task.cancel()
             for task in tasks + [control_task]:
                 task.cancel()
-            await asyncio.gather(*tasks, control_task, strategy_task, business_plan_task, builder_trigger_task, return_exceptions=True)
+            await asyncio.gather(
+                *tasks,
+                control_task,
+                strategy_task,
+                business_plan_task,
+                builder_trigger_task,
+                completion_task,
+                return_exceptions=True,
+            )
 
-            # ── Final business plan synthesis ──────────────────────────
-            try:
-                discoveries = await self.client.get_recent_discoveries(30, mission_id=mission_id)
-                if discoveries:
+            stop_reason = str(self.stop_context.get("reason", "")).strip() if self.stop_context else ""
+            was_superseded = stop_reason == "superseded"
+            was_manually_stopped = stop_reason == "manual"
+
+            if was_superseded:
+                try:
+                    await self.client.append_log(
+                        mission_id,
+                        agent_id=None,
+                        log_type="status",
+                        message="Newer research request detected. Skipping final synthesis so the worker can switch immediately.",
+                        metadata={
+                            "replacement_prompt": self.stop_context.get("replacement_prompt", ""),
+                        },
+                    )
+                except Exception:
+                    pass
+            else:
+                # ── Final business plan synthesis ──────────────────────
+                try:
+                    discoveries = await self.client.get_recent_discoveries(30, mission_id=mission_id)
                     current_plan = agent_context.get_business_plan()
                     discovery_dicts = [
                         {"platform": d.get("platform", ""), "keywords": d.get("keywords", ""),
@@ -2136,32 +2223,51 @@ class MasterBuildOrchestrator:
                     )
                     await self.client.append_log(
                         mission_id, agent_id=None, log_type="status",
-                        message=f"📋 FINAL business plan synthesized (confidence: {final_plan.get('confidence_score', 0)}%)",
-                        metadata={},
+                        message=(
+                            f"📋 FINAL business plan synthesized (confidence: {final_plan.get('confidence_score', 0)}%)"
+                            if discoveries
+                            else "📋 FINAL business plan synthesized from the current partial research snapshot."
+                        ),
+                        metadata={"discovery_count": len(discoveries)},
                     )
-            except Exception as e:
-                print(f"[orchestrator] final business plan error: {e}")
+                except Exception as e:
+                    print(f"[orchestrator] final business plan error: {e}")
 
-            if market_research_spec is not None:
-                try:
-                    await self._update_market_research_output(
-                        mission_id,
-                        prompt,
-                        spec=market_research_spec,
-                        is_final=True,
-                    )
-                except Exception as error:
-                    await self.client.append_log(
-                        mission_id,
-                        agent_id=market_research_spec.agent_id,
-                        log_type="error",
-                        message=f"Market research finalization failed: {error}",
-                        metadata={},
-                    )
+                if market_research_spec is not None:
+                    try:
+                        await self._update_market_research_output(
+                            mission_id,
+                            prompt,
+                            spec=market_research_spec,
+                            is_final=True,
+                        )
+                    except Exception as error:
+                        await self.client.append_log(
+                            mission_id,
+                            agent_id=market_research_spec.agent_id,
+                            log_type="error",
+                            message=f"Market research finalization failed: {error}",
+                            metadata={},
+                        )
 
-            await self.client.update_mission(mission_id, status="stopped", stopped_at=utc_now())
-            await self.client.append_log(mission_id, agent_id=None, log_type="status", message="Mission halted.", metadata={})
+            final_status = "stopped" if (was_superseded or was_manually_stopped) else "completed"
+            final_message = (
+                "Mission superseded by a newer request."
+                if was_superseded
+                else "Mission stopped."
+                if was_manually_stopped
+                else "Mission completed."
+            )
+            await self.client.update_mission(mission_id, status=final_status, stopped_at=utc_now())
+            await self.client.append_log(
+                mission_id,
+                agent_id=None,
+                log_type="status",
+                message=final_message,
+                metadata={"final_status": final_status, "stop_reason": stop_reason or None},
+            )
             agent_context.disable_insforge_sync()
+            self.stop_context = None
 
     async def monitor_control_commands(self, mission_id: str) -> None:
         while not self.stop_event.is_set():
@@ -2169,15 +2275,38 @@ class MasterBuildOrchestrator:
             for command in commands:
                 command_name = str(command.get("command", ""))
                 if command_name == "stop_all":
-                    await self.client.update_mission(mission_id, status="stopping")
-                    await self.client.append_log(mission_id, agent_id=None, log_type="status", message="Stop command received.", metadata={})
+                    payload = command.get("payload") if isinstance(command.get("payload"), dict) else {}
+                    source = str(payload.get("source", "")).strip()
+                    replacement_prompt = str(payload.get("replacementPrompt", "")).strip()
+                    self.stop_context = {
+                        "reason": "superseded" if source == "superseded_by_new_mission" else "manual",
+                        "source": source,
+                        "replacement_prompt": replacement_prompt,
+                    }
                     self.stop_event.set()
+                    if source == "superseded_by_new_mission":
+                        await self.client.append_log(
+                            mission_id,
+                            agent_id=None,
+                            log_type="status",
+                            message="Stop command received from a newer research request. Preempting current mission now.",
+                            metadata={"replacement_prompt": replacement_prompt},
+                        )
+                    else:
+                        await self.client.update_mission(mission_id, status="stopping")
+                        await self.client.append_log(
+                            mission_id,
+                            agent_id=None,
+                            log_type="status",
+                            message="Stop command received.",
+                            metadata={},
+                        )
                 await self.client.mark_command_handled(str(command["id"]))
-            await asyncio.sleep(2)
+            await asyncio.sleep(self.control_poll_seconds)
 
     async def periodic_strategy_update(self, mission_id: str) -> None:
         """Periodically ask MiniMax to update the shared strategy.md."""
-        await asyncio.sleep(15)
+        await asyncio.sleep(self.strategy_initial_delay_seconds)
         while not self.stop_event.is_set():
             try:
                 new_strategy = await self.ai.coordinate_strategy()
@@ -2191,19 +2320,19 @@ class MasterBuildOrchestrator:
                 raise
             except Exception:
                 pass
-            await asyncio.sleep(25)
+            await asyncio.sleep(self.strategy_poll_seconds)
 
     async def periodic_business_plan_synthesis(self, mission_id: str, prompt: str) -> None:
         """Periodically synthesize discoveries into a structured business plan."""
         plan_version = 0
         last_discovery_count = 0
-        synthesis_threshold = 5  # synthesize every N new discoveries
-        await asyncio.sleep(40)  # Let agents gather initial data
+        synthesis_threshold = self.plan_initial_threshold
+        await asyncio.sleep(self.plan_warmup_seconds)
         while not self.stop_event.is_set():
             try:
                 discoveries = await self.client.get_recent_discoveries(30, mission_id=mission_id)
                 new_count = len(discoveries)
-                if new_count >= last_discovery_count + synthesis_threshold:
+                if new_count and new_count >= last_discovery_count + synthesis_threshold:
                     last_discovery_count = new_count
                     plan_version += 1
                     current_plan = agent_context.get_business_plan()
@@ -2265,12 +2394,15 @@ class MasterBuildOrchestrator:
                     )
 
                     # Increase threshold as plan matures
-                    synthesis_threshold = min(synthesis_threshold + 2, 12)
+                    synthesis_threshold = min(
+                        synthesis_threshold + self.plan_threshold_growth,
+                        self.plan_threshold_max,
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 print(f"[orchestrator] business plan synthesis error: {e}")
-            await asyncio.sleep(30)
+            await asyncio.sleep(self.plan_poll_seconds)
 
     async def monitor_builder_trigger(self, mission_id: str, prompt: str) -> None:
         """Watch business plan confidence and launch the builder agent when ready.
@@ -2280,8 +2412,8 @@ class MasterBuildOrchestrator:
         we signal them to research the gaps and re-trigger the builder.
         """
         builder_launched = False
-        confidence_threshold = 40
-        await asyncio.sleep(60)  # Let research agents and plan synthesis warm up
+        confidence_threshold = self.builder_confidence_threshold
+        await asyncio.sleep(self.builder_warmup_seconds)
         while not self.stop_event.is_set() and not builder_launched:
             try:
                 plans = await self.client.list_records(
@@ -2315,7 +2447,99 @@ class MasterBuildOrchestrator:
             except Exception as e:
                 print(f"[orchestrator] builder trigger error: {e}")
             if not builder_launched:
-                await asyncio.sleep(20)
+                await asyncio.sleep(self.builder_poll_seconds)
+
+    async def monitor_auto_completion(
+        self,
+        mission_id: str,
+        *,
+        mission_started_at: float,
+        sweep_tasks: list[asyncio.Task[Any]],
+    ) -> str:
+        """Stop research automatically once the fast sweep is done or the time budget is spent."""
+        sweep_completed_at: float | None = None
+
+        await asyncio.sleep(self.auto_complete_poll_seconds)
+        while not self.stop_event.is_set():
+            try:
+                now = asyncio.get_running_loop().time()
+                elapsed = now - mission_started_at
+
+                discoveries = await self.client.get_recent_discoveries(24, mission_id=mission_id)
+                valid_discoveries = filter_valid_discoveries(discoveries)
+                coverage = build_platform_coverage(valid_discoveries)
+                all_sweeps_done = all(task.done() for task in sweep_tasks)
+
+                if all_sweeps_done and sweep_completed_at is None:
+                    sweep_completed_at = now
+
+                if coverage["readyForLovable"] and len(valid_discoveries) >= self.auto_complete_min_discoveries:
+                    await self.client.append_log(
+                        mission_id,
+                        agent_id=None,
+                        log_type="status",
+                        message=(
+                            f"Fast research complete in {int(elapsed)}s — "
+                            f"{len(valid_discoveries)} validated discoveries across all required platforms. Finalizing."
+                        ),
+                        metadata={
+                            "elapsed_seconds": round(elapsed, 1),
+                            "validated_discoveries": len(valid_discoveries),
+                            "completed_platforms": coverage["completedPlatforms"],
+                        },
+                    )
+                    self.stop_event.set()
+                    return "coverage_ready"
+
+                if (
+                    all_sweeps_done
+                    and discoveries
+                    and sweep_completed_at is not None
+                    and (now - sweep_completed_at) >= self.auto_complete_sweep_grace_seconds
+                ):
+                    await self.client.append_log(
+                        mission_id,
+                        agent_id=None,
+                        log_type="status",
+                        message=(
+                            f"API sweep finished in {int(elapsed)}s — finalizing with "
+                            f"{len(valid_discoveries) or len(discoveries)} discoveries to keep research under budget."
+                        ),
+                        metadata={
+                            "elapsed_seconds": round(elapsed, 1),
+                            "validated_discoveries": len(valid_discoveries),
+                            "total_discoveries": len(discoveries),
+                            "completed_platforms": coverage["completedPlatforms"],
+                            "missing_platforms": coverage["missingPlatforms"],
+                        },
+                    )
+                    self.stop_event.set()
+                    return "sweep_complete"
+
+                if elapsed >= self.mission_time_budget_seconds:
+                    await self.client.append_log(
+                        mission_id,
+                        agent_id=None,
+                        log_type="status",
+                        message=(
+                            f"Research time budget reached ({int(self.mission_time_budget_seconds)}s). "
+                            "Finalizing current findings now."
+                        ),
+                        metadata={
+                            "elapsed_seconds": round(elapsed, 1),
+                            "validated_discoveries": len(valid_discoveries),
+                            "total_discoveries": len(discoveries),
+                            "completed_platforms": coverage["completedPlatforms"],
+                        },
+                    )
+                    self.stop_event.set()
+                    return "time_budget"
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                print(f"[orchestrator] auto completion monitor error: {error}")
+
+            await asyncio.sleep(self.auto_complete_poll_seconds)
 
     def _discovery_signature(self, discoveries: list[dict[str, Any]]) -> str:
         return "|".join(str(item.get("id", "")) for item in discoveries[:16])
@@ -2653,7 +2877,7 @@ class MasterBuildOrchestrator:
                         energy=100,
                         last_heartbeat=utc_now(),
                     )
-                await asyncio.sleep(20)
+                await asyncio.sleep(self.market_research_poll_seconds)
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -3579,7 +3803,7 @@ class MasterBuildOrchestrator:
                     except Exception:
                         pass
 
-                    await asyncio.sleep(2)  # Let page render
+                    await asyncio.sleep(self.showcase_render_wait_seconds)
 
                     # Take screenshot
                     # Save to per-agent path so the frontend can display per-agent previews
@@ -3631,7 +3855,7 @@ class MasterBuildOrchestrator:
                     )
 
                 # Brief delay for visual pacing
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(self.showcase_step_wait_seconds)
 
             await self.client.append_log(
                 mission_id, agent_id=None, log_type="status",

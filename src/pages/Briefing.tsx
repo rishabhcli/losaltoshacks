@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
-import { useOsdkObjects, marketInsight, marketTrend } from "@/lib/osdk-shims";
+import { useOsdkObjects, marketInsight, marketRecommendation, marketTrend } from "@/lib/osdk-shims";
 import { Play, Pause, Volume2, SkipBack, SkipForward, Clock, Sparkles, FileText, AlertTriangle } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { LoadingState } from "@/components/market/LoadingState";
@@ -9,12 +9,26 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { inferWithOpenAI } from "@/lib/openai";
 import { generateAudio } from "@/lib/elevenlabs";
+import { useMasterBuildDashboard } from "@/hooks/useMasterBuildDashboard";
+
+function takeSentences(text: string | undefined, maxSentences = 2): string {
+  if (!text) return "";
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean)
+    .slice(0, maxSentences)
+    .join(" ");
+}
 
 /** Generates a realistic executive briefing script from trend and insight data */
 function generateBriefingScript(
   trends: Array<{ title: string | undefined; trendScore: number | undefined; status: string | undefined; industry: string | undefined; growthRate: number | undefined; description: string | undefined }>,
   insights: Array<{ title: string | undefined; summary: string | undefined; insightType: string | undefined; industry: string | undefined }>,
+  recommendations: Array<{ title: string | undefined; description: string | undefined; estimatedRevenuePotential?: string | undefined; priority?: string | undefined; industry?: string | undefined }>,
+  reportPlan: { market_opportunity?: string; competitive_landscape?: string; revenue_models?: string; risk_analysis?: string } | null,
   industry: string,
+  missionPrompt: string,
 ): string {
   const topTrends = trends
     .filter(t => t.status === "growing" || t.status === "emerging")
@@ -23,11 +37,29 @@ function generateBriefingScript(
 
   const alerts = insights.filter(i => i.insightType === "alert").slice(0, 2);
   const opportunities = insights.filter(i => i.insightType === "opportunity").slice(0, 2);
+  const topRecommendations = recommendations
+    .slice()
+    .sort((a, b) => {
+      const priorityScore = (value: string | undefined) => value === "high" ? 3 : value === "medium" ? 2 : 1;
+      return priorityScore(b.priority) - priorityScore(a.priority);
+    })
+    .slice(0, 2);
 
   const date = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const industryLabel = industry !== "All" ? getIndustryLabel(industry) : "all tracked sectors";
 
   let script = `Good morning. Here's your MarketPulse intelligence briefing for ${industryLabel}, prepared on ${date}.\n\n`;
+  if (missionPrompt) {
+    script += `Today's research topic is ${missionPrompt}.\n\n`;
+  }
+
+  if (reportPlan?.market_opportunity) {
+    script += `From the latest report synthesis, the clearest market opportunity is ${takeSentences(reportPlan.market_opportunity, 2)}.\n\n`;
+  }
+
+  if (reportPlan?.competitive_landscape) {
+    script += `On competition, ${takeSentences(reportPlan.competitive_landscape, 2)}.\n\n`;
+  }
 
   if (topTrends.length > 0) {
     script += `We're currently tracking ${trends.length} active trends. Let me walk you through the top signals.\n\n`;
@@ -46,6 +78,17 @@ function generateBriefingScript(
     });
   }
 
+  if (topRecommendations.length > 0) {
+    script += `The report's highest-priority recommendations are as follows. `;
+    topRecommendations.forEach((recommendation) => {
+      script += `${recommendation.title}. ${takeSentences(recommendation.description, 2)}`;
+      if (recommendation.estimatedRevenuePotential) {
+        script += ` Estimated revenue potential is ${recommendation.estimatedRevenuePotential}.`;
+      }
+      script += `\n\n`;
+    });
+  }
+
   if (alerts.length > 0) {
     script += `Now for key alerts. `;
     alerts.forEach(a => {
@@ -57,7 +100,15 @@ function generateBriefingScript(
     script += `Looking at opportunities. `;
     opportunities.forEach(o => {
       script += `${o.title}: ${o.summary?.split(/\.\s/).slice(0, 2).join(". ")}.\n\n`;
-    });
+      });
+  }
+
+  if (reportPlan?.revenue_models) {
+    script += `On monetization, ${takeSentences(reportPlan.revenue_models, 2)}.\n\n`;
+  }
+
+  if (reportPlan?.risk_analysis) {
+    script += `The key execution risks from the current report are ${takeSentences(reportPlan.risk_analysis, 2)}.\n\n`;
   }
 
   script += `That's your briefing. MarketPulse will continue monitoring these signals and alert you to any significant changes. Have a productive day.`;
@@ -68,25 +119,35 @@ function generateBriefingScript(
 function buildOpenAIPrompt(
   trends: Array<{ title: string | undefined; trendScore: number | undefined; status: string | undefined; industry: string | undefined; growthRate: number | undefined; description: string | undefined }>,
   insights: Array<{ title: string | undefined; summary: string | undefined; insightType: string | undefined; industry: string | undefined }>,
+  recommendations: Array<{ title: string | undefined; description: string | undefined; estimatedRevenuePotential?: string | undefined; priority?: string | undefined; industry?: string | undefined }>,
+  reportPlan: { market_opportunity?: string; competitive_landscape?: string; revenue_models?: string; user_acquisition?: string; risk_analysis?: string } | null,
   industry: string,
+  missionPrompt: string,
 ): string {
   return [
     "Create a spoken executive market intelligence briefing for the following dataset.",
     "Return plain text only.",
     "Use 5 to 7 short paragraphs with no markdown or bullet points.",
     "Cover the strongest growth signals, the top risks, and the clearest opportunities.",
+    "Incorporate the report synthesis and the top recommendations directly into the transcript so a TTS reader can speak the full research result.",
     "End with a short operator-style takeaway.",
     "",
+    `Research topic: ${missionPrompt}`,
     `Industry focus: ${industry}`,
     "",
     `Trend data: ${JSON.stringify(trends.slice(0, 8))}`,
     "",
     `Insight data: ${JSON.stringify(insights.slice(0, 8))}`,
+    "",
+    `Recommendation data: ${JSON.stringify(recommendations.slice(0, 6))}`,
+    "",
+    `Report synthesis: ${JSON.stringify(reportPlan ?? {})}`,
   ].join("\n");
 }
 
 export function Briefing() {
   const { preferences } = usePreferences();
+  const { latestMission, businessPlans } = useMasterBuildDashboard();
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -111,10 +172,17 @@ export function Briefing() {
     pageSize: 50,
   });
 
+  const { data: recommendations, isLoading: recommendationsLoading } = useOsdkObjects(marketRecommendation, {
+    orderBy: { confidenceScore: "desc" },
+    pageSize: 50,
+  });
+
+  const latestPlan = businessPlans[0] ?? null;
+
   const filteredTrends = useMemo(() => {
     if (!trends) return [];
     if (preferences.industry === "All") return [...trends];
-    return trends.filter(t => t.industry === preferences.industry);
+    return trends.filter(t => t.industry === preferences.industry || t.industry === "All");
   }, [trends, preferences.industry]);
 
   const filteredInsights = useMemo(() => {
@@ -123,10 +191,23 @@ export function Briefing() {
     return insights.filter(i => i.industry === preferences.industry || i.industry === "All");
   }, [insights, preferences.industry]);
 
+  const filteredRecommendations = useMemo(() => {
+    if (!recommendations) return [];
+    if (preferences.industry === "All") return [...recommendations];
+    return recommendations.filter((recommendation) => recommendation.industry === preferences.industry || recommendation.industry === "All");
+  }, [recommendations, preferences.industry]);
+
   const draftScript = useMemo(() => {
-    if (!filteredTrends.length && !filteredInsights.length) return "";
-    return generateBriefingScript(filteredTrends, filteredInsights, preferences.industry);
-  }, [filteredTrends, filteredInsights, preferences.industry]);
+    if (!filteredTrends.length && !filteredInsights.length && !filteredRecommendations.length && !latestPlan) return "";
+    return generateBriefingScript(
+      filteredTrends,
+      filteredInsights,
+      filteredRecommendations,
+      latestPlan,
+      preferences.industry,
+      latestMission?.prompt ?? "",
+    );
+  }, [filteredInsights, filteredRecommendations, filteredTrends, latestMission?.prompt, latestPlan, preferences.industry]);
 
   const displayedScript = liveScript ?? draftScript;
 
@@ -154,7 +235,14 @@ export function Briefing() {
       const result = await inferWithOpenAI({
         systemPrompt:
           "You are MarketPulse, an executive market intelligence analyst. Produce concise, high-signal briefings for business operators.",
-        userPrompt: buildOpenAIPrompt(filteredTrends, filteredInsights, preferences.industry),
+        userPrompt: buildOpenAIPrompt(
+          filteredTrends,
+          filteredInsights,
+          filteredRecommendations,
+          latestPlan,
+          preferences.industry,
+          latestMission?.prompt ?? "",
+        ),
         temperature: 1,
       });
 
@@ -165,7 +253,7 @@ export function Briefing() {
     } finally {
       setIsGenerating(false);
     }
-  }, [filteredInsights, filteredTrends, preferences.industry, resetPlayback]);
+  }, [filteredInsights, filteredRecommendations, filteredTrends, latestMission?.prompt, latestPlan, preferences.industry, resetPlayback]);
 
   const useDraftBriefing = useCallback(() => {
     setLiveScript(null);
@@ -277,7 +365,7 @@ export function Briefing() {
     [],
   );
 
-  if ((trendsLoading || insightsLoading) && (!trends || !insights)) {
+  if ((trendsLoading || insightsLoading || recommendationsLoading) && (!trends || !insights || !recommendations)) {
     return <LoadingState label="Preparing briefing" />;
   }
 
@@ -295,10 +383,15 @@ export function Briefing() {
               <p className="text-slate-500 text-sm mt-1">
                 AI-generated executive summary for {getIndustryLabel(preferences.industry)}
               </p>
+              {latestMission?.prompt ? (
+                <p className="text-slate-400 text-sm mt-2">
+                  Reading the latest report for: <span className="font-medium text-slate-600">{latestMission.prompt}</span>
+                </p>
+              ) : null}
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button onClick={generateLiveBriefing} disabled={isGenerating || filteredTrends.length === 0}>
+              <Button onClick={generateLiveBriefing} disabled={isGenerating || displayedScript.length === 0}>
                 {isGenerating ? "Generating with OpenAI..." : "Generate with OpenAI"}
               </Button>
               {liveScript ? (
@@ -319,11 +412,12 @@ export function Briefing() {
         ) : null}
 
         <div className="text-xs text-slate-500">
-          Source: {liveScript ? `Live OpenAI response${liveModel ? ` (${liveModel})` : ""}` : "Local draft from trend data"}
+          Source: {liveScript ? `Live OpenAI response${liveModel ? ` (${liveModel})` : ""}` : "Local draft from trends, report synthesis, and recommendations"}
         </div>
 
         {/* Audio Player Card */}
         <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
           <audio
             ref={audioRef}
             src={audioUrl || undefined}

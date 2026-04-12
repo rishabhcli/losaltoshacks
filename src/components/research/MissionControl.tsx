@@ -6,11 +6,48 @@ interface Props {
   isRunning: boolean;
   isCreatingMission: boolean;
   missionPrompt: string;
-  missionStatus: string | null;
+  missionStatus: "queued" | "active" | "stopping" | "stopped" | "completed" | "error" | null;
   error: string | null;
   onCreateMission: (prompt: string) => void;
   onStopAll: () => void;
   onResetAll: () => void;
+}
+
+function getMissionStatusCopy(missionStatus: Props["missionStatus"]) {
+  switch (missionStatus) {
+    case "queued":
+      return {
+        tone: "amber" as const,
+        label: "Worker pickup in progress",
+      };
+    case "active":
+      return {
+        tone: "green" as const,
+        label: "Agents researching",
+      };
+    case "stopping":
+      return {
+        tone: "amber" as const,
+        label: "Stopping current mission",
+      };
+    case "completed":
+      return {
+        tone: "slate" as const,
+        label: "Mission completed",
+      };
+    case "stopped":
+      return {
+        tone: "slate" as const,
+        label: "Mission stopped",
+      };
+    case "error":
+      return {
+        tone: "red" as const,
+        label: "Mission error",
+      };
+    default:
+      return null;
+  }
 }
 
 export function MissionControl({
@@ -101,25 +138,47 @@ export function MissionControl({
     }
   };
 
+  const statusCopy = getMissionStatusCopy(missionStatus);
+  const statusToneClasses = statusCopy?.tone === "green"
+    ? {
+        dotOuter: "bg-green-400",
+        dotInner: "bg-green-500",
+        text: "text-green-700 dark:text-emerald-300",
+      }
+    : statusCopy?.tone === "amber"
+      ? {
+          dotOuter: "bg-amber-400",
+          dotInner: "bg-amber-500",
+          text: "text-amber-700 dark:text-amber-300",
+        }
+      : statusCopy?.tone === "red"
+        ? {
+            dotOuter: "bg-red-400",
+            dotInner: "bg-red-500",
+            text: "text-red-700 dark:text-red-300",
+          }
+        : {
+            dotOuter: "bg-slate-400",
+            dotInner: "bg-slate-500",
+            text: "text-slate-500 dark:text-slate-300",
+          };
+
   return (
     <div className="border-t border-slate-200/60 dark:border-slate-800/80 glass px-5 py-3.5 dark:bg-slate-950/70">
       {/* Status line */}
-      {(isRunning || error || (missionPrompt && missionStatus === "stopped")) && (
+      {(statusCopy || error) && (
         <div className="flex items-center gap-2 mb-2.5 px-1">
-          {isRunning && (
+          {statusCopy && missionPrompt && (
             <>
               <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                {(missionStatus === "queued" || missionStatus === "active" || missionStatus === "stopping") && (
+                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${statusToneClasses.dotOuter}`} />
+                )}
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${statusToneClasses.dotInner}`} />
               </span>
-              <span className="text-xs text-green-700 dark:text-emerald-300 font-medium">Agents researching</span>
+              <span className={`text-xs font-medium ${statusToneClasses.text}`}>{statusCopy.label}</span>
               <span className="text-xs text-slate-400 dark:text-slate-500 truncate">&mdash; {missionPrompt}</span>
             </>
-          )}
-          {!isRunning && missionPrompt && missionStatus === "stopped" && (
-            <span className="text-xs text-slate-500 dark:text-slate-300">
-              Mission completed &mdash; {missionPrompt}
-            </span>
           )}
           {error && <span className="text-xs text-red-600">{error}</span>}
         </div>
@@ -133,50 +192,47 @@ export function MissionControl({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Describe a market to research... e.g., AI-powered wellness apps for Gen Z"
+            placeholder={isRunning ? "Ask a new research question to replace the current mission" : "Describe a market to research... e.g., AI-powered wellness apps for Gen Z"}
             className="flex-1 bg-transparent text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 outline-none"
             disabled={isCreatingMission}
           />
         </div>
 
-        {!isRunning ? (
-          <>
-            {/* Dictate button — MiniMax TTS */}
-            <Button
-              type="button"
-              onClick={isPlaying ? handleStopDictate : handleDictate}
-              disabled={isDictating || (!input.trim() && !missionPrompt)}
-              title={isPlaying ? "Stop dictation" : "Dictate prompt using MiniMax TTS"}
-              className={`h-10 w-10 p-0 rounded-2xl shrink-0 transition-all ${
-                isPlaying
-                  ? "bg-purple-600 hover:bg-purple-700 text-white ring-2 ring-purple-400/50"
-                  : "bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 text-slate-500 dark:text-slate-300 border border-slate-200 dark:border-slate-700/80"
-              }`}
-            >
-              {isDictating ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : isPlaying ? (
-                <Volume2 className="w-4 h-4 animate-pulse" />
-              ) : (
-                <Mic className="w-4 h-4" />
-              )}
-            </Button>
+        {/* Dictate button — MiniMax TTS */}
+        <Button
+          type="button"
+          onClick={isPlaying ? handleStopDictate : handleDictate}
+          disabled={isDictating || (!input.trim() && !missionPrompt)}
+          title={isPlaying ? "Stop dictation" : "Dictate prompt using MiniMax TTS"}
+          className={`h-10 w-10 p-0 rounded-2xl shrink-0 transition-all ${
+            isPlaying
+              ? "bg-purple-600 hover:bg-purple-700 text-white ring-2 ring-purple-400/50"
+              : "bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 text-slate-500 dark:text-slate-300 border border-slate-200 dark:border-slate-700/80"
+          }`}
+        >
+          {isDictating ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : isPlaying ? (
+            <Volume2 className="w-4 h-4 animate-pulse" />
+          ) : (
+            <Mic className="w-4 h-4" />
+          )}
+        </Button>
 
-            {/* Launch Mission button */}
-            <Button
-              onClick={handleLaunch}
-              disabled={!input.trim() || isCreatingMission}
-              className="h-10 px-5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white gap-2 text-sm font-medium shrink-0"
-            >
-              {isCreatingMission ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Play className="w-4 h-4" />
-              )}
-              {isCreatingMission ? "Launching..." : "Launch Mission"}
-            </Button>
-          </>
-        ) : (
+        <Button
+          onClick={handleLaunch}
+          disabled={!input.trim() || isCreatingMission}
+          className="h-10 px-5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white gap-2 text-sm font-medium shrink-0"
+        >
+          {isCreatingMission ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Play className="w-4 h-4" />
+          )}
+          {isCreatingMission ? "Launching..." : isRunning ? "Start New Mission" : "Launch Mission"}
+        </Button>
+
+        {isRunning && (
           <Button
             onClick={onStopAll}
             variant="destructive"

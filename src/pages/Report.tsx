@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useOsdkObjects, marketTrend, marketInsight, marketRecommendation } from "@/lib/osdk-shims";
 import {
   FileText,
@@ -17,11 +17,14 @@ import { LoadingState } from "@/components/market/LoadingState";
 import { StatusBadge } from "@/components/market/StatusBadge";
 import { usePreferences } from "@/hooks/usePreferences";
 import { getIndustryLabel } from "@/lib/industry";
+import { useMasterBuildDashboard } from "@/hooks/useMasterBuildDashboard";
 
 export function Report() {
   const { preferences } = usePreferences();
+  const { latestMission, businessPlans } = useMasterBuildDashboard();
   const [selectedTrendIds, setSelectedTrendIds] = useState<Set<string>>(new Set());
   const [isGenerated, setIsGenerated] = useState(false);
+  const [manualSelectionMode, setManualSelectionMode] = useState(false);
 
   const { data: trends, isLoading: trendsLoading } = useOsdkObjects(marketTrend, {
     orderBy: { trendScore: "desc" },
@@ -37,14 +40,41 @@ export function Report() {
     orderBy: { confidenceScore: "desc" },
     pageSize: 50,
   });
+  const latestPlan = businessPlans[0] ?? null;
+  const latestMissionId = latestMission?.id ?? null;
+  const missionRunning = latestMission?.status === "queued" || latestMission?.status === "active";
 
   const filteredTrends = useMemo(() => {
     if (!trends) return [];
     if (preferences.industry === "All") return [...trends];
-    return trends.filter(t => t.industry === preferences.industry);
+    return trends.filter(t => t.industry === preferences.industry || t.industry === "All");
   }, [trends, preferences.industry]);
 
+  const filteredTrendIds = useMemo(
+    () => filteredTrends.map((trend) => trend.trendId ?? "").filter(Boolean),
+    [filteredTrends],
+  );
+  const filteredTrendIdsKey = filteredTrendIds.join("|");
+
+  useEffect(() => {
+    setManualSelectionMode(false);
+  }, [latestMissionId]);
+
+  useEffect(() => {
+    if (!latestMissionId) {
+      setSelectedTrendIds(new Set());
+      setIsGenerated(false);
+      return;
+    }
+
+    if (manualSelectionMode) return;
+
+    setSelectedTrendIds(new Set(filteredTrendIds));
+    setIsGenerated(filteredTrendIds.length > 0);
+  }, [latestMissionId, filteredTrendIds, filteredTrendIdsKey, manualSelectionMode]);
+
   const toggleTrend = (trendId: string) => {
+    setManualSelectionMode(true);
     setSelectedTrendIds(prev => {
       const next = new Set(prev);
       if (next.has(trendId)) {
@@ -58,11 +88,13 @@ export function Report() {
   };
 
   const selectAll = () => {
+    setManualSelectionMode(true);
     setSelectedTrendIds(new Set(filteredTrends.map(t => t.trendId ?? "")));
     setIsGenerated(false);
   };
 
   const clearAll = () => {
+    setManualSelectionMode(true);
     setSelectedTrendIds(new Set());
     setIsGenerated(false);
   };
@@ -72,9 +104,14 @@ export function Report() {
     return filteredTrends.filter(t => selectedTrendIds.has(t.trendId ?? ""));
   }, [filteredTrends, selectedTrendIds]);
 
+  const highlightedTrendTitles = useMemo(
+    () => selectedTrends.map((trend) => trend.title ?? "").filter(Boolean).slice(0, 3),
+    [selectedTrends],
+  );
+
   const relatedInsights = useMemo(() => {
     if (!insights) return [];
-    return insights.filter(
+    const linkedInsights = insights.filter(
       i =>
         i.insightType !== "kpi" &&
         (i.relatedTrendIds
@@ -82,6 +119,8 @@ export function Report() {
           .some(id => selectedTrendIds.has(id)) ??
           false),
     );
+    if (linkedInsights.length > 0) return linkedInsights;
+    return insights.filter((insight) => insight.insightType !== "kpi").slice(0, 5);
   }, [insights, selectedTrendIds]);
 
   const relatedRecs = useMemo(() => {
@@ -90,6 +129,7 @@ export function Report() {
   }, [recommendations, selectedTrendIds]);
 
   const handleGenerate = () => {
+    setManualSelectionMode(true);
     setIsGenerated(true);
   };
 
@@ -109,10 +149,12 @@ export function Report() {
           <div>
             <div className="flex items-center gap-3">
               <FileText className="w-6 h-6 text-blue-600" />
-              <h1 className="text-4xl font-semibold text-slate-900">Report Builder</h1>
+              <h1 className="text-4xl font-semibold text-slate-900">Research Report</h1>
             </div>
             <p className="text-slate-500 text-sm mt-1">
-              Select trends to include in your intelligence report
+              {latestMission
+                ? "Latest research results are posted here automatically"
+                : "Launch a research mission to publish results here"}
             </p>
           </div>
           {isGenerated && (
@@ -207,6 +249,17 @@ export function Report() {
           </div>
         )}
 
+        {latestMission && !isGenerated && filteredTrends.length === 0 && !manualSelectionMode && (
+          <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+            <h2 className="font-semibold text-sm text-slate-900 mb-2">Waiting for research results</h2>
+            <p className="text-sm text-slate-500 leading-relaxed">
+              {missionRunning
+                ? `Agents are still researching "${latestMission.prompt}". This page will publish the report automatically as trends and recommendations arrive.`
+                : `No trends were generated yet for "${latestMission.prompt}".`}
+            </p>
+          </div>
+        )}
+
         {/* Generated Report */}
         {isGenerated && (
           <div className="space-y-6 print:space-y-4">
@@ -222,6 +275,11 @@ export function Report() {
               <p className="text-slate-500 text-sm">
                 {getIndustryLabel(preferences.industry)} &middot; {selectedTrends.length} trends analyzed
               </p>
+              {latestMission?.prompt && (
+                <p className="text-sm text-slate-600 mt-2">
+                  Research topic: <span className="font-medium text-slate-800">{latestMission.prompt}</span>
+                </p>
+              )}
               <div className="flex items-center gap-1 mt-3 text-xs text-slate-400">
                 <Calendar className="w-3 h-3" />
                 <span>
@@ -229,6 +287,27 @@ export function Report() {
                 </span>
               </div>
             </div>
+
+            {/* Research Synthesis */}
+            {latestPlan && (
+              <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+                <h3 className="font-semibold text-lg text-slate-900 mb-4 flex items-center gap-2">
+                  <BarChart3 className="w-5 h-5 text-blue-600" />
+                  Research Synthesis
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <ReportSection title="Market Opportunity" body={latestPlan.market_opportunity} />
+                  <ReportSection title="Competitive Landscape" body={latestPlan.competitive_landscape} />
+                  <ReportSection title="Revenue Models" body={latestPlan.revenue_models} />
+                  <ReportSection title="User Acquisition" body={latestPlan.user_acquisition} />
+                </div>
+                {latestPlan.risk_analysis && (
+                  <div className="mt-4">
+                    <ReportSection title="Risk Analysis" body={latestPlan.risk_analysis} />
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Executive Summary */}
             <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
@@ -239,6 +318,8 @@ export function Report() {
               <p className="text-sm text-slate-600 leading-relaxed">
                 This report covers {selectedTrends.length} market trend{selectedTrends.length !== 1 ? "s" : ""} across{" "}
                 {getIndustryLabel(preferences.industry)}.{" "}
+                {highlightedTrendTitles.length > 0 &&
+                  `The clearest concrete opportunities right now are ${formatHumanList(highlightedTrendTitles)}. `}
                 {selectedTrends.filter(t => t.status === "growing").length > 0 &&
                   `${selectedTrends.filter(t => t.status === "growing").length} trend${selectedTrends.filter(t => t.status === "growing").length !== 1 ? "s are" : " is"} in active growth. `}
                 {selectedTrends.filter(t => t.status === "emerging").length > 0 &&
@@ -381,7 +462,10 @@ export function Report() {
             {/* Back to selection */}
             <div className="flex justify-center pt-2 pb-8">
               <button
-                onClick={() => setIsGenerated(false)}
+                onClick={() => {
+                  setManualSelectionMode(true);
+                  setIsGenerated(false);
+                }}
                 className="text-sm text-blue-600 hover:text-blue-700 font-medium cursor-pointer"
               >
                 ← Modify trend selection
@@ -398,4 +482,22 @@ function formatNumber(num: number): string {
   if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + "M";
   if (num >= 1_000) return (num / 1_000).toFixed(1) + "K";
   return num.toFixed(0);
+}
+
+function formatHumanList(items: string[]): string {
+  if (items.length === 0) return "";
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items[0]}, ${items[1]}, and ${items[2]}`;
+}
+
+function ReportSection({ title, body }: { title: string; body: string | undefined }) {
+  if (!body) return null;
+
+  return (
+    <div className="rounded-lg border border-slate-100 bg-white/60 px-4 py-3">
+      <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">{title}</h4>
+      <p className="text-sm text-slate-600 leading-relaxed">{body}</p>
+    </div>
+  );
 }

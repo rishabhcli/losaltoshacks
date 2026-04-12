@@ -79,23 +79,40 @@ const RESETTABLE_TABLES = [
   "logs", "discoveries", "signals", "control_commands", "builder_outputs", "agent_memory",
 ];
 
-const MISSION_COLUMNS = "id,prompt,status,live_url_1,live_url_2,live_url_3,live_url_4,live_url_5,final_options";
+const MISSION_COLUMNS = "id,prompt,status,live_url_1,live_url_2,live_url_3,live_url_4,live_url_5,final_options,created_at,stopped_at";
 const AGENT_COLUMNS = "id,agent_id,status,current_url,profile_path,energy";
-const DISCOVERY_COLUMNS = "id,source_url,thumbnail_url,agent_id,keywords,industry,likes,views,comments,created_at";
+const DISCOVERY_COLUMNS = "id,source_url,thumbnail_url,agent_id,title,summary,keywords,industry,likes,views,comments,created_at";
 const LOG_COLUMNS = "id,agent_id,message,type,metadata,created_at";
 const SIGNAL_COLUMNS = "id,from_agent,to_agent,message,signal_type,created_at";
 const THOUGHT_COLUMNS = "id,agent_id,thought_type,prompt_summary,response_summary,action_taken,model,tokens_used,duration_ms,created_at";
 const MEMORY_COLUMNS = "id,filename,content,version,updated_by,updated_at";
 const BUSINESS_PLAN_COLUMNS = "id,version,market_opportunity,competitive_landscape,revenue_models,user_acquisition,risk_analysis,confidence_score,discovery_count,is_final,raw_plan,created_at";
 const DASHBOARD_CACHE_TTL_MS = 1500;
+const USER_MISSION_LOOKBACK_LIMIT = 100;
 
 let dashboardSnapshotCache = null;
 let dashboardSnapshotFetchedAt = 0;
 let dashboardSnapshotInFlight = null;
 
+const BACKGROUND_MISSION_PROMPT_PREFIX = "Background market research:";
+
 function invalidateDashboardSnapshot() {
   dashboardSnapshotCache = null;
   dashboardSnapshotFetchedAt = 0;
+}
+
+function isBackgroundMissionPrompt(prompt) {
+  return typeof prompt === "string" && prompt.startsWith(BACKGROUND_MISSION_PROMPT_PREFIX);
+}
+
+function selectLatestUserFacingMission(rows) {
+  if (!Array.isArray(rows)) return null;
+  return rows.find((row) => !isBackgroundMissionPrompt(row?.prompt)) ?? null;
+}
+
+function filterUserFacingMissions(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.filter((row) => !isBackgroundMissionPrompt(row?.prompt));
 }
 
 async function resolveMissionId(insforge, missionId) {
@@ -103,13 +120,13 @@ async function resolveMissionId(insforge, missionId) {
 
   const result = await insforge.database
     .from("missions")
-    .select("id")
+    .select("id,prompt")
     .order("created_at", { ascending: false })
-    .limit(1);
+    .limit(USER_MISSION_LOOKBACK_LIMIT);
 
   if (result.error) throw result.error;
 
-  const row = result.data?.[0];
+  const row = selectLatestUserFacingMission(result.data ?? []) ?? result.data?.[0];
   return typeof row?.id === "string" && row.id.trim() ? row.id : null;
 }
 
@@ -126,6 +143,61 @@ async function handleMissionCreate(request, response) {
   }
 
   const insforge = createServerInsforgeClient();
+  const priorMissionResult = await insforge.database
+    .from("missions")
+    .select("id,status")
+    .order("created_at", { ascending: false })
+    .limit(10);
+
+  if (priorMissionResult.error) throw priorMissionResult.error;
+
+  const supersededMissionIds = (priorMissionResult.data ?? [])
+    .filter((mission) => ["queued", "active", "stopping"].includes(String(mission.status ?? "")))
+    .map((mission) => String(mission.id ?? ""))
+    .filter(Boolean);
+
+  if (supersededMissionIds.length > 0) {
+    for (const priorMissionId of supersededMissionIds) {
+      const stopCommand = await insforge.database.from("control_commands").insert([{
+        mission_id: priorMissionId,
+        command: "stop_all",
+        payload: { source: "superseded_by_new_mission", replacementPrompt: prompt },
+        status: "pending",
+      }]);
+      if (stopCommand.error) throw stopCommand.error;
+
+      const missionStopping = await insforge.database
+        .from("missions")
+        .update({ status: "stopping" })
+        .eq("id", priorMissionId);
+      if (missionStopping.error) throw missionStopping.error;
+
+      const agentStopping = await insforge.database
+        .from("agents")
+        .update({ status: "stopped", energy: 0 })
+        .eq("mission_id", priorMissionId);
+      if (agentStopping.error) throw agentStopping.error;
+
+      const latestPlan = await insforge.database
+        .from("business_plans")
+        .select("id")
+        .eq("mission_id", priorMissionId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (latestPlan.error) throw latestPlan.error;
+      if (latestPlan.data?.id) {
+        const markFinal = await insforge.database
+          .from("business_plans")
+          .update({ is_final: true })
+          .eq("id", latestPlan.data.id);
+        if (markFinal.error) throw markFinal.error;
+      }
+    }
+  }
+
+  clearBrowserAgentPreviewFrames([1, 2, 3, 4, 5]);
+
   const missionId = crypto.randomUUID();
   const timestamp = new Date().toISOString();
 
@@ -168,8 +240,11 @@ async function handleMissionCreate(request, response) {
       mission_id: missionId,
       agent_id: null,
       type: "status",
-      message: "Mission queued and awaiting worker pickup.",
-      metadata: { prompt },
+      message:
+        supersededMissionIds.length > 0
+          ? "New request accepted. Stopping the previous mission and switching the worker now."
+          : "Mission created. Worker pickup should begin shortly.",
+      metadata: { prompt, supersededMissionIds },
       created_at: timestamp,
     }]);
 
@@ -184,7 +259,7 @@ async function handleMissionCreate(request, response) {
 
   writeJson(response, 200, {
     ok: true,
-    mission: { mission_id: missionId, prompt, status: "queued" },
+    mission: { mission_id: missionId, prompt, status: "queued", supersededMissionIds },
   });
 }
 
@@ -227,13 +302,6 @@ async function handleMissionStop(request, response) {
 
   // Immediate UX: blank the four browser preview tiles; Python runtime will also wind down.
   clearBrowserAgentPreviewFrames([1, 2, 3, 4]);
-
-  const stoppedAt = new Date().toISOString();
-  const missionStopped = await insforge.database
-    .from("missions")
-    .update({ status: "stopped", stopped_at: stoppedAt })
-    .eq("id", targetId);
-  if (missionStopped.error) throw missionStopped.error;
 
   // Persist latest synthesized plan into history as the saved checkpoint for this stop.
   const latestPlan = await insforge.database
@@ -335,23 +403,26 @@ async function handleMissionReset(request, response) {
 async function fetchDashboardSnapshot() {
   const insforge = createServerInsforgeClient();
 
-  const missionResult = await insforge.database
+  const missionRowsResult = await insforge.database
     .from("missions")
     .select(MISSION_COLUMNS)
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(USER_MISSION_LOOKBACK_LIMIT);
 
-  if (missionResult.error) throw missionResult.error;
+  if (missionRowsResult.error) throw missionRowsResult.error;
+
+  const missionRows = missionRowsResult.data ?? [];
+  const mission = selectLatestUserFacingMission(missionRows);
 
   const missionId =
-    missionResult.data && typeof missionResult.data === "object" && "id" in missionResult.data
-      ? String(missionResult.data.id ?? "")
+    mission && typeof mission === "object" && "id" in mission
+      ? String(mission.id ?? "")
       : "";
 
   if (!missionId) {
     return {
       mission: null,
+      recentMissions: [],
       agents: [],
       discoveries: [],
       logs: [],
@@ -377,7 +448,8 @@ async function fetchDashboardSnapshot() {
   if (firstError) throw firstError;
 
   return {
-    mission: missionResult.data ?? null,
+    mission,
+    recentMissions: filterUserFacingMissions(missionRows).slice(0, 12),
     agents: agentResult.data ?? [],
     discoveries: discoveryResult.data ?? [],
     logs: logResult.data ?? [],
@@ -446,6 +518,214 @@ const STOP_WORDS = new Set([
   "2024","2025","2026","2023","2022",
 ]);
 
+const SOURCE_NOISE_PHRASES = new Set([
+  "vogue business",
+  "business of fashion",
+  "business insider",
+  "wall street journal",
+  "new york times",
+  "financial times",
+  "washington post",
+  "harvard business review",
+  "fast company",
+  "associated press",
+]);
+
+const SOURCE_NOISE_WORDS = new Set([
+  "vogue","forbes","fortune","wired","techcrunch","reuters","bloomberg","guardian",
+  "journal","times","insider","newsletter","magazine","editorial","substack","axios",
+  "hbr","businessoffashion",
+]);
+
+const BROAD_TREND_TERMS = new Set([
+  "fashion","clothing","apparel","beauty","skincare","wellness","fitness","food","beverage",
+  "drink","travel","hospitality","finance","fintech","health","healthcare","education",
+  "entertainment","media","gaming","creator","economy","software","saas","technology",
+  "tech","product","products","service","services","tool","tools","platform","platforms",
+  "brand","brands","market","markets","industry","industries","consumer","consumers",
+  "content","audience","demand","growth","opportunity","opportunities","trend","trends",
+  "viral","shopping","retail","commerce","startup","business","companies","company",
+]);
+
+const ACTIONABLE_SIGNAL_TERMS = new Set([
+  "pants","jeans","dress","dresses","skirt","skirts","shorts","hoodie","hoodies","jacket",
+  "jackets","coat","coats","sneaker","sneakers","loafer","loafers","heel","heels","flat",
+  "flats","boot","boots","bag","bags","tote","wallet","watch","glasses","serum","cleanser",
+  "mask","moisturizer","lip","lipstick","fragrance","perfume","supplement","supplements",
+  "powder","snack","snacks","soda","coffee","tea","protein","meal","meals","retreat",
+  "retreats","package","packages","trip","trips","tour","tours","membership","memberships",
+  "subscription","subscriptions","concierge","clinic","therapy","coaching","course","courses",
+  "tutoring","dashboard","assistant","copilot","generator","agent","agents","workflow",
+  "automation","integrations","integration","api","apis","plugin","plugins","marketplace",
+  "community","communities","network","service","services","platform","app","apps","feature",
+  "features","program","programs","bundle","bundles","capsule","collection","collections",
+]);
+
+const DISPLAY_WORD_OVERRIDES = new Map([
+  ["ai", "AI"],
+  ["api", "API"],
+  ["saas", "SaaS"],
+  ["b2b", "B2B"],
+  ["d2c", "D2C"],
+  ["ux", "UX"],
+  ["ui", "UI"],
+  ["crm", "CRM"],
+]);
+
+function cleanPhrase(value) {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, "")
+    .trim();
+}
+
+function tokenizePhrase(value) {
+  return cleanPhrase(value)
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function toDisplayPhrase(value) {
+  return cleanPhrase(value)
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => {
+      const lower = word.toLowerCase();
+      if (DISPLAY_WORD_OVERRIDES.has(lower)) return DISPLAY_WORD_OVERRIDES.get(lower);
+      if (/^\d+[a-z]+$/i.test(word)) return word.toUpperCase();
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    })
+    .join(" ");
+}
+
+function rankPhraseCandidates(values, missionPrompt = "") {
+  const missionLower = cleanPhrase(missionPrompt).toLowerCase();
+  const ranked = [];
+
+  for (const rawValue of values) {
+    const phrase = cleanPhrase(rawValue);
+    const lower = phrase.toLowerCase();
+    if (!phrase || looksLikeSourceNoise(phrase)) continue;
+
+    const tokens = tokenizePhrase(phrase);
+    if (!tokens.length) continue;
+    if (tokens.every((token) => STOP_WORDS.has(token) || SOURCE_NOISE_WORDS.has(token))) continue;
+
+    let score = 0;
+    if (tokens.length >= 2) score += 4;
+    if (tokens.length >= 3 && tokens.length <= 4) score += 1;
+    if (tokens.length > 5) score -= 2;
+    if (tokens.some((token) => ACTIONABLE_SIGNAL_TERMS.has(token))) score += 4;
+    if (tokens.every((token) => BROAD_TREND_TERMS.has(token) || STOP_WORDS.has(token))) score -= 7;
+    if (tokens.length === 1 && BROAD_TREND_TERMS.has(tokens[0])) score -= 5;
+    if (/(trend|trending|viral|market|industry|business|consumer|audience|growth|opportunity)/.test(lower)) score -= 3;
+    if (missionLower && lower === missionLower) score -= 4;
+
+    score += tokens.filter((token) => !BROAD_TREND_TERMS.has(token) && !STOP_WORDS.has(token)).length;
+
+    ranked.push({ phrase, lower, score });
+  }
+
+  ranked.sort((a, b) => b.score - a.score || b.phrase.length - a.phrase.length);
+
+  const deduped = [];
+  for (const candidate of ranked) {
+    if (deduped.some((existing) => existing.lower === candidate.lower || existing.lower.includes(candidate.lower) || candidate.lower.includes(existing.lower))) {
+      continue;
+    }
+    deduped.push(candidate);
+  }
+
+  return deduped;
+}
+
+function pickPrimaryTrendSignal(keyword, data, missionPrompt = "") {
+  const ranked = rankPhraseCandidates([
+    keyword,
+    ...data.keywordPhrases,
+    ...data.allKeywords,
+  ], missionPrompt);
+  return ranked[0]?.phrase || cleanPhrase(keyword);
+}
+
+function looksLikeSourceNoise(value) {
+  const phrase = cleanPhrase(value).toLowerCase();
+  if (!phrase) return false;
+  if (SOURCE_NOISE_PHRASES.has(phrase)) return true;
+  const words = phrase.split(/\s+/).filter(Boolean);
+  return words.length > 0 && words.length <= 3 && words.every((word) => SOURCE_NOISE_WORDS.has(word));
+}
+
+function stripSourceSuffix(title) {
+  const raw = String(title ?? "").trim();
+  if (!raw) return "";
+
+  const parts = raw.split(/\s(?:\||[-–—]|•|·)\s/).map((part) => part.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    const tail = parts[parts.length - 1];
+    if (looksLikeSourceNoise(tail) || tail.split(/\s+/).length <= 3) {
+      return parts.slice(0, -1).join(" ").trim();
+    }
+  }
+
+  const colonIndex = raw.indexOf(":");
+  if (colonIndex > 0) {
+    const prefix = raw.slice(0, colonIndex).trim();
+    if (looksLikeSourceNoise(prefix)) {
+      return raw.slice(colonIndex + 1).trim();
+    }
+  }
+
+  return raw;
+}
+
+function formatHumanList(items) {
+  const values = items.filter(Boolean);
+  if (values.length === 0) return "";
+  if (values.length === 1) return values[0];
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values[0]}, ${values[1]}, and ${values[2]}`;
+}
+
+function pickSpecificSignals(keyword, data, missionPrompt = "") {
+  const keywordLower = keyword.toLowerCase();
+  const ranked = rankPhraseCandidates([
+    ...data.keywordPhrases,
+    ...[...data.allKeywords].filter((item) => item !== keywordLower),
+  ], missionPrompt)
+    .filter((candidate) => candidate.lower !== keywordLower);
+
+  return ranked.slice(0, 4).map((candidate) => candidate.phrase);
+}
+
+function pickEvidenceSentence(keyword, data, specificSignals) {
+  const keywordLower = keyword.toLowerCase();
+  const signalNeedles = specificSignals.map((signal) => signal.toLowerCase());
+  for (const rawSummary of data.summaryHints ?? []) {
+    const summary = String(rawSummary ?? "").replace(/\s+/g, " ").trim();
+    if (!summary) continue;
+    const sentences = summary.split(/(?<=[.!?])\s+/).map((sentence) => sentence.trim()).filter(Boolean);
+    for (const sentence of sentences) {
+      const lower = sentence.toLowerCase();
+      if (sentence.length < 40) continue;
+      if (lower.includes(keywordLower) || signalNeedles.some((needle) => lower.includes(needle))) {
+        return sentence;
+      }
+    }
+  }
+  return "";
+}
+
+function inferTrendLens(keyword, missionPrompt, specificSignals, evidenceSentence) {
+  const context = `${keyword} ${specificSignals.join(" ")} ${evidenceSentence} ${missionPrompt}`.toLowerCase();
+  if (/(software|saas|automation|ai|app|platform|tool|copilot|workflow|developer|code|api)/.test(context)) return "tools";
+  if (/(hotel|travel|trip|stay|booking|destination|tour|retreat|experience|package)/.test(context)) return "services";
+  if (/(payment|bank|invest|insurance|loan|merchant|treasury|finance|fintech)/.test(context)) return "services";
+  if (/(fashion|wear|style|dress|bag|shoe|apparel|accessor|beauty|skincare|cosmetic|serum|beverage|drink|food|snack|coffee|supplement|wearable|device)/.test(context)) return "products";
+  return "areas";
+}
+
 function synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId) {
   if (!discoveries.length) return [];
 
@@ -455,8 +735,8 @@ function synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId) 
     const rawKeywords = disc.keywords ?? "";
     const keywords = rawKeywords
       .split(",")
-      .map((k) => k.trim().toLowerCase())
-      .filter((k) => k.length > 3 && !STOP_WORDS.has(k));
+      .map((k) => cleanPhrase(k).toLowerCase())
+      .filter((k) => k.length > 3 && !STOP_WORDS.has(k) && !looksLikeSourceNoise(k));
 
     const engagement =
       (disc.likes ?? 0) +
@@ -469,7 +749,16 @@ function synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId) 
 
     for (const kw of keywords.slice(0, 4)) {
       if (!keywordGroups.has(kw)) {
-        keywordGroups.set(kw, { count: 0, engagement: 0, platforms: new Set(), sources: [], industries: {}, allKeywords: new Set() });
+        keywordGroups.set(kw, {
+          count: 0,
+          engagement: 0,
+          platforms: new Set(),
+          sources: [],
+          industries: {},
+          allKeywords: new Set(),
+          keywordPhrases: new Set(),
+          summaryHints: [],
+        });
       }
       const g = keywordGroups.get(kw);
       g.count++;
@@ -479,12 +768,34 @@ function synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId) 
       g.industries[discIndustry] = (g.industries[discIndustry] ?? 0) + 1;
       // Collect all keywords for description generation
       keywords.forEach(k => g.allKeywords.add(k));
+      rawKeywords
+        .split(",")
+        .map((phrase) => cleanPhrase(phrase))
+        .filter(Boolean)
+        .forEach((phrase) => {
+          if (!looksLikeSourceNoise(phrase)) g.keywordPhrases.add(phrase);
+        });
+      const titleHints = extractKeywordsFromResult(disc.title ?? "", disc.summary ?? "");
+      titleHints
+        .split(",")
+        .map((phrase) => cleanPhrase(phrase))
+        .filter(Boolean)
+        .forEach((phrase) => {
+          if (!looksLikeSourceNoise(phrase)) g.keywordPhrases.add(phrase);
+        });
+      if (disc.summary) {
+        const summary = String(disc.summary).trim();
+        if (summary && !g.summaryHints.includes(summary) && g.summaryHints.length < 10) {
+          g.summaryHints.push(summary);
+        }
+      }
       // Collect up to 8 clickable sources per keyword group
       if (disc.source_url && g.sources.length < 8) {
         g.sources.push({
           url: disc.source_url,
           thumbnail: disc.thumbnail_url || null,
           platform,
+          title: stripSourceSuffix(disc.title ?? ""),
           keywords: rawKeywords.split(",").map((k) => k.trim()).filter(Boolean).slice(0, 3).join(", "),
           likes: disc.likes ?? 0,
           views: disc.views ?? 0,
@@ -511,18 +822,28 @@ function synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId) 
     if (kept.length >= 15) break;
   }
 
-  return kept.map(([keyword, data], i) => {
+  const trendCandidates = kept.map(([keyword, data], i) => {
     const score = Math.min(99, 40 + data.count * 4 + Math.floor(data.engagement / 50));
     const mentionCount = data.count * 5000 + data.engagement * 100;
     const growthRate = parseFloat(Math.min(99, 12 + (data.count / discoveries.length) * 80).toFixed(1));
-    const title = keyword.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    const primarySignal = pickPrimaryTrendSignal(keyword, data, missionPrompt);
+    const title = toDisplayPhrase(primarySignal || keyword);
+    const specificSignals = pickSpecificSignals(keyword, data, missionPrompt)
+      .filter((signal) => signal.toLowerCase() !== cleanPhrase(primarySignal).toLowerCase())
+      .slice(0, 3);
 
     // Pick the most-voted industry for this keyword group; fall back to "All"
     const dominantIndustry = Object.entries(data.industries ?? {})
       .sort((a, b) => b[1] - a[1])[0]?.[0] ?? "All";
 
     // Generate humanized description from keyword context
-    const description = generateTrendDescription(keyword, data, missionPrompt);
+    const description = generateTrendDescription(primarySignal || keyword, keyword, data, missionPrompt, specificSignals);
+    const topKeywords = [primarySignal, ...specificSignals, keyword]
+      .map(cleanPhrase)
+      .filter(Boolean)
+      .filter((value, index, list) => list.findIndex((candidate) => candidate.toLowerCase() === value.toLowerCase()) === index)
+      .slice(0, 5)
+      .join(", ");
 
     return {
       $primaryKey: `live-${missionId}-${i}`,
@@ -536,59 +857,65 @@ function synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId) 
       mentionCount,
       growthRate,
       sentimentScore: 0.65,
-      topKeywords: keyword,
+      topKeywords,
+      actionableSignal: cleanPhrase(primarySignal || keyword),
       detectedAt: new Date().toISOString(),
       sources: [...data.sources],
     };
   });
+
+  const dedupedTrends = [];
+  const seenTitles = new Set();
+  for (const trend of trendCandidates) {
+    const key = cleanPhrase(trend.title).toLowerCase();
+    if (!key || seenTitles.has(key)) continue;
+    seenTitles.add(key);
+    dedupedTrends.push(trend);
+  }
+
+  return dedupedTrends;
 }
 
 // Generate humanized trend descriptions from keyword patterns
-function generateTrendDescription(keyword, data, missionPrompt) {
+function generateTrendDescription(primarySignal, keyword, data, missionPrompt, preselectedSignals = []) {
   const platforms = [...data.platforms];
-  const platformStr = platforms.slice(0, 2).join(" and ");
-  const relatedTerms = [...data.allKeywords].filter(k => k !== keyword).slice(0, 3);
-  
-  // Category-specific description templates based on keyword patterns
-  const kw = keyword.toLowerCase();
-  
-  // Product/Tech patterns
-  if (kw.includes("ai") || kw.includes("app") || kw.includes("software") || kw.includes("tool")) {
-    return `New ${keyword} solutions are gaining traction on ${platformStr}. ${relatedTerms.length > 0 ? `Related interest in ${relatedTerms.join(", ")} shows growing demand for smarter automation.` : "Teams are actively adopting these to streamline workflows."}`;
+  const platformStr = formatHumanList(platforms.slice(0, 2)) || "current sources";
+  const specificSignals = preselectedSignals.length > 0 ? preselectedSignals : pickSpecificSignals(keyword, data, missionPrompt);
+  const evidenceSentence = pickEvidenceSentence(primarySignal || keyword, data, [primarySignal, ...specificSignals].filter(Boolean));
+  const relatedTerms = [...data.allKeywords]
+    .filter((item) => item !== keyword && item !== primarySignal && !looksLikeSourceNoise(item))
+    .slice(0, 3);
+  const lens = inferTrendLens(primarySignal || keyword, missionPrompt, specificSignals, evidenceSentence);
+  const primaryLower = cleanPhrase(primarySignal).toLowerCase();
+  const keywordLower = cleanPhrase(keyword).toLowerCase();
+
+  const lensSentence =
+    lens === "tools"
+      ? "This points to a specific tool or workflow bet rather than generic interest in software."
+      : lens === "services"
+        ? "This points to a specific service offer or delivery model rather than broad category buzz."
+        : lens === "products"
+          ? "This points to a specific product line or item to sell rather than broad category chatter."
+          : "This points to a concrete sub-theme rather than a vague market narrative.";
+
+  if (primaryLower && primaryLower !== keywordLower) {
+    const supporting = [primarySignal, ...specificSignals].filter(Boolean);
+    return `${toDisplayPhrase(primarySignal)} is the clearest concrete expression of the broader ${keyword} trend across ${platformStr}. Demand is clustering around ${formatHumanList(supporting)}. ${evidenceSentence || lensSentence}`;
   }
-  
-  // Fashion/Apparel patterns
-  if (kw.includes("wear") || kw.includes("fashion") || kw.includes("style") || kw.includes("clothing") || kw.includes("dress")) {
-    return `${keyword} is catching on across ${platformStr}. ${relatedTerms.length > 0 ? `Often mentioned alongside ${relatedTerms.join(" and ")}.` : "Shoppers are actively seeking these items."}`;
+
+  if (specificSignals.length > 0) {
+    return `${toDisplayPhrase(primarySignal || keyword)} is gaining traction across ${platformStr}, with momentum concentrated in ${formatHumanList([primarySignal, ...specificSignals].filter(Boolean))}. ${evidenceSentence || lensSentence}`;
   }
-  
-  // Food/Beverage patterns
-  if (kw.includes("food") || kw.includes("drink") || kw.includes("coffee") || kw.includes("tea") || kw.includes("wine")) {
-    return `${keyword} is trending on ${platformStr} as consumers explore new flavors. ${relatedTerms.length > 0 ? `Frequently paired with discussions of ${relatedTerms.join(", ")}.` : "Early adopters are driving word-of-mouth."}`;
+
+  if (evidenceSentence) {
+    return `${toDisplayPhrase(primarySignal || keyword)} is gaining traction across ${platformStr}. ${evidenceSentence}`;
   }
-  
-  // Travel patterns
-  if (kw.includes("travel") || kw.includes("hotel") || kw.includes("trip") || kw.includes("vacation") || kw.includes("stay")) {
-    return `${keyword} is generating buzz on ${platformStr}. ${relatedTerms.length > 0 ? `Travelers are also researching ${relatedTerms.join(" and ")}.` : "Bookings and searches are up significantly."}`;
+
+  if (relatedTerms.length > 0) {
+    return `${toDisplayPhrase(primarySignal || keyword)} is gaining traction across ${platformStr}, especially around ${formatHumanList(relatedTerms)}. ${lensSentence}`;
   }
-  
-  // Wellness/Fitness patterns
-  if (kw.includes("health") || kw.includes("fitness") || kw.includes("wellness") || kw.includes("gym") || kw.includes("yoga")) {
-    return `${keyword} is picking up steam on ${platformStr}. ${relatedTerms.length > 0 ? `Enthusiasts are combining this with ${relatedTerms.join(", ")}.` : "Communities are forming around shared routines."}`;
-  }
-  
-  // Business/Money patterns
-  if (kw.includes("startup") || kw.includes("funding") || kw.includes("revenue") || kw.includes("market") || kw.includes("invest")) {
-    return `Discussions around ${keyword} are heating up on ${platformStr}. ${relatedTerms.length > 0 ? `Founders are connecting this with ${relatedTerms.join(" and ")}.` : "Industry watchers are taking note."}`;
-  }
-  
-  // Default pattern for general trends
-  const contextHints = missionPrompt.toLowerCase();
-  if (contextHints.includes("product") || contextHints.includes("service")) {
-    return `${keyword} is gaining attention on ${platformStr}. ${relatedTerms.length > 0 ? `Users often mention ${relatedTerms.join(" and ")} together.` : "Engagement suggests genuine interest, not just buzz."}`;
-  }
-  
-  return `${keyword} is trending on ${platformStr} with ${data.count}x more mentions than average. ${relatedTerms.length > 0 ? `Related topics include ${relatedTerms.join(", ")}.` : "This represents a genuine shift in what people are talking about."}`;
+
+  return `${toDisplayPhrase(primarySignal || keyword)} is gaining traction across ${platformStr}. Coverage is still early, but repeated mentions suggest a concrete commercial signal rather than a one-off spike.`;
 }
 
 function synthesizeTrendsFromOptions(finalOptions, missionPrompt, missionId) {
@@ -596,11 +923,27 @@ function synthesizeTrendsFromOptions(finalOptions, missionPrompt, missionId) {
 
   return finalOptions.options.slice(0, 8).map((option, i) => {
     const evidenceList = option.evidence ?? [];
+    const evidencePhrases = evidenceList.flatMap((e) => String(e.keywords ?? "").split(",").map((keyword) => cleanPhrase(keyword)).filter(Boolean));
     const evidenceKeywords = evidenceList
       .map((e) => e.keywords)
       .filter(Boolean)
       .slice(0, 5)
       .join(", ");
+    const primarySignal = rankPhraseCandidates([
+      ...evidencePhrases,
+      option.title,
+      option.concept,
+      option.whyPromising,
+      option.marketAngle,
+    ], missionPrompt)[0]?.phrase || cleanPhrase(option.title);
+    const supportingSignals = rankPhraseCandidates([
+      ...evidencePhrases,
+      evidenceKeywords,
+      option.title,
+    ], missionPrompt)
+      .map((candidate) => candidate.phrase)
+      .filter((phrase) => phrase.toLowerCase() !== cleanPhrase(primarySignal).toLowerCase())
+      .slice(0, 3);
 
     const sources = evidenceList
       .filter((e) => e.source_url || e.url)
@@ -618,8 +961,11 @@ function synthesizeTrendsFromOptions(finalOptions, missionPrompt, missionId) {
     return {
       $primaryKey: `live-opt-${missionId}-${i}`,
       trendId: `live-opt-${missionId}-${i}`,
-      title: option.title,
-      description: option.concept || option.whyPromising || `Market opportunity from research on "${missionPrompt}"`,
+      title: toDisplayPhrase(primarySignal || option.title),
+      description:
+        supportingSignals.length > 0
+          ? `${toDisplayPhrase(primarySignal || option.title)} is the clearest concrete opportunity inside this research track, with supporting demand around ${formatHumanList([primarySignal, ...supportingSignals].filter(Boolean))}. ${option.concept || option.whyPromising || `This is a market opportunity from research on "${missionPrompt}".`}`
+          : option.concept || option.whyPromising || `Market opportunity from research on "${missionPrompt}"`,
       industry: "All",
       category: option.recommendedFormat || "Live Research",
       status: i < 3 ? "growing" : "emerging",
@@ -627,7 +973,8 @@ function synthesizeTrendsFromOptions(finalOptions, missionPrompt, missionId) {
       mentionCount: Math.max(50000, (evidenceList.length ?? 1) * 20000),
       growthRate: parseFloat(Math.max(10, 35 - i * 4).toFixed(1)),
       sentimentScore: 0.72,
-      topKeywords: evidenceKeywords || option.title,
+      topKeywords: [primarySignal, ...supportingSignals, evidenceKeywords || option.title].filter(Boolean).join(", "),
+      actionableSignal: cleanPhrase(primarySignal || option.title),
       detectedAt: new Date().toISOString(),
       sources,
     };
@@ -703,26 +1050,29 @@ function synthesizeInsightsFromPlan(plan, missionPrompt) {
 async function handleTrends(_request, response) {
   const insforge = createServerInsforgeClient();
 
-  const missionResult = await insforge.database
+  const missionRowsResult = await insforge.database
     .from("missions")
     .select("id,prompt,status,final_options")
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(USER_MISSION_LOOKBACK_LIMIT);
 
-  if (missionResult.error || !missionResult.data) {
+  if (missionRowsResult.error) {
     writeJson(response, 200, { trends: [], insights: [] });
     return;
   }
 
-  const mission = missionResult.data;
+  const mission = selectLatestUserFacingMission(missionRowsResult.data ?? []);
+  if (!mission) {
+    writeJson(response, 200, { trends: [], insights: [] });
+    return;
+  }
   const missionId = String(mission.id ?? "");
   const missionPrompt = String(mission.prompt ?? "");
 
   const [discResult, planResult] = await Promise.all([
     insforge.database
       .from("discoveries")
-      .select("id,agent_id,source_url,thumbnail_url,keywords,industry,likes,views,comments,created_at")
+      .select("id,agent_id,source_url,thumbnail_url,title,summary,keywords,industry,likes,views,comments,created_at")
       .eq("mission_id", missionId)
       .order("created_at", { ascending: false })
       .limit(200),
@@ -802,41 +1152,73 @@ function industryRankForSort(industry, focusIndustry) {
 async function generateLiveRecommendations(focusIndustry = null) {
   const insforge = createServerInsforgeClient();
 
-  // Use the most recent business plan regardless of which mission generated it
+  const missionRowsResult = await insforge.database
+    .from("missions")
+    .select("id,prompt,status,final_options")
+    .order("created_at", { ascending: false })
+    .limit(USER_MISSION_LOOKBACK_LIMIT);
+
+  if (missionRowsResult.error) return { recommendations: [] };
+
+  const latestMission = selectLatestUserFacingMission(missionRowsResult.data ?? []);
+  if (!latestMission) return { recommendations: [] };
+
+  const missionId = String(latestMission.id ?? "");
+  const missionPrompt = String(latestMission.prompt ?? "multi-industry market research");
+  if (!missionId) return { recommendations: [] };
+
+  // Only use the newest plan for the newest mission. If a fresh mission hasn't
+  // produced a plan yet, keep recommendations empty instead of leaking the
+  // previous mission's output.
   const planResult = await insforge.database
     .from("business_plans")
     .select("id,mission_id,market_opportunity,competitive_landscape,revenue_models,user_acquisition,risk_analysis,confidence_score,discovery_count,created_at")
+    .eq("mission_id", missionId)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (planResult.error || !planResult.data) return { recommendations: [] };
+  if (planResult.error || !planResult.data) return { recommendations: [], missionId };
 
   const plan = planResult.data;
-  const planMissionId = String(plan.mission_id ?? "");
 
-  // Get the prompt from the mission that produced this plan
-  const missionResult = await insforge.database
-    .from("missions")
-    .select("id,prompt")
-    .eq("id", planMissionId)
-    .maybeSingle();
-
-  const missionPrompt = String(missionResult.data?.prompt ?? "multi-industry market research");
-  const missionId = planMissionId;
-
-  // Build discovery keyword summary from the same mission
+  // Build live trend summary from the same mission so recommendations stay
+  // anchored to specific items, services, and features rather than generic themes.
   const discResult = await insforge.database
     .from("discoveries")
-    .select("keywords,likes,views")
-    .eq("mission_id", planMissionId)
+    .select("id,agent_id,source_url,thumbnail_url,title,summary,keywords,industry,likes,views,comments,created_at")
+    .eq("mission_id", missionId)
     .order("created_at", { ascending: false })
     .limit(40);
 
-  const topKeywords = (discResult.data ?? [])
+  const discoveries = discResult.data ?? [];
+  const topKeywords = discoveries
     .flatMap((d) => (d.keywords ?? "").split(",").map((k) => k.trim()).filter(Boolean))
     .slice(0, 20)
     .join(", ");
+  let liveTrends = synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId);
+
+  const finalOptionsRaw = latestMission.final_options;
+  if (liveTrends.length < 6 && finalOptionsRaw) {
+    try {
+      const parsedFinalOptions =
+        typeof finalOptionsRaw === "string" ? JSON.parse(finalOptionsRaw) : finalOptionsRaw;
+      const optionTrends = synthesizeTrendsFromOptions(parsedFinalOptions, missionPrompt, missionId);
+      const existingTitles = new Set(liveTrends.map((trend) => cleanPhrase(trend.title).toLowerCase()));
+      for (const trend of optionTrends) {
+        const key = cleanPhrase(trend.title).toLowerCase();
+        if (!key || existingTitles.has(key)) continue;
+        existingTitles.add(key);
+        liveTrends.push(trend);
+      }
+    } catch (error) {
+      console.warn("[ai-server] Failed to parse final_options for recommendation trends:", error?.message ?? error);
+    }
+  }
+  liveTrends = liveTrends.slice(0, 8);
+  const trendBriefs = liveTrends
+    .map((trend) => `- ${trend.title}: ${trend.description} Keywords: ${trend.topKeywords || "N/A"}`)
+    .join("\n");
 
   const industryFocusLine =
     focusIndustry && focusIndustry !== "All"
@@ -853,6 +1235,8 @@ Research Topic: ${missionPrompt}
 Confidence Score: ${plan.confidence_score ?? 0}%
 Sources Analyzed: ${plan.discovery_count ?? 0}
 Top Trending Keywords: ${topKeywords || "N/A"}
+Specific Trend Briefs:
+${trendBriefs || "N/A"}
 
 Market Opportunity:
 ${plan.market_opportunity ?? "N/A"}
@@ -872,8 +1256,9 @@ ${plan.risk_analysis ?? "N/A"}
 Return a JSON array with exactly this shape (no extra keys):
 [
   {
-    "title": "Short action title (max 8 words)",
-    "description": "1-2 sentence description of the opportunity and why it matters now",
+    "sourceTrendTitle": "Exact trend title from the list above",
+    "title": "Short action title (max 8 words) that names the exact thing to sell, launch, offer, or build",
+    "description": "1-2 sentence description naming the exact product, service, feature, or package and why it matters now",
     "industry": "One of: ${REC_INDUSTRY_SLUGS.join(", ")}",
     "productCategory": "One of: Product, Service, Platform, Partnership, Content, Community",
     "targetDemographic": "Specific target audience (e.g. Gen Z shoppers 18-24, B2B SaaS teams)",
@@ -889,7 +1274,11 @@ Rules:
 - Revenue estimates must be specific dollar amounts derived from the data, not vague ranges
 - Scale estimates to match the research scope and discovery count
 - priority must be "high", "medium", or "low"
-- confidenceScore must be between 0.50 and 0.97`;
+- confidenceScore must be between 0.50 and 0.97
+- Every recommendation must explicitly name a concrete product, service, feature, format, or offer. Never say "lean into this trend", "tap into demand", or "build around this space" without naming the exact thing.
+- If the signal is consumer-facing, name the exact item or collection (for example cargo pants, charm necklaces, protein soda, sleep gummies).
+- If the signal is software or B2B, name the exact workflow, feature, dashboard, integration, or managed service.
+- sourceTrendTitle should exactly match one of the trend titles above whenever possible.`;
 
   let rawRecs = [];
   try {
@@ -910,14 +1299,67 @@ Rules:
     return { recommendations: [] };
   }
 
+  const trendTitleMap = new Map(
+    liveTrends.map((trend) => [cleanPhrase(trend.title).toLowerCase(), trend]),
+  );
+
+  function findBestMatchingTrend(rec) {
+    const sourceTrendTitle = cleanPhrase(rec.sourceTrendTitle ?? "").toLowerCase();
+    if (sourceTrendTitle && trendTitleMap.has(sourceTrendTitle)) {
+      return trendTitleMap.get(sourceTrendTitle) ?? null;
+    }
+
+    const haystack = `${rec.title ?? ""} ${rec.description ?? ""} ${rec.actionPlan ?? ""} ${rec.targetDemographic ?? ""}`.toLowerCase();
+    let bestMatch = null;
+    let bestScore = 0;
+    for (const trend of liveTrends) {
+      const candidateTerms = [
+        trend.title,
+        ...(String(trend.topKeywords ?? "").split(",").map((value) => value.trim()).filter(Boolean)),
+      ];
+      let score = 0;
+      for (const term of candidateTerms) {
+        const normalizedTerm = cleanPhrase(term).toLowerCase();
+        if (!normalizedTerm || !haystack.includes(normalizedTerm)) continue;
+        score += normalizedTerm === cleanPhrase(trend.title).toLowerCase() ? 5 : 2;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = trend;
+      }
+    }
+    return bestMatch;
+  }
+
   const recommendations = rawRecs.slice(0, 8).map((rec, i) => {
     const ind = normalizeRecIndustry(rec.industry);
+    const matchedTrend = findBestMatchingTrend(rec);
+    const matchedTitle = cleanPhrase(rec.sourceTrendTitle ?? matchedTrend?.title ?? "");
+    const specificContext = matchedTitle || cleanPhrase(rec.title ?? "");
+    let title = String(rec.title ?? "Recommendation").trim();
+    let description = String(rec.description ?? "").trim();
+
+    if ((!title || /^(recommendation|opportunity|growth strategy)$/i.test(title)) && specificContext) {
+      const verb = String(rec.productCategory ?? "").toLowerCase() === "service"
+        ? "Offer"
+        : String(rec.productCategory ?? "").toLowerCase() === "platform"
+          ? "Build"
+          : "Launch";
+      title = `${verb} ${specificContext}`;
+    }
+
+    if (specificContext && !`${title} ${description}`.toLowerCase().includes(specificContext.toLowerCase())) {
+      description = description
+        ? `${description} Focus the offer on ${specificContext}.`
+        : `Consider launching ${specificContext} based on the current live research signal.`;
+    }
+
     return {
       $primaryKey: `live-rec-${missionId}-${i}`,
       recommendationId: `live-rec-${missionId}-${i}`,
-      trendId: `live-${missionId}-${i % 8}`,
-      title: rec.title ?? "Recommendation",
-      description: rec.description ?? "",
+      trendId: matchedTrend?.trendId ?? `live-${missionId}-${i % 8}`,
+      title: title || "Recommendation",
+      description,
       industry: ind,
       productCategory: rec.productCategory ?? "Product",
       targetDemographic: rec.targetDemographic ?? "",
@@ -926,6 +1368,7 @@ Rules:
       priority: ["high", "medium", "low"].includes(rec.priority) ? rec.priority : "medium",
       status: "new",
       actionPlan: rec.actionPlan ?? "",
+      sourceTrendTitle: matchedTrend?.title ?? matchedTitle,
       createdAt: new Date().toISOString(),
     };
   });
@@ -1043,11 +1486,12 @@ function detectAgentId(url) {
 
 function extractKeywordsFromResult(title, description) {
   // Prefer title over description for signal quality
-  const text = `${title ?? ""} ${description ?? ""}`.toLowerCase();
+  const cleanedTitle = stripSourceSuffix(title);
+  const text = `${cleanedTitle} ${description ?? ""}`.toLowerCase();
   const tokens = text
     .split(/[\s,;:'"!?.|()\[\]{}<>\/\\–—]+/)
     .map(w => w.replace(/[^a-z0-9]/g, ""))
-    .filter(w => w.length > 3 && !STOP_WORDS.has(w) && !/^\d+$/.test(w)); // drop pure numbers
+    .filter(w => w.length > 3 && !STOP_WORDS.has(w) && !SOURCE_NOISE_WORDS.has(w) && !/^\d+$/.test(w)); // drop pure numbers
 
   if (!tokens.length) return "";
 
@@ -1055,13 +1499,16 @@ function extractKeywordsFromResult(title, description) {
   const bigrams = [];
   for (let i = 0; i < tokens.length - 1; i++) {
     if (tokens[i].length > 3 && tokens[i + 1].length > 3) {
-      bigrams.push(`${tokens[i]} ${tokens[i + 1]}`);
+      const bigram = `${tokens[i]} ${tokens[i + 1]}`;
+      if (!looksLikeSourceNoise(bigram)) bigrams.push(bigram);
     }
   }
 
   // Return up to 2 bigrams + up to 2 unigrams for variety
   const chosen = [...bigrams.slice(0, 2), ...tokens.slice(0, 2)];
-  return [...new Set(chosen)].slice(0, 4).join(", ");
+  return [...new Set(chosen.map((phrase) => cleanPhrase(phrase)).filter((phrase) => phrase && !looksLikeSourceNoise(phrase)))]
+    .slice(0, 4)
+    .join(", ");
 }
 
 // Domains blocked regardless of Brave's safe-search result
@@ -1199,6 +1646,8 @@ async function runBackgroundDataRefresh(force = false) {
         agent_id:      agentId,
         platform:      PLATFORM_BY_AGENT_ID[agentId] ?? "market_research",
         industry,
+        title:         r.title ?? "",
+        summary:       r.description ?? "",
         source_url:    r.url,
         thumbnail_url: r.thumbnail?.src ?? r.thumbnail?.original ?? "",
         keywords,
@@ -1258,7 +1707,11 @@ Return a JSON object with exactly these keys (2-4 sentences each):
   "user_acquisition": "...",
   "risk_analysis": "...",
   "confidence_score": 78
-}`,
+}
+
+Rules:
+- In every section, name the specific products, services, formats, or features that appear to be winning.
+- Avoid generic phrasing like "fashion is trending" or "AI tools are growing" unless you immediately name the concrete thing inside that trend.`,
       model: process.env.OPENAI_MODEL || "gpt-4o-mini",
       temperature: 0.3,
     });

@@ -7,19 +7,14 @@ import { useMasterBuildDashboard } from "@/hooks/useMasterBuildDashboard";
 import { getTrendForecast, forecastColors } from "@/lib/trendForecast";
 import { StatusBadge } from "@/components/market/StatusBadge";
 import { LoadingState } from "@/components/market/LoadingState";
-import { PipelineProgress } from "@/components/market/PipelineProgress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { usePreferences } from "@/hooks/usePreferences";
-import { useTheme } from "@/lib/theme";
 import { getIndustryLabel, INDUSTRY_OPTIONS } from "@/lib/industry";
 import { TrendSparkline } from "@/components/market/TrendSparkline";
 
 export function Dashboard() {
   const { preferences } = usePreferences();
-  const { theme } = useTheme();
-  const isDark = theme === "dark";
   const [activeIndustry, setActiveIndustry] = useState<string>(preferences.industry);
-  const [showPipeline, setShowPipeline] = useState(true);
   const [missionInput, setMissionInput] = useState("");
   const navigate = useNavigate();
   const { latestMission, isCreatingMission, createMission } = useMasterBuildDashboard();
@@ -103,58 +98,55 @@ export function Dashboard() {
 
             {/* Mission launcher */}
             <div className="flex items-center gap-2.5 p-3 rounded-xl border border-blue-100 dark:border-blue-900/50 bg-blue-50/30 dark:bg-blue-950/20">
-              {!missionRunning ? (
-                <>
-                  <div className="flex-1 flex items-center gap-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2">
-                    <Search className="w-4 h-4 text-slate-400 shrink-0" />
-                    <input
-                      value={missionInput}
-                      onChange={(e) => setMissionInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && missionInput.trim()) {
-                          createMission(missionInput.trim());
-                          setMissionInput("");
-                          navigate("/market-research");
-                        }
-                      }}
-                      placeholder="Research a market... e.g., AI fitness coaches for remote workers"
-                      className="flex-1 bg-transparent text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 outline-none"
-                      disabled={isCreatingMission}
-                    />
-                  </div>
-                  <button
-                    onClick={() => {
-                      if (!missionInput.trim()) return;
+              <div className="flex-1 flex items-center gap-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2">
+                <Search className="w-4 h-4 text-slate-400 shrink-0" />
+                <input
+                  value={missionInput}
+                  onChange={(e) => setMissionInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && missionInput.trim()) {
                       createMission(missionInput.trim());
                       setMissionInput("");
                       navigate("/market-research");
-                    }}
-                    disabled={!missionInput.trim() || isCreatingMission}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
-                  >
-                    {isCreatingMission ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                    Launch
-                  </button>
-                </>
-              ) : (
-                <div className="flex items-center justify-between w-full">
-                  <div className="flex items-center gap-2">
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
-                    </span>
-                    <span className="text-sm text-green-700 dark:text-green-400 font-medium">Agents researching</span>
-                    <span className="text-xs text-slate-400 truncate max-w-[300px]">&mdash; {latestMission?.prompt}</span>
-                  </div>
-                  <button
-                    onClick={() => navigate("/market-research")}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-950/40 transition-colors"
-                  >
-                    View Research <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                    }
+                  }}
+                  placeholder={missionRunning ? "Ask a new research question to replace the current mission" : "Research a market... e.g., AI fitness coaches for remote workers"}
+                  className="flex-1 bg-transparent text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 outline-none"
+                  disabled={isCreatingMission}
+                />
+              </div>
+              <button
+                onClick={() => {
+                  if (!missionInput.trim()) return;
+                  createMission(missionInput.trim());
+                  setMissionInput("");
+                  navigate("/market-research");
+                }}
+                disabled={!missionInput.trim() || isCreatingMission}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+              >
+                {isCreatingMission ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                {missionRunning ? "Start New Research" : "Launch"}
+              </button>
+              {missionRunning && (
+                <button
+                  onClick={() => navigate("/market-research")}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-950/40 transition-colors shrink-0"
+                >
+                  View Research <ArrowRight className="w-3.5 h-3.5" />
+                </button>
               )}
             </div>
+            {missionRunning && (
+              <div className="flex items-center gap-2 mt-2 px-1">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                </span>
+                <span className="text-sm text-green-700 dark:text-green-400 font-medium">Agents researching</span>
+                <span className="text-xs text-slate-400 truncate max-w-[420px]">&mdash; {latestMission?.prompt}</span>
+              </div>
+            )}
 
             {/* Industry filter tabs — only shown when preference is "All" */}
             {preferences.industry === "All" && (
