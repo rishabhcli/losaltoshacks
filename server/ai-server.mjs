@@ -25,8 +25,8 @@ const port = Number.parseInt(process.env.AI_SERVER_PORT || "3001", 10);
 function resolveMasterbuildRuntimeDir() {
   const envRuntime = process.env.MASTERBUILD_RUNTIME_DIR;
   return envRuntime
-    ? (path.isAbsolute(envRuntime) ? envRuntime : path.join(process.cwd(), "agents", envRuntime))
-    : path.join(process.cwd(), "agents", "runtime");
+    ? (path.isAbsolute(envRuntime) ? envRuntime : path.join(process.cwd(), envRuntime))
+    : path.join(process.cwd(), "runtime");
 }
 
 /** Clear local JPEG previews for browser-use agents (default 1–4). */
@@ -337,63 +337,99 @@ async function handleMissionReset(request, response) {
   const targetId = await resolveMissionId(insforge, missionId);
 
   if (!targetId) {
-    return writeJson(response, 200, { ok: true, missionId: null });
+    return writeJson(response, 200, { ok: true, missionId: null, message: "No active mission to reset" });
   }
 
-  // Send stop command first
-  await insforge.database.from("control_commands").insert([{
-    mission_id: targetId,
-    command: "stop_all",
-    payload: { source: "reset" },
-    status: "pending",
-  }]);
+  console.log(`[ai-server] Starting reset for mission: ${targetId}`);
 
-  // Wait for agents to acknowledge stop
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+  try {
+    // Send stop command first
+    const stopResult = await insforge.database.from("control_commands").insert([{
+      mission_id: targetId,
+      command: "stop_all",
+      payload: { source: "reset" },
+      status: "pending",
+    }]);
+    if (stopResult.error) {
+      console.warn(`[ai-server] Stop command insert failed (non-fatal): ${stopResult.error.message}`);
+    }
 
-  // Delete data from resettable tables
-  for (const table of RESETTABLE_TABLES) {
-    const deleteResult = await insforge.database
-      .from(table)
-      .delete()
+    // Wait for agents to acknowledge stop
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    // Delete data from resettable tables - continue on error for each table
+    const deleteErrors = [];
+    for (const table of RESETTABLE_TABLES) {
+      try {
+        const deleteResult = await insforge.database
+          .from(table)
+          .delete()
+          .eq("mission_id", targetId);
+        if (deleteResult.error) {
+          console.warn(`[ai-server] Failed to delete from ${table}: ${deleteResult.error.message}`);
+          deleteErrors.push({ table, error: deleteResult.error.message });
+        } else {
+          console.log(`[ai-server] Deleted from ${table}`);
+        }
+      } catch (err) {
+        console.warn(`[ai-server] Exception deleting from ${table}: ${err?.message ?? err}`);
+        deleteErrors.push({ table, error: err?.message ?? String(err) });
+      }
+    }
+
+    // Reset agents to idle - non-blocking if it fails
+    const agentReset = await insforge.database
+      .from("agents")
+      .update({
+        status: "idle",
+        current_url: "",
+        assignment: "",
+        energy: 100,
+        session_id: null,
+        preview_bucket: null,
+        preview_key: null,
+        preview_updated_at: null,
+      })
       .eq("mission_id", targetId);
-    if (deleteResult.error) throw deleteResult.error;
+    if (agentReset.error) {
+      console.warn(`[ai-server] Agent reset warning: ${agentReset.error.message}`);
+    }
+
+    clearBrowserAgentPreviewFrames([1, 2, 3, 4, 5]);
+
+    // Reset mission to stopped
+    const missionReset = await insforge.database
+      .from("missions")
+      .update({
+        status: "stopped",
+        stopped_at: new Date().toISOString(),
+        refined_idea: null,
+        final_options: null,
+      })
+      .eq("id", targetId);
+    if (missionReset.error) {
+      console.warn(`[ai-server] Mission reset warning: ${missionReset.error.message}`);
+    }
+
+    // Clear caches
+    invalidateDashboardSnapshot();
+    invalidateRecsCache();
+
+    console.log(`[ai-server] Reset complete for mission: ${targetId}`);
+
+    writeJson(response, 200, {
+      ok: true,
+      missionId: targetId,
+      deleteErrors: deleteErrors.length > 0 ? deleteErrors : undefined,
+    });
+  } catch (error) {
+    console.error(`[ai-server] Reset failed for mission ${targetId}:`, error);
+    writeJson(response, 500, {
+      ok: false,
+      error: error?.message ?? "Reset failed",
+      missionId: targetId,
+    });
   }
-
-  // Reset agents to idle
-  const agentReset = await insforge.database
-    .from("agents")
-    .update({
-      status: "idle",
-      current_url: "",
-      assignment: "",
-      energy: 100,
-      session_id: null,
-      preview_bucket: null,
-      preview_key: null,
-      preview_updated_at: null,
-    })
-    .eq("mission_id", targetId);
-  if (agentReset.error) throw agentReset.error;
-
-  clearBrowserAgentPreviewFrames([1, 2, 3, 4, 5]);
-
-  // Reset mission to stopped
-  const missionReset = await insforge.database
-    .from("missions")
-    .update({
-      status: "stopped",
-      stopped_at: new Date().toISOString(),
-      refined_idea: null,
-      final_options: null,
-    })
-    .eq("id", targetId);
-  if (missionReset.error) throw missionReset.error;
-
-  invalidateDashboardSnapshot();
-  invalidateRecsCache();
-
-  writeJson(response, 200, { ok: true, missionId: targetId });
 }
 
 /* ------------------------------------------------------------------ */
@@ -1929,8 +1965,8 @@ const server = http.createServer(async (request, response) => {
 
     const envRuntime = process.env.MASTERBUILD_RUNTIME_DIR;
     const runtimeDir = envRuntime
-      ? (path.isAbsolute(envRuntime) ? envRuntime : path.join(process.cwd(), "agents", envRuntime))
-      : path.join(process.cwd(), "agents", "runtime");
+      ? (path.isAbsolute(envRuntime) ? envRuntime : path.join(process.cwd(), envRuntime))
+      : path.join(process.cwd(), "runtime");
     const framePath = path.join(runtimeDir, "previews", `agent-${agentId}`, "latest.jpg");
 
     try {
@@ -1966,8 +2002,8 @@ const server = http.createServer(async (request, response) => {
       const theme = body?.theme === "dark" ? "dark" : "light";
       const envRuntime = process.env.MASTERBUILD_RUNTIME_DIR;
       const runtimeDir = envRuntime
-        ? (path.isAbsolute(envRuntime) ? envRuntime : path.join(process.cwd(), "agents", envRuntime))
-        : path.join(process.cwd(), "agents", "runtime");
+        ? (path.isAbsolute(envRuntime) ? envRuntime : path.join(process.cwd(), envRuntime))
+        : path.join(process.cwd(), "runtime");
       fs.mkdirSync(runtimeDir, { recursive: true });
       fs.writeFileSync(path.join(runtimeDir, "theme.txt"), theme);
       writeJson(response, 200, { ok: true, theme });
@@ -1981,8 +2017,8 @@ const server = http.createServer(async (request, response) => {
     try {
       const envRuntime = process.env.MASTERBUILD_RUNTIME_DIR;
       const runtimeDir = envRuntime
-        ? (path.isAbsolute(envRuntime) ? envRuntime : path.join(process.cwd(), "agents", envRuntime))
-        : path.join(process.cwd(), "agents", "runtime");
+        ? (path.isAbsolute(envRuntime) ? envRuntime : path.join(process.cwd(), envRuntime))
+        : path.join(process.cwd(), "runtime");
       const themePath = path.join(runtimeDir, "theme.txt");
       const theme = fs.existsSync(themePath) ? fs.readFileSync(themePath, "utf8").trim() : "light";
       writeJson(response, 200, { theme });

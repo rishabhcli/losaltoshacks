@@ -50,7 +50,9 @@ export function MarketResearch() {
       stopAll();
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    resetAll();
+    await resetAll();
+    // Hard refresh to clear all state and caches
+    window.location.reload();
   }, [isRunning, stopAll, resetAll]);
 
   if (isLoading) {

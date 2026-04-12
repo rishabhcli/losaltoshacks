@@ -176,6 +176,7 @@ def build_local_browser_session(agent_id: int, platform: str, *, headless: bool)
         chromium_sandbox=False,
         window_size={"width": width, "height": height},
         args=chromium_args,
+        executable_path="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         minimum_wait_page_load_time=3.0 if not effective_headless else 1.0,
         wait_for_network_idle_page_load_time=10.0 if not effective_headless else 8.0,
     )

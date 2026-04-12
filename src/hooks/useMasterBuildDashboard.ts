@@ -520,7 +520,16 @@ export function useMasterBuildDashboard() {
 
   const resetAll = useCallback(async () => {
     try {
-      await callMissionControlRoute("/api/mission/reset", { missionId: latestMission?.id ?? null });
+      const result = await callMissionControlRoute<{ ok: boolean; error?: string; missionId?: string | null }>(
+        "/api/mission/reset",
+        { missionId: latestMission?.id ?? null }
+      );
+
+      if (!result.ok) {
+        throw new Error(result.error || "Reset failed on server");
+      }
+
+      // Clear local state - UI becomes blank
       invalidateLiveResearchCache(false);
       startTransition(() => {
         setLatestMission(null);
@@ -534,11 +543,14 @@ export function useMasterBuildDashboard() {
         setBusinessPlans([]);
         setError(null);
       });
-      await loadDashboard();
+
+      // Don't reload dashboard - keep UI blank
+      // The next user action (create new mission) will trigger a fresh load
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to reset.");
+      console.error("[useMasterBuildDashboard] Reset failed:", err);
+      setError(err instanceof Error ? err.message : "Failed to reset mission.");
     }
-  }, [latestMission?.id, loadDashboard]);
+  }, [latestMission?.id]);
 
   return {
     latestMission, missionHistory, agents, discoveries, logs, signals, thoughts, memory, businessPlans,

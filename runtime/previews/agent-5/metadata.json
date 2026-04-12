@@ -1,9 +1,9 @@
 {
   "agentId": 5,
   "status": "searching",
-  "title": "Lovable handoff ready",
+  "title": "Waiting for discoveries",
   "currentUrl": "",
-  "updatedAt": "2026-04-12T05:59:54.764706+00:00",
-  "heartbeatAt": "2026-04-12T05:59:54.764734+00:00",
-  "note": "3 options, winner: Lovable: Your Trendy Fashion Companion"
+  "updatedAt": "2026-04-12T12:46:14.610702+00:00",
+  "heartbeatAt": "2026-04-12T12:46:14.610726+00:00",
+  "note": "Coverage: 2/4 (min 3 per platform). Sources: {\"reddit\": 4, \"substack\": 1, \"x\": 1, \"youtube\": 4}"
 }

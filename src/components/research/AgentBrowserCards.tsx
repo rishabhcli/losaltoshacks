@@ -33,8 +33,8 @@ function statusColor(status: AgentData["status"]) {
   }
 }
 
-/** Poll interval (ms) — align with agents/masterbuild_runtime.py MASTERBUILD_PREVIEW_STREAM_SEC (~280ms) for livestream feel */
-const PREVIEW_POLL_MS = 280;
+/** Poll interval (ms) — high frequency for smooth livestream feel (~8fps) */
+const PREVIEW_POLL_MS = 120;
 
 export function AgentBrowserCards({ agents, discoveries, isRunning }: Props) {
   const [refreshKey, setRefreshKey] = useState(0);
@@ -74,11 +74,33 @@ export function AgentBrowserCards({ agents, discoveries, isRunning }: Props) {
           const color = PLATFORM_COLORS[def.platform] ?? def.color;
           const count = discoveryCounts[def.agentId] ?? 0;
 
+          const isActive = ["searching", "exploiting", "found_trend", "reassigning"].includes(status);
+
           return (
             <div
               key={def.id}
-              className="rounded-xl border border-slate-200 dark:border-slate-800/80 bg-white dark:bg-slate-950/90 overflow-hidden shadow-sm dark:shadow-[0_18px_42px_rgba(2,6,23,0.35)]"
+              className={`
+                relative rounded-xl border bg-white dark:bg-slate-950/90 overflow-hidden shadow-sm 
+                dark:shadow-[0_18px_42px_rgba(2,6,23,0.35)] transition-all duration-300
+                ${isActive 
+                  ? "border-transparent ring-2 ring-offset-1 dark:ring-offset-0 ring-green-500/60 dark:ring-green-400/50 animate-live-pulse" 
+                  : "border-slate-200 dark:border-slate-800/80"
+                }
+              `}
+              style={isActive ? { 
+                boxShadow: `0 0 20px ${color}40, 0 0 40px ${color}20, inset 0 0 20px ${color}10` 
+              } : undefined}
             >
+              {/* Animated glow overlay for active agents */}
+              {isActive && (
+                <div 
+                  className="absolute inset-0 pointer-events-none z-10 rounded-xl"
+                  style={{
+                    background: `radial-gradient(ellipse at center, ${color}15 0%, transparent 70%)`,
+                    animation: "liveGlow 2s ease-in-out infinite alternate"
+                  }}
+                />
+              )}
               {/* Preview image */}
               <div className="relative aspect-video bg-slate-100 dark:bg-slate-800 overflow-hidden">
                 <img
