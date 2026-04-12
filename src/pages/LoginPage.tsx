@@ -283,7 +283,7 @@ export function LoginPage() {
 
       <div className="relative z-10 w-full max-w-[420px] mx-4">
         {/* Card */}
-        <div className="bg-white/80 backdrop-blur-xl border border-slate-200/60 rounded-2xl shadow-[0_1px_3px_rgba(0,0,0,0.04)] p-8">
+        <div className="bg-white/80 dark:bg-slate-900/90 backdrop-blur-xl border border-slate-200/60 dark:border-slate-700/60 rounded-2xl shadow-[0_1px_3px_rgba(0,0,0,0.04)] p-8">
           {step === "verify" ? (
             /* Verification Code Screen */
             <div>
@@ -313,7 +313,7 @@ export function LoginPage() {
                     onKeyDown={e => handleDigitKeyDown(i, e)}
                     onPaste={handleDigitPaste}
                     aria-label={`Digit ${i + 1}`}
-                    className="w-12 h-14 text-center text-xl font-semibold rounded-lg border border-slate-200 bg-white text-slate-800 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none transition-all"
+                    className="w-12 h-14 text-center text-xl font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 outline-none transition-all"
                   />
                 ))}
               </div>
@@ -366,7 +366,7 @@ export function LoginPage() {
               </div>
 
               {/* Mode toggle */}
-              <div className="flex bg-slate-100/80 rounded-lg p-1 mb-6">
+              <div className="flex bg-slate-100/80 dark:bg-slate-800 rounded-lg p-1 mb-6">
                 <button
                   type="button"
                   onClick={() => {
@@ -376,7 +376,7 @@ export function LoginPage() {
                     setEmailTouched(false);
                   }}
                   className={`flex-1 py-2 text-sm font-medium rounded-md transition-all cursor-pointer ${
-                    mode === "signin" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                    mode === "signin" ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
                   }`}
                 >
                   Sign in
@@ -390,7 +390,7 @@ export function LoginPage() {
                     setEmailTouched(false);
                   }}
                   className={`flex-1 py-2 text-sm font-medium rounded-md transition-all cursor-pointer ${
-                    mode === "create" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                    mode === "create" ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
                   }`}
                 >
                   Create account
@@ -410,7 +410,7 @@ export function LoginPage() {
                       placeholder="Your name"
                       value={displayName}
                       onChange={e => setDisplayName(e.target.value)}
-                      className="bg-white border-slate-200 text-slate-800 placeholder:text-slate-300 rounded-lg"
+                      className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 placeholder:text-slate-300 dark:placeholder:text-slate-500 rounded-lg"
                       autoComplete="name"
                     />
                   </div>
@@ -427,8 +427,8 @@ export function LoginPage() {
                     value={email}
                     onChange={e => handleEmailChange(e.target.value)}
                     onBlur={handleEmailBlur}
-                    className={`bg-white text-slate-800 placeholder:text-slate-300 rounded-lg transition-colors ${
-                      isEmailInvalid ? "border-red-400 focus:border-red-500 focus:ring-red-100" : "border-slate-200"
+                    className={`bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 placeholder:text-slate-300 dark:placeholder:text-slate-500 rounded-lg transition-colors ${
+                      isEmailInvalid ? "border-red-400 focus:border-red-500 focus:ring-red-100" : "border-slate-200 dark:border-slate-700"
                     }`}
                     autoComplete="email"
                   />
@@ -451,7 +451,7 @@ export function LoginPage() {
                       placeholder="Enter password"
                       value={password}
                       onChange={e => setPassword(e.target.value)}
-                      className="bg-white border-slate-200 text-slate-800 placeholder:text-slate-300 rounded-lg pr-10"
+                      className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 placeholder:text-slate-300 dark:placeholder:text-slate-500 rounded-lg pr-10"
                       autoComplete={mode === "create" ? "new-password" : "current-password"}
                     />
                     <button
@@ -484,7 +484,7 @@ export function LoginPage() {
                   <div className="w-full border-t border-slate-200" />
                 </div>
                 <div className="relative flex justify-center text-sm">
-                  <span className="bg-white px-2 text-slate-500">Or continue with</span>
+                  <span className="bg-white dark:bg-slate-900 px-2 text-slate-500 dark:text-slate-400">Or continue with</span>
                 </div>
               </div>
 
@@ -492,7 +492,7 @@ export function LoginPage() {
                 <Button
                   type="button"
                   variant="outline"
-                  className="w-full h-11 bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-slate-900 cursor-pointer"
+                  className="w-full h-11 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer"
                   onClick={() => void handleOAuthSignIn("google")}
                   disabled={isSubmitting}
                 >
@@ -504,7 +504,7 @@ export function LoginPage() {
                 <Button
                   type="button"
                   variant="outline"
-                  className="w-full h-11 bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-slate-900 cursor-pointer"
+                  className="w-full h-11 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer"
                   onClick={() => void handleOAuthSignIn("github")}
                   disabled={isSubmitting}
                 >

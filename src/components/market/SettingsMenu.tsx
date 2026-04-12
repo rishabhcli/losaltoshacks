@@ -44,19 +44,19 @@ export function SettingsMenu() {
       </button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-[420px] bg-white border-slate-200 rounded-xl shadow-lg p-0 gap-0">
+        <DialogContent className="sm:max-w-[420px] bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 rounded-xl shadow-lg p-0 gap-0">
           <div className="px-6 pt-6 pb-4">
-            <DialogTitle className="text-lg font-semibold text-slate-900 tracking-tight">Preferences</DialogTitle>
-            <DialogDescription className="text-sm text-slate-500 mt-1">
+            <DialogTitle className="text-lg font-semibold text-slate-900 dark:text-slate-100 tracking-tight">Preferences</DialogTitle>
+            <DialogDescription className="text-sm text-slate-500 dark:text-slate-400 mt-1">
               Customize your MarketPulse experience
             </DialogDescription>
           </div>
 
-          <div className="h-px bg-slate-100 mx-6" />
+          <div className="h-px bg-slate-100 dark:bg-slate-700 mx-6" />
 
           {/* Industry selection */}
           <div className="px-6 pt-4 pb-2">
-            <Label className="text-sm font-medium text-slate-700 mb-2 block">Industry focus</Label>
+            <Label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">Industry focus</Label>
             <div className="grid grid-cols-2 gap-2">
               {INDUSTRY_OPTIONS.map(ind => (
                 <button
@@ -64,8 +64,8 @@ export function SettingsMenu() {
                   onClick={() => setLocalIndustry(ind.value)}
                   className={`text-left p-2.5 rounded-lg border transition-all cursor-pointer text-sm ${
                     localIndustry === ind.value
-                      ? "border-blue-600 bg-blue-50 text-blue-600 font-semibold shadow-[0_0_0_3px_rgba(37,99,235,0.12)]"
-                      : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                      ? "border-blue-600 bg-blue-50 dark:bg-blue-950/40 text-blue-600 font-semibold shadow-[0_0_0_3px_rgba(37,99,235,0.12)]"
+                      : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700"
                   }`}
                 >
                   {ind.label}
@@ -76,7 +76,7 @@ export function SettingsMenu() {
 
           {/* Business name */}
           <div className="px-6 pt-3 pb-2">
-            <Label htmlFor="settings-business-name" className="text-sm font-medium text-slate-700 mb-2 block">
+            <Label htmlFor="settings-business-name" className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">
               Business name (optional)
             </Label>
             <Input
@@ -84,11 +84,11 @@ export function SettingsMenu() {
               placeholder="e.g. Acme Corp"
               value={localName}
               onChange={e => setLocalName(e.target.value)}
-              className="bg-white border-slate-200 text-slate-800 placeholder:text-slate-300 rounded-lg"
+              className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 placeholder:text-slate-300 dark:placeholder:text-slate-500 rounded-lg"
             />
           </div>
 
-          <div className="h-px bg-slate-100 mx-6 mt-3" />
+          <div className="h-px bg-slate-100 dark:bg-slate-700 mx-6 mt-3" />
 
           {/* Actions */}
           <div className="px-6 pt-4 pb-6 flex items-center justify-between gap-3">

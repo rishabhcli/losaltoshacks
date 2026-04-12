@@ -462,7 +462,7 @@ export function Briefing() {
                 key={idx}
                 className={`text-sm leading-relaxed transition-all duration-300 ${
                   idx === highlightedParagraph && isPlaying
-                    ? "text-slate-900 font-medium bg-blue-50/50 -mx-3 px-3 py-2 rounded-lg border-l-2 border-blue-400"
+                    ? "text-slate-900 dark:text-slate-100 font-medium bg-blue-50/50 dark:bg-blue-950/30 -mx-3 px-3 py-2 rounded-lg border-l-2 border-blue-400 dark:border-blue-500"
                     : idx < highlightedParagraph && currentTime > 0
                       ? "text-slate-400"
                       : "text-slate-600"
@@ -487,7 +487,7 @@ export function Briefing() {
               .map(t => (
                 <span
                   key={t.$primaryKey}
-                  className="text-[11px] font-medium text-blue-600 bg-blue-50 px-3 py-1 rounded-md border border-blue-100"
+                  className="text-[11px] font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 px-3 py-1 rounded-md border border-blue-100 dark:border-blue-800"
                 >
                   {t.title} — Score {t.trendScore?.toFixed(0)}
                 </span>

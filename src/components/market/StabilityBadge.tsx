@@ -5,22 +5,22 @@ import { generateTrendTimeSeries, analyzeTrendStability, type StabilityLevel } f
 const levelConfig: Record<StabilityLevel, { icon: typeof ShieldCheck; colors: string; dotColor: string }> = {
   steady: {
     icon: ShieldCheck,
-    colors: "text-emerald-600 bg-emerald-50 border-emerald-200",
+    colors: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800",
     dotColor: "bg-emerald-500",
   },
   moderate: {
     icon: Activity,
-    colors: "text-blue-600 bg-blue-50 border-blue-200",
+    colors: "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800",
     dotColor: "bg-blue-500",
   },
   volatile: {
     icon: AlertTriangle,
-    colors: "text-amber-600 bg-amber-50 border-amber-200",
+    colors: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800",
     dotColor: "bg-amber-500",
   },
   spike: {
     icon: Zap,
-    colors: "text-red-600 bg-red-50 border-red-200",
+    colors: "text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800",
     dotColor: "bg-red-500",
   },
 };

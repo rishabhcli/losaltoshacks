@@ -149,7 +149,7 @@ export function TrendDetail() {
 
         {/* Out-of-focus note */}
         {preferences.industry !== "All" && trend.industry && trend.industry !== preferences.industry && (
-          <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg text-sm text-amber-700 dark:text-amber-400">
             <Info className="w-4 h-4 shrink-0" />
             <span>
               This trend is in <span className="font-semibold">{getIndustryLabel(trend.industry ?? "")}</span>, outside
@@ -370,16 +370,16 @@ const livePlatformIcons: Record<string, React.ReactNode> = {
 };
 
 const livePlatformColors: Record<string, string> = {
-  youtube: "bg-red-50 text-red-600 border-red-100",
-  x: "bg-slate-50 text-slate-700 border-slate-200",
-  reddit: "bg-orange-50 text-orange-600 border-orange-100",
-  substack: "bg-amber-50 text-amber-700 border-amber-100",
-  market_research: "bg-blue-50 text-blue-600 border-blue-100",
+  youtube:         "bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 border-red-100 dark:border-red-800",
+  x:               "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700",
+  reddit:          "bg-orange-50 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400 border-orange-100 dark:border-orange-800",
+  substack:        "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border-amber-100 dark:border-amber-800",
+  market_research: "bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border-blue-100 dark:border-blue-800",
 };
 
 function LiveSourceCard({ source }: { source: TrendSource }) {
   const platform = (source.platform ?? "unknown").toLowerCase();
-  const badgeClass = livePlatformColors[platform] ?? "bg-slate-50 text-slate-700 border-slate-200";
+  const badgeClass = livePlatformColors[platform] ?? "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700";
   const icon = livePlatformIcons[platform] ?? <Globe className="w-3.5 h-3.5" />;
 
   return (

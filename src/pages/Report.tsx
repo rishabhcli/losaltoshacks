@@ -170,12 +170,12 @@ export function Report() {
                     className={`flex items-center gap-3 p-3 rounded-lg border transition-all text-left cursor-pointer ${
                       isSelected
                         ? "border-blue-500 bg-blue-50/80 shadow-[0_0_0_3px_rgba(37,99,235,0.08)]"
-                        : "border-slate-200 bg-white/50 hover:border-slate-300 hover:bg-white/80"
+                        : "border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-800/50 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-white/80 dark:hover:bg-slate-800/80"
                     }`}
                   >
                     <div
                       className={`w-5 h-5 rounded flex items-center justify-center shrink-0 transition-all ${
-                        isSelected ? "bg-blue-500 text-white" : "border border-slate-300 bg-white"
+                        isSelected ? "bg-blue-500 text-white" : "border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700"
                       }`}
                     >
                       {isSelected && <Check className="w-3 h-3" />}
@@ -320,7 +320,7 @@ export function Report() {
                   {relatedRecs.slice(0, 8).map(rec => (
                     <div
                       key={rec.$primaryKey}
-                      className="p-4 border border-slate-100 rounded-lg bg-white/50"
+                      className="p-4 border border-slate-100 dark:border-slate-700 rounded-lg bg-white/50 dark:bg-slate-800/30"
                     >
                       <div className="flex items-start justify-between gap-2 mb-1">
                         <h4 className="font-semibold text-sm text-slate-800">{rec.title}</h4>
@@ -356,7 +356,7 @@ export function Report() {
                 </h3>
                 <div className="space-y-3">
                   {relatedInsights.map(insight => (
-                    <div key={insight.$primaryKey} className="p-3 border border-slate-100 rounded-lg bg-white/50">
+                    <div key={insight.$primaryKey} className="p-3 border border-slate-100 dark:border-slate-700 rounded-lg bg-white/50 dark:bg-slate-800/30">
                       <div className="flex items-center gap-2 mb-1">
                         <span
                           className={`text-[10px] font-medium uppercase tracking-widest ${

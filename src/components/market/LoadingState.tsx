@@ -13,10 +13,10 @@ export function CardSkeleton({ count = 3 }: { count?: number }) {
   return (
     <div className="grid gap-3">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="border border-slate-200 bg-white rounded-xl p-4 animate-pulse">
-          <div className="h-4 bg-slate-100 rounded w-2/3 mb-3" />
-          <div className="h-3 bg-slate-100 rounded w-1/2 mb-2" />
-          <div className="h-3 bg-slate-100 rounded w-1/3" />
+        <div key={i} className="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl p-4 animate-pulse">
+          <div className="h-4 bg-slate-100 dark:bg-slate-700 rounded w-2/3 mb-3" />
+          <div className="h-3 bg-slate-100 dark:bg-slate-700 rounded w-1/2 mb-2" />
+          <div className="h-3 bg-slate-100 dark:bg-slate-700 rounded w-1/3" />
         </div>
       ))}
     </div>

@@ -23,7 +23,7 @@ export function OnboardingDialog() {
   return (
     <Dialog open={true}>
       <DialogContent
-        className="sm:max-w-[600px] bg-white border-slate-200 rounded-xl shadow-lg p-0 gap-0 [&>button]:hidden"
+        className="sm:max-w-[600px] bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 rounded-xl shadow-lg p-0 gap-0 [&>button]:hidden"
         onPointerDownOutside={e => e.preventDefault()}
         onEscapeKeyDown={e => e.preventDefault()}
       >
@@ -32,19 +32,19 @@ export function OnboardingDialog() {
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-blue-50 mb-4">
             <Activity className="w-6 h-6 text-blue-600" />
           </div>
-          <DialogTitle className="text-2xl font-semibold text-slate-900 tracking-tight">
+          <DialogTitle className="text-2xl font-semibold text-slate-900 dark:text-slate-100 tracking-tight">
             Welcome to MarketPulse
           </DialogTitle>
-          <DialogDescription className="text-sm text-slate-500 mt-2 max-w-sm mx-auto">
+          <DialogDescription className="text-sm text-slate-500 dark:text-slate-400 mt-2 max-w-sm mx-auto">
             AI-powered market intelligence tailored to your business. Let us personalize your experience.
           </DialogDescription>
         </div>
 
-        <div className="h-px bg-slate-100 mx-6" />
+        <div className="h-px bg-slate-100 dark:bg-slate-700 mx-6" />
 
         {/* Industry selection */}
         <div className="px-6 pt-5 pb-2">
-          <Label className="text-sm font-medium text-slate-700 mb-3 block">What industry are you in?</Label>
+          <Label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3 block">What industry are you in?</Label>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[320px] overflow-y-auto">
             {INDUSTRY_OPTIONS.map(ind => (
               <button
@@ -52,16 +52,16 @@ export function OnboardingDialog() {
                 onClick={() => setSelectedIndustry(ind.value)}
                 className={`text-left p-3 rounded-lg border transition-all cursor-pointer ${
                   selectedIndustry === ind.value
-                    ? "border-blue-600 bg-blue-50 shadow-[0_0_0_3px_rgba(37,99,235,0.12)]"
-                    : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+                    ? "border-blue-600 bg-blue-50 dark:bg-blue-950/40 shadow-[0_0_0_3px_rgba(37,99,235,0.12)]"
+                    : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700"
                 }`}
               >
                 <p
-                  className={`text-sm font-semibold ${selectedIndustry === ind.value ? "text-blue-600" : "text-slate-800"}`}
+                  className={`text-sm font-semibold ${selectedIndustry === ind.value ? "text-blue-600" : "text-slate-800 dark:text-slate-200"}`}
                 >
                   {ind.label}
                 </p>
-                <p className="text-[11px] text-slate-400 mt-0.5">{ind.description}</p>
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{ind.description}</p>
               </button>
             ))}
           </div>
@@ -69,7 +69,7 @@ export function OnboardingDialog() {
 
         {/* Business name (optional) */}
         <div className="px-6 pt-3 pb-2">
-          <Label htmlFor="business-name" className="text-sm font-medium text-slate-700 mb-2 block">
+          <Label htmlFor="business-name" className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">
             Your business name (optional)
           </Label>
           <Input
@@ -77,7 +77,7 @@ export function OnboardingDialog() {
             placeholder="e.g. Acme Corp"
             value={name}
             onChange={e => setName(e.target.value)}
-            className="bg-white border-slate-200 text-slate-800 placeholder:text-slate-300 rounded-lg"
+            className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 placeholder:text-slate-300 dark:placeholder:text-slate-500 rounded-lg"
           />
         </div>
 
