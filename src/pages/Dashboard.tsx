@@ -17,14 +17,7 @@ import { LoadingState } from "@/components/market/LoadingState";
 import { PipelineProgress } from "@/components/market/PipelineProgress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { usePreferences } from "@/hooks/usePreferences";
-import { getIndustryLabel } from "@/lib/industry";
-
-const INDUSTRIES = [
-  { value: "All", label: "All Industries" },
-  { value: "fashion-retail", label: "Fashion & Retail" },
-  { value: "travel-hospitality", label: "Travel & Hospitality" },
-  { value: "consumer-products", label: "Consumer Products" },
-] as const;
+import { getIndustryLabel, INDUSTRY_OPTIONS } from "@/lib/industry";
 
 export function Dashboard() {
   const { preferences } = usePreferences();
@@ -61,7 +54,7 @@ export function Dashboard() {
     if (!insights) return [];
     let kpis = insights.filter(i => i.insightType === "kpi");
     if (activeIndustry !== "All") {
-      kpis = kpis.filter(i => i.industry === activeIndustry);
+      kpis = kpis.filter(i => i.industry === activeIndustry || i.industry === "All");
     }
     return kpis;
   }, [insights, activeIndustry]);
@@ -92,7 +85,7 @@ export function Dashboard() {
     if (!insights) return [];
     let filtered = insights.filter(i => i.insightType !== "kpi");
     if (activeIndustry !== "All") {
-      filtered = filtered.filter(i => i.industry === activeIndustry);
+      filtered = filtered.filter(i => i.industry === activeIndustry || i.industry === "All");
     }
     return filtered.slice(0, 6);
   }, [insights, activeIndustry]);
@@ -126,7 +119,7 @@ export function Dashboard() {
             {/* Industry filter tabs — only shown when preference is "All" */}
             {preferences.industry === "All" && (
               <div className="flex gap-0 border-b border-slate-200">
-                {INDUSTRIES.map(industry => (
+                {INDUSTRY_OPTIONS.filter(industry => industry.value !== "All").map(industry => (
                   <button
                     key={industry.value}
                     onClick={() => setActiveIndustry(industry.value)}

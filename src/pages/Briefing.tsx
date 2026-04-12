@@ -87,7 +87,7 @@ export function Briefing() {
   const filteredInsights = useMemo(() => {
     if (!insights) return [];
     if (preferences.industry === "All") return [...insights];
-    return insights.filter(i => i.industry === preferences.industry || i.industry === "all");
+    return insights.filter(i => i.industry === preferences.industry || i.industry === "All");
   }, [insights, preferences.industry]);
 
   const script = useMemo(() => {

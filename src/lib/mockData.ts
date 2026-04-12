@@ -97,7 +97,7 @@ export const MOCK_TRENDS: MockTrend[] = [
     $primaryKey: "t3", trendId: "t3",
     title: "Adaptogenic Wellness Beverages",
     description: "Consumer interest in stress-relief drinks featuring adaptogens like ashwagandha, reishi, and lion's mane is skyrocketing, driven by wellness culture and the 'slow living' movement.",
-    industry: "consumer-products", category: "Beverages", status: "growing",
+    industry: "food-beverage", category: "Beverages", status: "growing",
     trendScore: 85, mentionCount: 512000, growthRate: 41.3,
     sentimentScore: 0.78, topKeywords: "adaptogens, ashwagandha, functional beverages, wellness, nootropics",
     detectedAt: "2025-02-02T09:15:00Z",
@@ -124,7 +124,7 @@ export const MOCK_TRENDS: MockTrend[] = [
     $primaryKey: "t6", trendId: "t6",
     title: "AI-Curated Skincare Personalization",
     description: "Beauty brands are deploying AI diagnostics that analyze skin profiles to deliver bespoke formulations and routines. DTC brands are winning loyalty through data-driven personalization.",
-    industry: "consumer-products", category: "Beauty & Skincare", status: "emerging",
+    industry: "beauty-skincare", category: "Beauty & Skincare", status: "emerging",
     trendScore: 77, mentionCount: 490000, growthRate: 38.9,
     sentimentScore: 0.69, topKeywords: "AI skincare, personalization, custom formulation, beauty tech, skin analysis",
     detectedAt: "2025-02-18T10:00:00Z",
@@ -142,7 +142,7 @@ export const MOCK_TRENDS: MockTrend[] = [
     $primaryKey: "t8", trendId: "t8",
     title: "Wellness Retreat & Digital Detox Packages",
     description: "Demand for no-phone, high-nature wellness retreats is surging among high-income millennials experiencing burnout. Spas converting to tech-free sanctuaries report 60%+ occupancy boosts.",
-    industry: "travel-hospitality", category: "Wellness", status: "growing",
+    industry: "wellness-fitness", category: "Wellness", status: "growing",
     trendScore: 81, mentionCount: 412000, growthRate: 31.6,
     sentimentScore: 0.82, topKeywords: "digital detox, wellness retreat, mindfulness, burnout recovery, spa",
     detectedAt: "2025-02-08T13:00:00Z",
@@ -151,7 +151,7 @@ export const MOCK_TRENDS: MockTrend[] = [
     $primaryKey: "t9", trendId: "t9",
     title: "Regenerative Ingredient Sourcing",
     description: "Consumer products companies are pivoting to regenerative agriculture sourcing to meet rising sustainability expectations. Brands marketing regenerative practices report 22% higher NPS vs. organic-only claims.",
-    industry: "consumer-products", category: "Sustainability", status: "growing",
+    industry: "beauty-skincare", category: "Sustainability", status: "growing",
     trendScore: 76, mentionCount: 375000, growthRate: 26.4,
     sentimentScore: 0.74, topKeywords: "regenerative agriculture, sustainability, carbon-neutral, clean label, B-corp",
     detectedAt: "2025-01-30T12:00:00Z",
@@ -191,7 +191,7 @@ export const MOCK_INSIGHTS: MockInsight[] = [
   {
     $primaryKey: "i4", insightId: "i4", insightType: "kpi",
     title: "Active Trends", metricValue: 10, metricUnit: "trends", changePercent: 25.0, period: "vs last quarter",
-    summary: "Total number of active market trends being tracked.", industry: "consumer-products",
+    summary: "Total number of active market trends being tracked.", industry: "beauty-skincare",
     generatedAt: "2025-04-01T08:00:00Z", relatedTrendIds: "",
   },
   // Opportunities
@@ -211,7 +211,7 @@ export const MOCK_INSIGHTS: MockInsight[] = [
     $primaryKey: "i7", insightId: "i7", insightType: "opportunity",
     title: "DTC Adaptogen Subscription Box Potential",
     summary: "Subscription wellness boxes featuring curated adaptogen products show 3.4x higher LTV vs one-time purchases. The category has <5% subscription penetration — major growth lever for CPG brands.",
-    industry: "consumer-products", generatedAt: "2025-04-07T11:00:00Z", relatedTrendIds: "t3,t9",
+    industry: "food-beverage", generatedAt: "2025-04-07T11:00:00Z", relatedTrendIds: "t3",
   },
   // Alerts
   {
@@ -224,7 +224,7 @@ export const MOCK_INSIGHTS: MockInsight[] = [
     $primaryKey: "i9", insightId: "i9", insightType: "alert",
     title: "Plastic Regulation Impacting Packaging Supply Chain",
     summary: "New EU single-use plastics directives effective Q3 may impact 34% of consumer products packaging. Brands without alternative packaging solutions risk €500K+ compliance penalties and shelf delisting.",
-    industry: "consumer-products", generatedAt: "2025-04-03T14:00:00Z", relatedTrendIds: "t9,t3",
+    industry: "beauty-skincare", generatedAt: "2025-04-03T14:00:00Z", relatedTrendIds: "t9,t6",
   },
   // Summaries
   {
@@ -238,6 +238,24 @@ export const MOCK_INSIGHTS: MockInsight[] = [
     title: "Travel & Hospitality Q1 Recap",
     summary: "Post-pandemic normalization complete. Business travel recovering faster than forecast (+22% YoY). Leisure travel shifting toward experiential and wellness verticals. Revenue per available room (RevPAR) up 14% in luxury segment.",
     industry: "travel-hospitality", generatedAt: "2025-04-08T09:30:00Z", relatedTrendIds: "t2,t5,t8",
+  },
+  {
+    $primaryKey: "i12", insightId: "i12", insightType: "summary",
+    title: "Wellness & Fitness Momentum Check",
+    summary: "Consumers are shifting wellness spend toward immersive recovery formats rather than one-off classes. Retreats, sleep programs, and membership-based reset offerings are outperforming generic spa packages on both retention and premium pricing.",
+    industry: "wellness-fitness", generatedAt: "2025-04-09T08:45:00Z", relatedTrendIds: "t8",
+  },
+  {
+    $primaryKey: "i13", insightId: "i13", insightType: "summary",
+    title: "Beauty & Skincare Trend Pulse",
+    summary: "Beauty buyers are rewarding brands that combine clinical credibility with personalized routines and sustainable sourcing. Skin barrier messaging, refillable formats, and provenance-backed ingredients are increasing conversion across both DTC and retail discovery channels.",
+    industry: "beauty-skincare", generatedAt: "2025-04-09T09:00:00Z", relatedTrendIds: "t6,t9",
+  },
+  {
+    $primaryKey: "i14", insightId: "i14", insightType: "summary",
+    title: "Food & Beverage Functional Category Recap",
+    summary: "Functional beverages continue to outpace broader packaged beverage growth as consumers seek everyday mood, focus, and recovery support. Subscription, sampler packs, and creator-led education remain the strongest conversion levers for new entrants.",
+    industry: "food-beverage", generatedAt: "2025-04-09T09:20:00Z", relatedTrendIds: "t3",
   },
 ];
 
@@ -323,6 +341,26 @@ export const MOCK_RECOMMENDATIONS: MockRecommendation[] = [
     actionPlan: "Engage sustainability consulting firm for certification framework. Pilot with 2 suppliers. Brief retail buyers 6 months ahead of launch.",
     createdAt: "2025-04-02T10:00:00Z",
   },
+  {
+    $primaryKey: "r9", recommendationId: "r9", trendId: "t6",
+    title: "Launch Barrier-First Routine Builder",
+    description: "Package AI skin analysis with a barrier-repair starter routine, refill reminders, and dermatologist-backed education modules. Position the product line around skin resilience instead of aggressive active cycling.",
+    productCategory: "Beauty & Skincare", targetDemographic: "Ingredient-Conscious Shoppers 20-40",
+    confidenceScore: 0.83, estimatedRevenuePotential: "$2.9M DTC uplift",
+    priority: "high", status: "new",
+    actionPlan: "Bundle cleanser, serum, and moisturizer SKUs with guided onboarding. Rework PDP copy around skin barrier recovery. Test subscription replenishment at 45-day cadence.",
+    createdAt: "2025-04-09T10:00:00Z",
+  },
+  {
+    $primaryKey: "r10", recommendationId: "r10", trendId: "t8",
+    title: "Build a Monthly Reset Membership",
+    description: "Turn wellness retreat demand into recurring revenue with a membership that includes one guided reset weekend per quarter, monthly digital detox circles, and recovery coaching between visits.",
+    productCategory: "Memberships", targetDemographic: "Burnout-Prone Professionals 30-50",
+    confidenceScore: 0.8, estimatedRevenuePotential: "$1.6M recurring annual revenue",
+    priority: "high", status: "new",
+    actionPlan: "Pilot with existing retreat guests, price as premium annual membership, and add corporate wellness partnerships for team off-sites during low-occupancy periods.",
+    createdAt: "2025-04-09T10:20:00Z",
+  },
 ];
 
 // ---- Sources (linked to trends) ----
@@ -334,6 +372,9 @@ export const MOCK_SOURCES: MockSource[] = [
   { $primaryKey: "s5", platform: "News", mentionCount: 140000, engagementRate: 0.9, sentimentBreakdown: "70% positive, 20% neutral, 10% negative", collectedAt: "2025-04-08T07:00:00Z", trendId: "t2" },
   { $primaryKey: "s6", platform: "Instagram", mentionCount: 270000, engagementRate: 5.9, sentimentBreakdown: "80% positive, 16% neutral, 4% negative", collectedAt: "2025-04-08T07:00:00Z", trendId: "t3" },
   { $primaryKey: "s7", platform: "TikTok", mentionCount: 242000, engagementRate: 8.4, sentimentBreakdown: "76% positive, 18% neutral, 6% negative", collectedAt: "2025-04-08T07:00:00Z", trendId: "t3" },
+  { $primaryKey: "s8", platform: "YouTube", mentionCount: 168000, engagementRate: 6.1, sentimentBreakdown: "74% positive, 20% neutral, 6% negative", collectedAt: "2025-04-08T07:00:00Z", trendId: "t6" },
+  { $primaryKey: "s9", platform: "Instagram", mentionCount: 195000, engagementRate: 5.3, sentimentBreakdown: "82% positive, 13% neutral, 5% negative", collectedAt: "2025-04-08T07:00:00Z", trendId: "t8" },
+  { $primaryKey: "s10", platform: "News", mentionCount: 128000, engagementRate: 1.6, sentimentBreakdown: "69% positive, 24% neutral, 7% negative", collectedAt: "2025-04-08T07:00:00Z", trendId: "t9" },
 ];
 
 // ---- Demographics (linked to trends) ----
@@ -343,4 +384,7 @@ export const MOCK_DEMOGRAPHICS: MockDemographic[] = [
   { $primaryKey: "d3", ageGroup: "25-34", gender: "All", location: "USA", affinityScore: 0.76, engagementIndex: 5.8, purchaseIntent: 0.55, topInterests: "remote work, travel, productivity", trendId: "t2" },
   { $primaryKey: "d4", ageGroup: "35-44", gender: "All", location: "Global", affinityScore: 0.71, engagementIndex: 4.9, purchaseIntent: 0.48, topInterests: "entrepreneurship, nomadic lifestyle, digital tools", trendId: "t2" },
   { $primaryKey: "d5", ageGroup: "22-34", gender: "All", location: "USA", affinityScore: 0.88, engagementIndex: 8.3, purchaseIntent: 0.67, topInterests: "wellness, yoga, meditation, health optimization", trendId: "t3" },
+  { $primaryKey: "d6", ageGroup: "24-39", gender: "Female", location: "USA", affinityScore: 0.85, engagementIndex: 7.6, purchaseIntent: 0.73, topInterests: "dermatology, ingredients, beauty tech, skin health", trendId: "t6" },
+  { $primaryKey: "d7", ageGroup: "30-49", gender: "All", location: "North America", affinityScore: 0.8, engagementIndex: 6.7, purchaseIntent: 0.61, topInterests: "burnout recovery, mindfulness, luxury travel, longevity", trendId: "t8" },
+  { $primaryKey: "d8", ageGroup: "27-42", gender: "Female", location: "UK", affinityScore: 0.74, engagementIndex: 5.9, purchaseIntent: 0.58, topInterests: "clean beauty, sustainability, ingredient sourcing, refill systems", trendId: "t9" },
 ];
