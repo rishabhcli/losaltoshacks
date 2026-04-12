@@ -2089,8 +2089,8 @@ class MasterBuildOrchestrator:
         # Keep visual browser sessions on by default so the UI always has live preview movement,
         # especially when cloud sessions are unavailable and we fall back to API sweep mode.
         self.enable_browser_showcase = os.getenv("MASTERBUILD_ENABLE_BROWSER_SHOWCASE", "true").lower() == "true"
-        self.showcase_render_wait_seconds = float(os.getenv("MASTERBUILD_SHOWCASE_RENDER_WAIT_SECONDS", "0.75"))
-        self.showcase_step_wait_seconds = float(os.getenv("MASTERBUILD_SHOWCASE_STEP_WAIT_SECONDS", "0.35"))
+        self.showcase_render_wait_seconds = float(os.getenv("MASTERBUILD_SHOWCASE_RENDER_WAIT_SECONDS", "10.0"))
+        self.showcase_step_wait_seconds = float(os.getenv("MASTERBUILD_SHOWCASE_STEP_WAIT_SECONDS", "2.0"))
         self.sweep_result_limit = int(os.getenv("MASTERBUILD_SWEEP_RESULT_LIMIT", "4"))
         self.llm_health_cache_ttl_seconds = float(os.getenv("MASTERBUILD_LLM_HEALTH_CACHE_TTL_SECONDS", "600"))
         self._llm_health_verified_at = 0.0
@@ -2421,8 +2421,14 @@ class MasterBuildOrchestrator:
             )
         )
 
-        # ── Phase 2: Browser showcase (launches after sweep finishes) ──
+        # ── Phase 2: Browser showcase (runs in parallel with sweep) ──
         showcase_task: asyncio.Task[Any] | None = None
+        if not use_cloud_agents and self.enable_browser_showcase:
+            print("[orchestrator] Launching browser showcase agent")
+            showcase_task = asyncio.create_task(
+                self.run_browser_showcase(mission_id=mission_id, mission_prompt=prompt)
+            )
+            tasks.append(showcase_task)
 
         try:
             if use_cloud_agents:
@@ -2439,34 +2445,6 @@ class MasterBuildOrchestrator:
                 done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
                 if control_task in done or completion_task in done:
                     break
-
-                # Check if all sweep agents are done → launch browser showcase
-                if (
-                    not use_cloud_agents
-                    and
-                    self.enable_browser_showcase
-                    and showcase_task is None
-                    and all(t.done() for t in sweep_tasks)
-                ):
-                    print("[orchestrator] API sweep complete — launching browser showcase")
-                    await self.client.append_log(
-                        mission_id, agent_id=None, log_type="status",
-                        message="API sweep complete. Starting browser showcase for visual deep-dive.",
-                        metadata={},
-                    )
-                    showcase_task = asyncio.create_task(
-                        self.run_browser_showcase(mission_id=mission_id, mission_prompt=prompt)
-                    )
-                    tasks.append(showcase_task)
-                elif not self.enable_browser_showcase and showcase_task is None and all(t.done() for t in sweep_tasks):
-                    showcase_task = asyncio.create_task(asyncio.sleep(0))
-                    await self.client.append_log(
-                        mission_id,
-                        agent_id=None,
-                        log_type="status",
-                        message="Skipping browser showcase to prioritize fast research completion.",
-                        metadata={"showcase_enabled": False},
-                    )
 
                 pending = [task for task in pending if not task.done()]
                 if all(task.done() for task in tasks):
@@ -3907,6 +3885,7 @@ class MasterBuildOrchestrator:
             f"High-priority links (check first):\n{curated_lines}\n\n"
             "Execution requirements:\n"
             "- Open and inspect at least 5 distinct content pages on your platform.\n"
+            "- Spend AT LEAST 10 SECONDS on each individual post/thread/article to ensure the user following the live session can read the content.\n"
             "- Prioritize real post/video/thread/article URLs (not generic search/home pages).\n"
             "- Capture concrete signals: pain points, buyer language, metrics, pricing, engagement, workflow behavior.\n"
             "- Avoid login/signup flows and skip pages blocked by auth walls.\n"
@@ -3991,7 +3970,7 @@ class MasterBuildOrchestrator:
             session = await self.browser_cloud.create_session(
                 task=task_description,
                 output_schema=self._cloud_output_schema(self.browser_cloud.max_findings),
-                keep_alive=False,
+                keep_alive=True,
             )
             session_id = session["id"]
             live_url = session["live_url"]
@@ -4328,48 +4307,18 @@ class MasterBuildOrchestrator:
     ) -> None:
         """Open discovered URLs in a browser for screenshots and deep extraction.
 
-        Runs AFTER the API sweep completes. Provides the visual browsing experience
-        while enriching discoveries with deeper content extraction.
+        Runs concurrently with the API sweep agents. Provides a live visual browsing
+        experience by visiting newly discovered pages as they arrive.
         """
         last_preview_key: str | None = None
         pw_browser = None
         pw_context = None
+        visited_urls: set[str] = set()
+        max_showcase_items = 40
+        items_processed = 0
 
         try:
             from patchright.async_api import async_playwright
-
-            # Fetch all discoveries for this mission
-            discoveries = await self.client.get_recent_discoveries(50, mission_id=mission_id)
-            if not discoveries:
-                print("[showcase] No discoveries to showcase")
-                return
-
-            # Interleave platforms for visual variety (round-robin)
-            by_platform: dict[str, list[dict[str, Any]]] = {}
-            for d in discoveries:
-                platform = d.get("platform", "unknown")
-                by_platform.setdefault(platform, []).append(d)
-
-            interleaved: list[dict[str, Any]] = []
-            platform_iters = {p: iter(items) for p, items in by_platform.items()}
-            while platform_iters:
-                exhausted = []
-                for platform, it in platform_iters.items():
-                    try:
-                        interleaved.append(next(it))
-                    except StopIteration:
-                        exhausted.append(platform)
-                for p in exhausted:
-                    del platform_iters[p]
-
-            # Limit to top 15 for reasonable showcase duration
-            showcase_items = interleaved[:15]
-
-            await self.client.append_log(
-                mission_id, agent_id=None, log_type="status",
-                message=f"Browser showcase starting: visiting {len(showcase_items)} discovered pages",
-                metadata={},
-            )
 
             # Read current theme from file (synced by frontend)
             runtime_dir = Path(os.getenv("MASTERBUILD_RUNTIME_DIR", Path.cwd() / "runtime")).expanduser()
@@ -4379,9 +4328,9 @@ class MasterBuildOrchestrator:
             except Exception:
                 current_theme = "light"
             color_scheme = "dark" if current_theme == "dark" else "light"
-            print(f"[showcase] Browser theme: {color_scheme}")
+            print(f"[showcase] Browser showcase started (theme: {color_scheme})")
 
-            # Launch browser using patchright directly (avoids browser-use devtools bug)
+            # Launch browser using patchright directly
             pw = await async_playwright().start()
             pw_browser = await pw.chromium.launch(
                 headless=self.headless,
@@ -4399,123 +4348,167 @@ class MasterBuildOrchestrator:
                 device_scale_factor=1.5,
             )
             page = await pw_context.new_page()
+
             # Create per-agent preview directories
             for aid in range(1, 6):
                 (runtime_dir / "previews" / f"agent-{aid}").mkdir(parents=True, exist_ok=True)
 
-            for i, discovery in enumerate(showcase_items):
-                if self.stop_event.is_set():
-                    break
+            await self.client.append_log(
+                mission_id, agent_id=None, log_type="status",
+                message="Browser showcase active: monitoring for new discoveries to visit.",
+                metadata={},
+            )
 
-                source_url = discovery.get("source_url", "")
-                platform = discovery.get("platform", "unknown")
-                agent_id = discovery.get("agent_id", 1)
-                title = discovery.get("title", "")[:80]
-
-                if not source_url:
+            # Continuous loop: poll for discoveries and visit new ones
+            while not self.stop_event.is_set() and items_processed < max_showcase_items:
+                # Fetch recent discoveries
+                discoveries = await self.client.get_recent_discoveries(50, mission_id=mission_id)
+                
+                # Filter for new ones
+                new_discoveries = [d for d in discoveries if d.get("source_url") not in visited_urls and d.get("source_url")]
+                
+                if not new_discoveries:
+                    # If we haven't reached the limit, wait a bit for more discoveries
+                    await asyncio.sleep(2)
                     continue
 
-                try:
-                    # Update agent status to show browsing activity
-                    await self.client.update_agent(
-                        agent_id, mission_id=mission_id,
-                        status="exploiting",
-                        current_url=source_url,
-                        assignment=f"Deep dive: {title}",
-                        energy=max(20, 90 - i * 5),
-                        last_heartbeat=utc_now(),
-                    )
+                # Interleave platforms for visual variety
+                by_platform: dict[str, list[dict[str, Any]]] = {}
+                for d in new_discoveries:
+                    platform = d.get("platform", "unknown")
+                    by_platform.setdefault(platform, []).append(d)
 
-                    # Navigate to the URL
-                    try:
-                        await page.goto(source_url, wait_until="domcontentloaded", timeout=15000)
-                    except Exception:
-                        await page.goto(source_url, timeout=15000)
-
-                    # Inject 150% zoom for larger, more readable screenshots
-                    try:
-                        await page.evaluate("() => { document.body.style.zoom = '150%'; }")
-                    except Exception:
-                        pass
-
-                    # Re-read theme in case user toggled mid-showcase
-                    try:
-                        new_theme = theme_file.read_text().strip() if theme_file.exists() else current_theme
-                        if new_theme != current_theme:
-                            current_theme = new_theme
-                            await pw_context.set_extra_http_headers({})  # no-op to keep context alive
-                            await page.emulate_media(color_scheme="dark" if current_theme == "dark" else "light")
-                            print(f"[showcase] Theme switched to: {current_theme}")
-                    except Exception:
-                        pass
-
-                    await asyncio.sleep(self.showcase_render_wait_seconds)
-
-                    # Take screenshot
-                    # Save to per-agent path so the frontend can display per-agent previews
-                    agent_preview_dir = runtime_dir / "previews" / f"agent-{agent_id}"
-                    agent_preview_dir.mkdir(parents=True, exist_ok=True)
-                    screenshot_path = str(agent_preview_dir / "latest.jpg")
-                    try:
-                        await page.screenshot(path=screenshot_path, type="jpeg", quality=75)
+                interleaved: list[dict[str, Any]] = []
+                platform_iters = {p: iter(items) for p, items in by_platform.items()}
+                while platform_iters:
+                    exhausted = []
+                    for platform, it in platform_iters.items():
                         try:
-                            preview_upload = await self.client.upload_preview_frame(agent_id, screenshot_path)
-                            uploaded_key = str(preview_upload.get("key", "")).strip()
-                            uploaded_bucket = str(preview_upload.get("bucket", self.client.preview_bucket)).strip() or self.client.preview_bucket
-                            if last_preview_key and last_preview_key != uploaded_key:
-                                await self.client.delete_storage_object(uploaded_bucket, last_preview_key)
-                            last_preview_key = uploaded_key or None
+                            interleaved.append(next(it))
+                        except StopIteration:
+                            exhausted.append(platform)
+                    for p in exhausted:
+                        del platform_iters[p]
+
+                # Process this batch
+                for discovery in interleaved:
+                    if self.stop_event.is_set():
+                        break
+                    
+                    source_url = discovery.get("source_url", "")
+                    if source_url in visited_urls:
+                        continue
+                    
+                    visited_urls.add(source_url)
+                    platform = discovery.get("platform", "unknown")
+                    agent_id = discovery.get("agent_id", 1)
+                    title = discovery.get("title", "")[:80]
+
+                    try:
+                        # Update agent status to show browsing activity
+                        await self.client.update_agent(
+                            agent_id, mission_id=mission_id,
+                            status="exploiting",
+                            current_url=source_url,
+                            assignment=f"Deep dive: {title}",
+                            energy=max(20, 95 - items_processed * 2),
+                            last_heartbeat=utc_now(),
+                        )
+
+                        # Navigate to the URL
+                        try:
+                            await page.goto(source_url, wait_until="domcontentloaded", timeout=15000)
+                        except Exception:
+                            await page.goto(source_url, timeout=15000)
+
+                        # Inject 150% zoom for larger, more readable screenshots
+                        try:
+                            await page.evaluate("() => { document.body.style.zoom = '150%'; }")
                         except Exception:
                             pass
-                    except Exception:
-                        pass
 
-                    # Deep extraction via JS
-                    try:
-                        page_text = await page.evaluate("() => document.body?.innerText?.slice(0, 1500) || ''")
-                        if page_text and len(page_text) > 50:
-                            keywords, summary = await self.ai.summarize_discovery(
-                                mission_prompt, title, title, source_url, page_text, platform=platform,
-                            )
-                            if keywords and summary:
-                                await self.client.append_log(
-                                    mission_id, agent_id=agent_id, log_type="analysis",
-                                    message=f"Deep enrichment: {keywords}",
-                                    metadata={"url": source_url, "enriched_summary": summary[:300]},
+                        # Re-read theme in case user toggled mid-showcase
+                        try:
+                            new_theme = theme_file.read_text().strip() if theme_file.exists() else current_theme
+                            if new_theme != current_theme:
+                                current_theme = new_theme
+                                await page.emulate_media(color_scheme="dark" if current_theme == "dark" else "light")
+                                print(f"[showcase] Theme switched to: {current_theme}")
+                        except Exception:
+                            pass
+
+                        await asyncio.sleep(self.showcase_render_wait_seconds)
+
+                        # Take screenshot
+                        agent_preview_dir = runtime_dir / "previews" / f"agent-{agent_id}"
+                        agent_preview_dir.mkdir(parents=True, exist_ok=True)
+                        screenshot_path = str(agent_preview_dir / "latest.jpg")
+                        try:
+                            await page.screenshot(path=screenshot_path, type="jpeg", quality=75)
+                            try:
+                                preview_upload = await self.client.upload_preview_frame(agent_id, screenshot_path)
+                                uploaded_key = str(preview_upload.get("key", "")).strip()
+                                uploaded_bucket = str(preview_upload.get("bucket", self.client.preview_bucket)).strip() or self.client.preview_bucket
+                                if last_preview_key and last_preview_key != uploaded_key:
+                                    await self.client.delete_storage_object(uploaded_bucket, last_preview_key)
+                                last_preview_key = uploaded_key or None
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+
+                        # Deep extraction via JS
+                        try:
+                            page_text = await page.evaluate("() => document.body?.innerText?.slice(0, 1500) || ''")
+                            if page_text and len(page_text) > 50:
+                                keywords, summary = await self.ai.summarize_discovery(
+                                    mission_prompt, title, title, source_url, page_text, platform=platform,
                                 )
-                    except Exception:
-                        pass
+                                if keywords and summary:
+                                    await self.client.append_log(
+                                        mission_id, agent_id=agent_id, log_type="analysis",
+                                        message=f"Deep enrichment: {keywords}",
+                                        metadata={"url": source_url, "enriched_summary": summary[:300]},
+                                    )
+                        except Exception:
+                            pass
 
-                    await self.client.append_log(
-                        mission_id, agent_id=agent_id, log_type="search",
-                        message=f"Visited: {title} | {source_url[:60]}",
-                        metadata={"showcase_index": i},
-                    )
+                        await self.client.append_log(
+                            mission_id, agent_id=agent_id, log_type="search",
+                            message=f"Visited: {title} | {source_url[:60]}",
+                            metadata={"showcase_index": items_processed},
+                        )
 
-                except Exception as e:
-                    print(f"[showcase] Error visiting {source_url[:60]}: {e}")
-                    await self.client.append_log(
-                        mission_id, agent_id=agent_id, log_type="error",
-                        message=f"Showcase visit failed: {str(e)[:100]}",
-                        metadata={"url": source_url},
-                    )
+                        items_processed += 1
+                        
+                        # Brief delay for visual pacing
+                        await asyncio.sleep(self.showcase_step_wait_seconds)
 
-                # Brief delay for visual pacing
-                await asyncio.sleep(self.showcase_step_wait_seconds)
+                    except Exception as e:
+                        print(f"[showcase] Error visiting {source_url[:60]}: {e}")
+                        await self.client.append_log(
+                            mission_id, agent_id=agent_id, log_type="error",
+                            message=f"Showcase visit failed: {str(e)[:100]}",
+                            metadata={"url": source_url},
+                        )
+
+                # Small sleep before next discovery poll
+                await asyncio.sleep(2)
 
             await self.client.append_log(
                 mission_id, agent_id=None, log_type="status",
-                message=f"Browser showcase completed: visited {len(showcase_items)} pages",
+                message=f"Browser showcase completed: visited {items_processed} pages",
                 metadata={},
             )
 
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            print(f"[showcase] Error: {error}")
+            print(f"[showcase] Fatal error: {error}")
             await self.client.append_log(
                 mission_id, agent_id=None, log_type="error",
-                message=f"Browser showcase error: {error}", metadata={},
+                message=f"Browser showcase fatal error: {error}",
+                metadata={},
             )
         finally:
             if pw_context is not None:

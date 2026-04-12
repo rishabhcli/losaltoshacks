@@ -7,3 +7,5 @@
 
   ➜  Local:   http://localhost:3000/
   ➜  Network: use --host to expose
+7:35:45 AM [vite] .env changed, restarting server...
+7:35:45 AM [vite] server restarted.
