@@ -47,11 +47,6 @@ export function MarketResearch() {
     [agents],
   );
 
-  // Auto-show final options modal when they arrive
-  useEffect(() => {
-    if (latestMission?.finalOptions) setShowFinalOptions(true);
-  }, [latestMission?.finalOptions]);
-
   const handleReset = useCallback(async () => {
     if (isRunning) {
       stopAll();
@@ -93,11 +88,20 @@ export function MarketResearch() {
         </div>
 
         <div className="flex items-center gap-2">
+        {/* View Results button */}
+        {latestMission?.finalOptions && (
+          <button
+            onClick={() => setShowFinalOptions(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
+          >
+            View Results
+          </button>
+        )}
         {/* Reset button */}
         {latestMission && (
           <button
             onClick={handleReset}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-500 border border-red-200/60 hover:bg-red-50 transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-500 border border-red-200/60 dark:border-red-800/60 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             Reset

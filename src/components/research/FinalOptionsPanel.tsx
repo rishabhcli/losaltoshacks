@@ -29,7 +29,7 @@ export function FinalOptionsPanel({ finalOptions }: Props) {
       {marketResearch.summary && (
         <Card className="border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-900/30">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold text-blue-800 flex items-center gap-2">
+            <CardTitle className="text-sm font-semibold text-blue-800 dark:text-blue-300 flex items-center gap-2">
               <Globe className="w-4 h-4" />
               Market Research Summary
             </CardTitle>
@@ -132,7 +132,7 @@ export function FinalOptionsPanel({ finalOptions }: Props) {
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <Lightbulb className="w-4 h-4 text-purple-600" />
-                <span className="text-sm font-semibold text-purple-800">Build with Lovable</span>
+                <span className="text-sm font-semibold text-purple-800 dark:text-purple-300">Build with Lovable</span>
               </div>
               <div className="flex items-center gap-2">
                 <Button
