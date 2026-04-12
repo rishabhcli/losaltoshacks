@@ -446,7 +446,10 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    const runtimeDir = process.env.MASTERBUILD_RUNTIME_DIR || path.join(process.cwd(), "agents", "runtime");
+    const envRuntime = process.env.MASTERBUILD_RUNTIME_DIR;
+    const runtimeDir = envRuntime
+      ? (path.isAbsolute(envRuntime) ? envRuntime : path.join(process.cwd(), "agents", envRuntime))
+      : path.join(process.cwd(), "agents", "runtime");
     const framePath = path.join(runtimeDir, "previews", `agent-${agentId}`, "latest.jpg");
 
     try {
