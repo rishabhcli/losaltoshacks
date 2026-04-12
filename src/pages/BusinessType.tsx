@@ -61,7 +61,7 @@ export function BusinessType() {
         {/* Industry selection */}
         <div className="border border-slate-200 bg-white rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
           <Label className="text-sm font-medium text-slate-700 mb-4 block">Choose your industry focus</Label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {INDUSTRY_OPTIONS.map(ind => {
               const isSelected = selectedIndustry === ind.value;
               return (

@@ -478,6 +478,39 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
+  // Theme sync — frontend writes current theme so the browser showcase matches
+  if (request.method === "POST" && url.pathname === "/api/theme") {
+    try {
+      const body = await readJsonBody(request);
+      const theme = body?.theme === "dark" ? "dark" : "light";
+      const envRuntime = process.env.MASTERBUILD_RUNTIME_DIR;
+      const runtimeDir = envRuntime
+        ? (path.isAbsolute(envRuntime) ? envRuntime : path.join(process.cwd(), "agents", envRuntime))
+        : path.join(process.cwd(), "agents", "runtime");
+      fs.mkdirSync(runtimeDir, { recursive: true });
+      fs.writeFileSync(path.join(runtimeDir, "theme.txt"), theme);
+      writeJson(response, 200, { ok: true, theme });
+    } catch (error) {
+      writeJson(response, 500, { error: "Failed to sync theme" });
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/theme") {
+    try {
+      const envRuntime = process.env.MASTERBUILD_RUNTIME_DIR;
+      const runtimeDir = envRuntime
+        ? (path.isAbsolute(envRuntime) ? envRuntime : path.join(process.cwd(), "agents", envRuntime))
+        : path.join(process.cwd(), "agents", "runtime");
+      const themePath = path.join(runtimeDir, "theme.txt");
+      const theme = fs.existsSync(themePath) ? fs.readFileSync(themePath, "utf8").trim() : "light";
+      writeJson(response, 200, { theme });
+    } catch {
+      writeJson(response, 200, { theme: "light" });
+    }
+    return;
+  }
+
   writeJson(response, 404, { error: "Not found" });
 });
 

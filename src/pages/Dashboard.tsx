@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useOsdkObjects, marketTrend, marketInsight } from "@/lib/osdk-shims";
-import { TrendingUp, ArrowUpRight, ArrowDownRight, Zap, Eye, BarChart3 } from "lucide-react";
+import { TrendingUp, ArrowUpRight, ArrowDownRight, Zap, Eye, BarChart3, Search, Play, Loader2, ArrowRight } from "lucide-react";
+import { useMasterBuildDashboard } from "@/hooks/useMasterBuildDashboard";
 import { getTrendForecast, forecastColors } from "@/lib/trendForecast";
 import { StatusBadge } from "@/components/market/StatusBadge";
 import { LoadingState } from "@/components/market/LoadingState";
@@ -18,7 +19,10 @@ export function Dashboard() {
   const isDark = theme === "dark";
   const [activeIndustry, setActiveIndustry] = useState<string>(preferences.industry);
   const [showPipeline, setShowPipeline] = useState(true);
+  const [missionInput, setMissionInput] = useState("");
   const navigate = useNavigate();
+  const { latestMission, isCreatingMission, createMission } = useMasterBuildDashboard();
+  const missionRunning = latestMission?.status === "queued" || latestMission?.status === "active";
 
   // Sync active industry tab when preferences change
   useEffect(() => {
@@ -95,14 +99,79 @@ export function Dashboard() {
               </p>
             </div>
 
+            {/* Mission launcher */}
+            <div className="flex items-center gap-2.5 p-3 rounded-xl border border-blue-100 bg-blue-50/30">
+              {!missionRunning ? (
+                <>
+                  <div className="flex-1 flex items-center gap-2.5 bg-white border border-slate-200 rounded-xl px-3.5 py-2">
+                    <Search className="w-4 h-4 text-slate-400 shrink-0" />
+                    <input
+                      value={missionInput}
+                      onChange={(e) => setMissionInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && missionInput.trim()) {
+                          createMission(missionInput.trim());
+                          setMissionInput("");
+                          navigate("/market-research");
+                        }
+                      }}
+                      placeholder="Research a market... e.g., AI fitness coaches for remote workers"
+                      className="flex-1 bg-transparent text-sm text-slate-800 placeholder:text-slate-400 outline-none"
+                      disabled={isCreatingMission}
+                    />
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (!missionInput.trim()) return;
+                      createMission(missionInput.trim());
+                      setMissionInput("");
+                      navigate("/market-research");
+                    }}
+                    disabled={!missionInput.trim() || isCreatingMission}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+                  >
+                    {isCreatingMission ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                    Launch
+                  </button>
+                </>
+              ) : (
+                <div className="flex items-center justify-between w-full">
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                    </span>
+                    <span className="text-sm text-green-700 font-medium">Agents researching</span>
+                    <span className="text-xs text-slate-400 truncate max-w-[300px]">&mdash; {latestMission?.prompt}</span>
+                  </div>
+                  <button
+                    onClick={() => navigate("/market-research")}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-blue-600 hover:bg-blue-100 transition-colors"
+                  >
+                    View Research <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+
             {/* Industry filter tabs — only shown when preference is "All" */}
             {preferences.industry === "All" && (
-              <div className="flex gap-0 border-b border-slate-200">
+              <div className="flex gap-0 border-b border-slate-200 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                <button
+                  onClick={() => setActiveIndustry("All")}
+                  className={`px-4 py-2 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                    activeIndustry === "All"
+                      ? "text-blue-600 border-b-2 border-blue-600 -mb-px"
+                      : "text-slate-400 hover:text-slate-600"
+                  }`}
+                >
+                  All
+                </button>
                 {INDUSTRY_OPTIONS.filter(industry => industry.value !== "All").map(industry => (
                   <button
                     key={industry.value}
                     onClick={() => setActiveIndustry(industry.value)}
-                    className={`px-4 py-2 text-sm font-medium transition-all cursor-pointer ${
+                    className={`px-4 py-2 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                       activeIndustry === industry.value
                         ? "text-blue-600 border-b-2 border-blue-600 -mb-px"
                         : "text-slate-400 hover:text-slate-600"
@@ -217,7 +286,7 @@ export function Dashboard() {
       </div>
 
       {/* Right panel — Latest AI Insights */}
-      <aside className="hidden lg:block w-80 xl:w-96 border-l border-white/30 dark:border-white/10 glass backdrop-blur-xl">
+      <aside className="hidden xl:block w-80 shrink-0 border-l border-white/30 dark:border-white/10 glass backdrop-blur-xl">
         <ScrollArea className="h-screen">
           <div className="p-5">
             <h2 className="font-semibold text-sm uppercase tracking-wider text-slate-400 mb-4">Latest AI Insights</h2>

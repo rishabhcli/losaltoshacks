@@ -3478,6 +3478,16 @@ class MasterBuildOrchestrator:
                 metadata={},
             )
 
+            # Read current theme from file (synced by frontend)
+            runtime_dir = Path(os.getenv("MASTERBUILD_RUNTIME_DIR", Path.cwd() / "runtime")).expanduser()
+            theme_file = runtime_dir / "theme.txt"
+            try:
+                current_theme = theme_file.read_text().strip() if theme_file.exists() else "light"
+            except Exception:
+                current_theme = "light"
+            color_scheme = "dark" if current_theme == "dark" else "light"
+            print(f"[showcase] Browser theme: {color_scheme}")
+
             # Launch browser using patchright directly (avoids browser-use devtools bug)
             pw = await async_playwright().start()
             pw_browser = await pw.chromium.launch(
@@ -3486,15 +3496,16 @@ class MasterBuildOrchestrator:
                     "--disable-blink-features=AutomationControlled",
                     "--disable-infobars",
                     "--no-first-run",
+                    "--force-dark-mode" if color_scheme == "dark" else "--no-first-run",
                 ],
             )
             pw_context = await pw_browser.new_context(
                 viewport={"width": 1440, "height": 900},
                 user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                color_scheme=color_scheme,
+                device_scale_factor=1.5,
             )
             page = await pw_context.new_page()
-
-            runtime_dir = Path(os.getenv("MASTERBUILD_RUNTIME_DIR", Path.cwd() / "runtime")).expanduser()
             # Create per-agent preview directories
             for aid in range(1, 6):
                 (runtime_dir / "previews" / f"agent-{aid}").mkdir(parents=True, exist_ok=True)
@@ -3527,6 +3538,24 @@ class MasterBuildOrchestrator:
                         await page.goto(source_url, wait_until="domcontentloaded", timeout=15000)
                     except Exception:
                         await page.goto(source_url, timeout=15000)
+
+                    # Inject 150% zoom for larger, more readable screenshots
+                    try:
+                        await page.evaluate("() => { document.body.style.zoom = '150%'; }")
+                    except Exception:
+                        pass
+
+                    # Re-read theme in case user toggled mid-showcase
+                    try:
+                        new_theme = theme_file.read_text().strip() if theme_file.exists() else current_theme
+                        if new_theme != current_theme:
+                            current_theme = new_theme
+                            await pw_context.set_extra_http_headers({})  # no-op to keep context alive
+                            await page.emulate_media(color_scheme="dark" if current_theme == "dark" else "light")
+                            print(f"[showcase] Theme switched to: {current_theme}")
+                    except Exception:
+                        pass
+
                     await asyncio.sleep(2)  # Let page render
 
                     # Take screenshot

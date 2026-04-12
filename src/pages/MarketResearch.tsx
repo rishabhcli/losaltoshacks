@@ -11,6 +11,9 @@ import { DiscoveryGrid } from "@/components/research/DiscoveryGrid";
 import { FinalOptionsPanel } from "@/components/research/FinalOptionsPanel";
 import { BusinessPlanPanel } from "@/components/research/BusinessPlanPanel";
 import { AgentFeed } from "@/components/research/AgentFeed";
+import { useTheme } from "@/lib/theme";
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
 
 type ViewMode = "command" | "observe";
 
@@ -23,6 +26,16 @@ export function MarketResearch() {
 
   const [viewMode, setViewMode] = useState<ViewMode>("command");
   const [showFinalOptions, setShowFinalOptions] = useState(false);
+  const { theme } = useTheme();
+
+  // Sync theme to server so browser showcase matches
+  useEffect(() => {
+    fetch(`${API_BASE}/api/theme`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ theme }),
+    }).catch(() => {});
+  }, [theme]);
 
   const isRunning = useMemo(() => {
     const status = latestMission?.status;

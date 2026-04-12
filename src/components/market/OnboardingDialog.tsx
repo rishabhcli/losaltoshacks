@@ -23,7 +23,7 @@ export function OnboardingDialog() {
   return (
     <Dialog open={true}>
       <DialogContent
-        className="sm:max-w-[480px] bg-white border-slate-200 rounded-xl shadow-lg p-0 gap-0 [&>button]:hidden"
+        className="sm:max-w-[600px] bg-white border-slate-200 rounded-xl shadow-lg p-0 gap-0 [&>button]:hidden"
         onPointerDownOutside={e => e.preventDefault()}
         onEscapeKeyDown={e => e.preventDefault()}
       >
@@ -45,7 +45,7 @@ export function OnboardingDialog() {
         {/* Industry selection */}
         <div className="px-6 pt-5 pb-2">
           <Label className="text-sm font-medium text-slate-700 mb-3 block">What industry are you in?</Label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[320px] overflow-y-auto">
             {INDUSTRY_OPTIONS.map(ind => (
               <button
                 key={ind.value}

@@ -46,12 +46,11 @@ test.describe("Authenticated app", () => {
     await expect(page.getByRole("button", { name: "Command" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Observe" })).toBeVisible();
 
-    // Agent status grid: 5 agents
+    // Browser agent cards (4 browser agents, Atlas has no browser)
     await expect(page.getByText("Echo")).toBeVisible();
     await expect(page.getByText("Pulse", { exact: true })).toBeVisible();
     await expect(page.getByText("Thread")).toBeVisible();
     await expect(page.getByText("Ledger")).toBeVisible();
-    await expect(page.getByText("Atlas")).toBeVisible();
 
     // Discoveries section
     await expect(page.getByText("Discoveries").first()).toBeVisible();
