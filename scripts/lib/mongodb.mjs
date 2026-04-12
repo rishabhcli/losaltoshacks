@@ -8,12 +8,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "../..");
 
-for (const fileName of [".env.development.local", ".env.local", ".env.development", ".env"]) {
+[".env", ".env.local", ".env.development", ".env.development.local"].forEach((fileName, index) => {
   const envPath = path.join(projectRoot, fileName);
   if (existsSync(envPath)) {
-    loadDotEnv({ path: envPath, override: false });
+    loadDotEnv({ path: envPath, override: index > 0 });
   }
-}
+});
 
 let cachedClient;
 

@@ -83,6 +83,7 @@
     "vitest": "^3.0.5"
   },
   "scripts": {
+    "ai:server": "node server/ai-server.mjs",
     "build": "vite build",
     "dev": "vite",
     "dev:local": "nohup vite > logs/dev-server.log 2>&1 &",

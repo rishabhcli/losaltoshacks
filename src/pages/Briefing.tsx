@@ -1,10 +1,13 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { useOsdkObjects, marketInsight, marketTrend } from "@/lib/osdk-shims";
-import { Play, Pause, Volume2, SkipBack, SkipForward, Clock, Sparkles, FileText } from "lucide-react";
+import { Play, Pause, Volume2, SkipBack, SkipForward, Clock, Sparkles, FileText, AlertTriangle } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { LoadingState } from "@/components/market/LoadingState";
 import { usePreferences } from "@/hooks/usePreferences";
 import { getIndustryLabel } from "@/lib/industry";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { inferWithOpenAI } from "@/lib/openai";
 
 /** Generates a realistic executive briefing script from trend and insight data */
 function generateBriefingScript(
@@ -61,11 +64,35 @@ function generateBriefingScript(
   return script;
 }
 
+function buildOpenAIPrompt(
+  trends: Array<{ title: string | undefined; trendScore: number | undefined; status: string | undefined; industry: string | undefined; growthRate: number | undefined; description: string | undefined }>,
+  insights: Array<{ title: string | undefined; summary: string | undefined; insightType: string | undefined; industry: string | undefined }>,
+  industry: string,
+): string {
+  return [
+    "Create a spoken executive market intelligence briefing for the following dataset.",
+    "Return plain text only.",
+    "Use 5 to 7 short paragraphs with no markdown or bullet points.",
+    "Cover the strongest growth signals, the top risks, and the clearest opportunities.",
+    "End with a short operator-style takeaway.",
+    "",
+    `Industry focus: ${industry}`,
+    "",
+    `Trend data: ${JSON.stringify(trends.slice(0, 8))}`,
+    "",
+    `Insight data: ${JSON.stringify(insights.slice(0, 8))}`,
+  ].join("\n");
+}
+
 export function Briefing() {
   const { preferences } = usePreferences();
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [highlightedParagraph, setHighlightedParagraph] = useState(0);
+  const [liveScript, setLiveScript] = useState<string | null>(null);
+  const [liveModel, setLiveModel] = useState<string | null>(null);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
   const playIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { data: trends, isLoading: trendsLoading } = useOsdkObjects(marketTrend, {
@@ -90,15 +117,50 @@ export function Briefing() {
     return insights.filter(i => i.industry === preferences.industry || i.industry === "All");
   }, [insights, preferences.industry]);
 
-  const script = useMemo(() => {
+  const draftScript = useMemo(() => {
     if (!filteredTrends.length && !filteredInsights.length) return "";
     return generateBriefingScript(filteredTrends, filteredInsights, preferences.industry);
   }, [filteredTrends, filteredInsights, preferences.industry]);
 
-  const paragraphs = useMemo(() => script.split("\n\n").filter(Boolean), [script]);
+  const displayedScript = liveScript ?? draftScript;
+
+  const paragraphs = useMemo(() => displayedScript.split("\n\n").filter(Boolean), [displayedScript]);
+
+  const generateLiveBriefing = useCallback(async () => {
+    setIsGenerating(true);
+    setGenerationError(null);
+
+    try {
+      const result = await inferWithOpenAI({
+        systemPrompt:
+          "You are MarketPulse, an executive market intelligence analyst. Produce concise, high-signal briefings for business operators.",
+        userPrompt: buildOpenAIPrompt(filteredTrends, filteredInsights, preferences.industry),
+        temperature: 1,
+      });
+
+      setLiveScript(result.text);
+      setLiveModel(result.model);
+      setCurrentTime(0);
+      setHighlightedParagraph(0);
+      setIsPlaying(false);
+    } catch (error) {
+      setGenerationError(error instanceof Error ? error.message : "OpenAI generation failed.");
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [filteredInsights, filteredTrends, preferences.industry]);
+
+  const useDraftBriefing = useCallback(() => {
+    setLiveScript(null);
+    setLiveModel(null);
+    setGenerationError(null);
+    setCurrentTime(0);
+    setHighlightedParagraph(0);
+    setIsPlaying(false);
+  }, []);
 
   // Estimated duration: ~150 words per minute speaking rate
-  const wordCount = script.split(/\s+/).length;
+  const wordCount = displayedScript.trim() ? displayedScript.trim().split(/\s+/).length : 0;
   const estimatedDuration = Math.ceil((wordCount / 150) * 60); // seconds
 
   const formatTime = (seconds: number) => {
@@ -151,11 +213,21 @@ export function Briefing() {
     setHighlightedParagraph(idx);
   }, [currentTime, paragraphs.length, estimatedDuration]);
 
+  useEffect(() => {
+    if (currentTime > estimatedDuration) {
+      setCurrentTime(0);
+    }
+  }, [currentTime, estimatedDuration]);
+
   const progress = estimatedDuration > 0 ? (currentTime / estimatedDuration) * 100 : 0;
 
-  // Generate waveform bar heights — fixed per render
+  // Generate stable visual variation without restricted randomness.
   const waveformBars = useMemo(
-    () => Array.from({ length: 80 }, () => 0.15 + Math.random() * 0.85),
+    () =>
+      Array.from({ length: 80 }, (_, index) => {
+        const wave = Math.sin((index + 1) * 1.37) + Math.cos((index + 1) * 0.61);
+        return 0.2 + ((wave + 2) / 4) * 0.8;
+      }),
     [],
   );
 
@@ -168,13 +240,40 @@ export function Briefing() {
       <div className="p-6 lg:p-8 space-y-6 max-w-4xl">
         {/* Header */}
         <div>
-          <div className="flex items-center gap-3">
-            <Volume2 className="w-6 h-6 text-blue-600" />
-            <h1 className="text-4xl font-semibold text-slate-900">Intelligence Briefing</h1>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="flex items-center gap-3">
+                <Volume2 className="w-6 h-6 text-blue-600" />
+                <h1 className="text-4xl font-semibold text-slate-900">Intelligence Briefing</h1>
+              </div>
+              <p className="text-slate-500 text-sm mt-1">
+                AI-generated executive summary for {getIndustryLabel(preferences.industry)}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={generateLiveBriefing} disabled={isGenerating || filteredTrends.length === 0}>
+                {isGenerating ? "Generating with OpenAI..." : "Generate with OpenAI"}
+              </Button>
+              {liveScript ? (
+                <Button variant="outline" onClick={useDraftBriefing} disabled={isGenerating}>
+                  Use draft version
+                </Button>
+              ) : null}
+            </div>
           </div>
-          <p className="text-slate-500 text-sm mt-1">
-            AI-generated executive summary for {getIndustryLabel(preferences.industry)}
-          </p>
+        </div>
+
+        {generationError ? (
+          <Alert variant="destructive">
+            <AlertTriangle />
+            <AlertTitle>MiniMax request failed</AlertTitle>
+            <AlertDescription>{generationError}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        <div className="text-xs text-slate-500">
+          Source: {liveScript ? `Live OpenAI response${liveModel ? ` (${liveModel})` : ""}` : "Local draft from trend data"}
         </div>
 
         {/* Audio Player Card */}
@@ -205,12 +304,15 @@ export function Briefing() {
           </div>
 
           {/* Progress bar */}
-          <div className="relative h-1 bg-slate-200 rounded-full mb-4 cursor-pointer group"
+          <button
+            type="button"
+            className="relative h-1 w-full bg-slate-200 rounded-full mb-4 cursor-pointer group"
             onClick={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
               const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
               setCurrentTime(Math.floor(pct * estimatedDuration));
             }}
+            aria-label="Jump to a position in the briefing"
           >
             <div
               className="absolute h-full bg-blue-500 rounded-full transition-all duration-300"
@@ -220,7 +322,7 @@ export function Briefing() {
               className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-blue-600 rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
               style={{ left: `${progress}%`, marginLeft: "-6px" }}
             />
-          </div>
+          </button>
 
           {/* Time labels */}
           <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium tabular-nums mb-5">
@@ -263,7 +365,7 @@ export function Briefing() {
             </div>
             <div className="flex items-center gap-1">
               <Sparkles className="w-3 h-3" />
-              <span>AI-generated</span>
+              <span>{liveScript ? "MiniMax-generated" : "Draft-generated"}</span>
             </div>
             <div className="flex items-center gap-1">
               <FileText className="w-3 h-3" />
