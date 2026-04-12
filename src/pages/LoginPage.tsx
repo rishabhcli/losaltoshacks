@@ -6,24 +6,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { BackgroundBubbles } from "@/components/market/BackgroundBubbles";
 import { usePreferences } from "@/hooks/usePreferences";
-import { getStoredAccounts, saveStoredAccounts, validateEmail, type StoredAccount } from "@/lib/auth";
+import { getAuthErrorMessage, toCurrentUser, validateEmail } from "@/lib/auth";
+import { insforge } from "@/lib/insforge";
 import { clearSplashShown } from "@/lib/splash";
 import { toast } from "sonner";
 
 type Mode = "signin" | "create";
 type Step = "form" | "verify";
 
-function generateCode(): string {
-  const array = new Uint32Array(1);
-  crypto.getRandomValues(array);
-  // Map to 7-digit range: 1000000–9999999
-  const code = 1000000 + (array[0] % 9000000);
-  return code.toString();
-}
-
 export function LoginPage() {
   const navigate = useNavigate();
-  const { login } = usePreferences();
+  const { currentUser, isAuthReady, login } = usePreferences();
   const [mode, setMode] = useState<Mode>("signin");
   const [step, setStep] = useState<Step>("form");
   const [email, setEmail] = useState("");
@@ -33,11 +26,16 @@ export function LoginPage() {
   const [error, setError] = useState("");
   const [emailError, setEmailError] = useState("");
   const [emailTouched, setEmailTouched] = useState(false);
-  const [verificationCode, setVerificationCode] = useState("");
-  const [codeInput, setCodeInput] = useState<string[]>(Array(7).fill(""));
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [codeInput, setCodeInput] = useState<string[]>(Array(6).fill(""));
   const digitRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // Focus first digit input when entering verification step
+  useEffect(() => {
+    if (isAuthReady && currentUser) {
+      navigate("/", { replace: true });
+    }
+  }, [currentUser, isAuthReady, navigate]);
+
   useEffect(() => {
     if (step === "verify") {
       digitRefs.current[0]?.focus();
@@ -65,9 +63,11 @@ export function LoginPage() {
 
   const isEmailInvalid = emailTouched && emailError !== "";
 
-  const handleSignIn = () => {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  const handleSignIn = async () => {
     setError("");
-    if (!email.trim() || !password.trim()) {
+    if (!normalizedEmail || !password.trim()) {
       setError("Please fill in all fields");
       return;
     }
@@ -79,30 +79,38 @@ export function LoginPage() {
       return;
     }
 
-    const accounts = getStoredAccounts();
-    const account = accounts.find(a => a.email.toLowerCase() === email.trim().toLowerCase());
-    if (!account) {
-      setError("No account found with that email");
+    setIsSubmitting(true);
+
+    const { data, error: authError } = await insforge.auth.signInWithPassword({
+      email: normalizedEmail,
+      password,
+    });
+
+    setIsSubmitting(false);
+
+    if (authError) {
+      setError(getAuthErrorMessage(authError, "Unable to sign in"));
       return;
     }
-    if (account.password !== password) {
-      setError("Incorrect password");
+
+    if (!data?.user) {
+      setError("Unable to sign in");
       return;
     }
-    // Clear splash so it replays after login
+
     clearSplashShown();
-    login(account.email);
+    login(toCurrentUser(data.user));
     navigate("/");
   };
 
-  const handleCreateAccount = () => {
+  const handleCreateAccount = async () => {
     setError("");
-    if (!displayName.trim() || !email.trim() || !password.trim()) {
+    if (!displayName.trim() || !normalizedEmail || !password.trim()) {
       setError("Please fill in all fields");
       return;
     }
-    if (password.length < 4) {
-      setError("Password must be at least 4 characters");
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters");
       return;
     }
 
@@ -113,61 +121,94 @@ export function LoginPage() {
       return;
     }
 
-    const accounts = getStoredAccounts();
-    if (accounts.find(a => a.email.toLowerCase() === email.trim().toLowerCase())) {
-      setError("An account with this email already exists");
-      return;
-    }
+    setIsSubmitting(true);
 
-    // Generate verification code and switch to verify step
-    const code = generateCode();
-    setVerificationCode(code);
-    setCodeInput(Array(7).fill(""));
-    setStep("verify");
-    setError("");
-    toast("Your verification code is: " + code, { duration: 15000 });
-  };
-
-  const handleVerify = () => {
-    setError("");
-    const enteredCode = codeInput.join("");
-    if (enteredCode.length !== 7) {
-      setError("Please enter the full 7-digit code");
-      return;
-    }
-    if (enteredCode !== verificationCode) {
-      setError("Invalid verification code. Please try again.");
-      return;
-    }
-
-    // Code is correct — create the account
-    const accounts = getStoredAccounts();
-    const newAccount: StoredAccount = {
-      email: email.trim().toLowerCase(),
+    const { data, error: authError } = await insforge.auth.signUp({
+      email: normalizedEmail,
       password,
-      displayName: displayName.trim(),
-    };
-    saveStoredAccounts([...accounts, newAccount]);
+      name: displayName.trim(),
+    });
+
+    setIsSubmitting(false);
+
+    if (authError) {
+      setError(getAuthErrorMessage(authError, "Unable to create your account"));
+      return;
+    }
+
+    if (data?.requireEmailVerification) {
+      setCodeInput(Array(6).fill(""));
+      setStep("verify");
+      toast.success("We sent a 6-digit verification code to your email.");
+      return;
+    }
+
+    if (!data?.user) {
+      setError("Unable to create your account");
+      return;
+    }
+
     clearSplashShown();
-    login(newAccount.email);
+    login(toCurrentUser(data.user, displayName.trim()));
     navigate("/");
   };
 
-  const handleResendCode = () => {
-    const code = generateCode();
-    setVerificationCode(code);
-    setCodeInput(Array(7).fill(""));
+  const handleVerify = async () => {
     setError("");
-    toast("Your verification code is: " + code, { duration: 15000 });
-    // Focus first input
+    const enteredCode = codeInput.join("");
+    if (enteredCode.length !== 6) {
+      setError("Please enter the full 6-digit code");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    const { data, error: authError } = await insforge.auth.verifyEmail({
+      email: normalizedEmail,
+      otp: enteredCode,
+    });
+
+    setIsSubmitting(false);
+
+    if (authError) {
+      setError(getAuthErrorMessage(authError, "Unable to verify your email"));
+      return;
+    }
+
+    if (!data?.user) {
+      setError("Unable to verify your email");
+      return;
+    }
+
+    clearSplashShown();
+    login(toCurrentUser(data.user, displayName.trim()));
+    navigate("/");
+  };
+
+  const handleResendCode = async () => {
+    setError("");
+    setIsSubmitting(true);
+
+    const { error: authError } = await insforge.auth.resendVerificationEmail({
+      email: normalizedEmail,
+    });
+
+    setIsSubmitting(false);
+
+    if (authError) {
+      setError(getAuthErrorMessage(authError, "Unable to resend verification code"));
+      return;
+    }
+
+    setCodeInput(Array(6).fill(""));
+    toast.success("Verification code sent.");
     setTimeout(() => digitRefs.current[0]?.focus(), 50);
   };
 
   const handleBackToForm = () => {
     setStep("form");
     setError("");
-    setCodeInput(Array(7).fill(""));
-    setVerificationCode("");
+    setCodeInput(Array(6).fill(""));
   };
 
   const handleDigitChange = useCallback((index: number, value: string) => {
@@ -179,10 +220,10 @@ export function LoginPage() {
       return next;
     });
     // Auto-advance to next input
-    if (digit && index < 6) {
+    if (digit && index < codeInput.length - 1) {
       digitRefs.current[index + 1]?.focus();
     }
-  }, []);
+  }, [codeInput.length]);
 
   const handleDigitKeyDown = useCallback(
     (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -196,23 +237,30 @@ export function LoginPage() {
 
   const handleDigitPaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>) => {
     e.preventDefault();
-    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 7);
+    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, codeInput.length);
     if (!pasted) return;
-    const newCode = Array(7).fill("");
+    const newCode = Array(codeInput.length).fill("");
     for (let i = 0; i < pasted.length; i++) {
       newCode[i] = pasted[i];
     }
     setCodeInput(newCode);
-    // Focus the next empty slot or the last one
-    const focusIndex = Math.min(pasted.length, 6);
+    const focusIndex = Math.min(pasted.length, codeInput.length - 1);
     setTimeout(() => digitRefs.current[focusIndex]?.focus(), 0);
-  }, []);
+  }, [codeInput.length]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (mode === "signin") handleSignIn();
-    else handleCreateAccount();
+    if (isSubmitting) return;
+    if (mode === "signin") {
+      void handleSignIn();
+      return;
+    }
+    void handleCreateAccount();
   };
+
+  if (!isAuthReady) {
+    return null;
+  }
 
   return (
     <div className="relative min-h-screen flex items-center justify-center">
@@ -230,14 +278,13 @@ export function LoginPage() {
                 </div>
                 <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">Check your email</h1>
                 <p className="text-sm text-slate-500 mt-2">
-                  We sent a 7-digit code to{" "}
-                  <span className="font-medium text-slate-700">{email.trim().toLowerCase()}</span>
+                  We sent a 6-digit code to <span className="font-medium text-slate-700">{normalizedEmail}</span>
                 </p>
               </div>
 
-              {/* 7 digit inputs */}
+              {/* 6 digit inputs */}
               <div className="flex gap-2 justify-center mb-6">
-                {Array.from({ length: 7 }).map((_, i) => (
+                {Array.from({ length: 6 }).map((_, i) => (
                   <input
                     key={i}
                     ref={el => {
@@ -265,10 +312,11 @@ export function LoginPage() {
 
               <Button
                 type="button"
-                onClick={handleVerify}
+                onClick={() => void handleVerify()}
+                disabled={isSubmitting}
                 className="w-full bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 rounded-lg hover:shadow-[0_0_0_3px_rgba(37,99,235,0.12)] transition-all h-11"
               >
-                Verify
+                {isSubmitting ? "Verifying..." : "Verify"}
               </Button>
 
               <div className="flex items-center justify-between mt-4">
@@ -283,6 +331,7 @@ export function LoginPage() {
                 <button
                   type="button"
                   onClick={handleResendCode}
+                  disabled={isSubmitting}
                   className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors cursor-pointer"
                 >
                   Resend code
@@ -408,9 +457,10 @@ export function LoginPage() {
 
                 <Button
                   type="submit"
+                  disabled={isSubmitting}
                   className="w-full bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 rounded-lg hover:shadow-[0_0_0_3px_rgba(37,99,235,0.12)] transition-all h-11 mt-2"
                 >
-                  {mode === "signin" ? "Sign in" : "Create account"}
+                  {isSubmitting ? (mode === "signin" ? "Signing in..." : "Creating account...") : mode === "signin" ? "Sign in" : "Create account"}
                 </Button>
               </form>
             </>

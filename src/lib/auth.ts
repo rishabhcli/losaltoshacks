@@ -1,4 +1,4 @@
-const ACCOUNTS_KEY = "marketpulse-accounts";
+import type { CurrentUser } from "@/contexts/PreferencesContext";
 
 const KNOWN_EMAIL_DOMAINS = new Set([
   "gmail.com",
@@ -85,22 +85,40 @@ export function validateEmail(email: string): { valid: boolean; error?: string }
   return { valid: false, error: "This email domain is not recognized" };
 }
 
-export interface StoredAccount {
-  email: string;
-  password: string;
-  displayName: string;
+interface AuthUserLike {
+  id?: string;
+  email?: string | null;
+  emailVerified?: boolean;
+  profile?: {
+    name?: string | null;
+  } | null;
 }
 
-export function getStoredAccounts(): StoredAccount[] {
-  try {
-    const raw = localStorage.getItem(ACCOUNTS_KEY);
-    if (raw) return JSON.parse(raw) as StoredAccount[];
-  } catch {
-    // ignore
+export function toCurrentUser(user: AuthUserLike, fallbackDisplayName?: string): CurrentUser {
+  const email = user.email?.trim().toLowerCase() ?? "";
+  const displayName = user.profile?.name?.trim() || fallbackDisplayName?.trim() || email.split("@")[0] || "User";
+
+  return {
+    id: user.id ?? email,
+    email,
+    displayName,
+    emailVerified: Boolean(user.emailVerified),
+  };
+}
+
+export function getAuthErrorMessage(error: unknown, fallback: string): string {
+  if (!error || typeof error !== "object") {
+    return fallback;
   }
-  return [];
-}
 
-export function saveStoredAccounts(accounts: StoredAccount[]) {
-  localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
+  const typedError = error as {
+    message?: string;
+    nextActions?: string;
+  };
+
+  const details = [typedError.message, typedError.nextActions].filter(
+    (value): value is string => Boolean(value && value.trim()),
+  );
+
+  return details[0] ? details.join(". ") : fallback;
 }

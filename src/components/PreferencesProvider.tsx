@@ -1,8 +1,7 @@
 import { useState, useCallback, useEffect, type ReactNode } from "react";
 import { PreferencesContext, type UserPreferences, type CurrentUser } from "@/contexts/PreferencesContext";
-import { getStoredAccounts } from "@/lib/auth";
-
-const CURRENT_USER_KEY = "marketpulse-current-user";
+import { getAuthErrorMessage, toCurrentUser } from "@/lib/auth";
+import { insforge } from "@/lib/insforge";
 
 function prefsKeyForEmail(email: string): string {
   return `marketpulse-prefs-${email}`;
@@ -13,17 +12,6 @@ const defaultPreferences: UserPreferences = {
   businessName: "",
   hasCompletedSetup: false,
 };
-
-function getCurrentUserEmail(): string | null {
-  return localStorage.getItem(CURRENT_USER_KEY);
-}
-
-function resolveCurrentUser(email: string): CurrentUser | null {
-  const accounts = getStoredAccounts();
-  const account = accounts.find(a => a.email === email);
-  if (!account) return null;
-  return { email: account.email, displayName: account.displayName };
-}
 
 function loadPreferences(email: string | null): UserPreferences {
   if (!email) return defaultPreferences;
@@ -49,16 +37,49 @@ function savePreferences(email: string | null, prefs: UserPreferences) {
 }
 
 export function PreferencesProvider({ children }: { children: ReactNode }) {
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(() => {
-    const email = getCurrentUserEmail();
-    return email ? resolveCurrentUser(email) : null;
-  });
-  const [preferences, setPreferences] = useState<UserPreferences>(() => loadPreferences(currentUser?.email ?? null));
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [preferences, setPreferences] = useState<UserPreferences>(defaultPreferences);
 
-  // Persist to localStorage on change
   useEffect(() => {
+    let cancelled = false;
+
+    async function bootstrapSession() {
+      const { data, error } = await insforge.auth.getCurrentUser();
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error(getAuthErrorMessage(error, "Failed to restore InsForge session"));
+        setCurrentUser(null);
+        setPreferences(defaultPreferences);
+        setIsAuthReady(true);
+        return;
+      }
+
+      if (data?.user?.email) {
+        const user = toCurrentUser(data.user);
+        setCurrentUser(user);
+        setPreferences(loadPreferences(user.email));
+      } else {
+        setCurrentUser(null);
+        setPreferences(defaultPreferences);
+      }
+
+      setIsAuthReady(true);
+    }
+
+    void bootstrapSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthReady) return;
     savePreferences(currentUser?.email ?? null, preferences);
-  }, [preferences, currentUser]);
+  }, [isAuthReady, preferences, currentUser]);
 
   const setIndustry = useCallback((industry: string) => {
     setPreferences(prev => ({ ...prev, industry }));
@@ -76,15 +97,16 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     setPreferences({ ...defaultPreferences, hasCompletedSetup: true });
   }, []);
 
-  const login = useCallback((email: string) => {
-    localStorage.setItem(CURRENT_USER_KEY, email);
-    const user = resolveCurrentUser(email);
+  const login = useCallback((user: CurrentUser) => {
     setCurrentUser(user);
-    setPreferences(loadPreferences(email));
+    setPreferences(loadPreferences(user.email));
   }, []);
 
-  const logout = useCallback(() => {
-    localStorage.removeItem(CURRENT_USER_KEY);
+  const logout = useCallback(async () => {
+    const { error } = await insforge.auth.signOut();
+    if (error) {
+      console.error(getAuthErrorMessage(error, "Failed to sign out"));
+    }
     setCurrentUser(null);
     setPreferences(defaultPreferences);
   }, []);
@@ -92,6 +114,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   return (
     <PreferencesContext.Provider
       value={{
+        isAuthReady,
         preferences,
         currentUser,
         setIndustry,

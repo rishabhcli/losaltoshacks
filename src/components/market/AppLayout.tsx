@@ -33,15 +33,15 @@ const navItems = [
 export function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { preferences, currentUser, logout } = usePreferences();
+  const { isAuthReady, preferences, currentUser, logout } = usePreferences();
   const [showSplash, setShowSplash] = useState(() => !wasSplashShown());
 
   // Auth guard: redirect to /login if not logged in
   useEffect(() => {
-    if (!currentUser) {
+    if (isAuthReady && !currentUser) {
       navigate("/login", { replace: true });
     }
-  }, [currentUser, navigate]);
+  }, [currentUser, isAuthReady, navigate]);
 
   const handleSplashComplete = useCallback(() => {
     setShowSplash(false);
@@ -51,13 +51,13 @@ export function AppLayout() {
     }
   }, [preferences.hasCompletedSetup, navigate]);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate("/login", { replace: true });
   };
 
   // Don't render anything until auth is confirmed
-  if (!currentUser) return null;
+  if (!isAuthReady || !currentUser) return null;
 
   const renderNavItem = (item: (typeof navItems)[number]) => {
     const isActive = item.path === "/" ? location.pathname === "/" : location.pathname.startsWith(item.path);

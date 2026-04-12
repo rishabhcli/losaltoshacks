@@ -1,7 +1,7 @@
 import { loadEnv } from "vite";
 import { expect, test } from "vitest";
 
-const ENV_VARS = ["VITE_FOUNDRY_API_URL", "VITE_FOUNDRY_CLIENT_ID", "VITE_FOUNDRY_REDIRECT_URL"];
+const ENV_VARS = ["VITE_INSFORGE_URL", "VITE_INSFORGE_ANON_KEY"];
 
 for (const envVar of ENV_VARS) {
   test.skipIf(process.env.VERIFY_ENV_PRODUCTION !== "true")(`production env should contain ${envVar}`, () => {
