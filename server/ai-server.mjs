@@ -905,6 +905,30 @@ function extractKeywordsFromResult(title, description) {
   return [...new Set(chosen)].slice(0, 4).join(", ");
 }
 
+// Domains blocked regardless of Brave's safe-search result
+const BLOCKED_DOMAINS = new Set([
+  "pornhub.com", "xvideos.com", "xhamster.com", "xnxx.com", "redtube.com",
+  "youporn.com", "tube8.com", "spankbang.com", "porntrex.com", "beeg.com",
+  "4tube.com", "slutload.com", "tnaflix.com", "drtuber.com", "hclips.com",
+  "onlyfans.com", "fansly.com", "manyvids.com", "clips4sale.com",
+  "brazzers.com", "bangbros.com", "naughtyamerica.com", "realitykings.com",
+  "adultfriendfinder.com", "ashleymadison.com",
+  "4chan.org", "rule34.xxx", "gelbooru.com", "danbooru.donmai.us",
+  "nhentai.net", "e-hentai.org", "hentaihaven.xxx",
+]);
+
+function isSafeUrl(url) {
+  if (!url) return false;
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./, "");
+    // Block any domain that contains known NSFW keywords
+    if (/\b(porn|xxx|sex|adult|nude|nsfw|hentai|escort|cam(girl|boy|live))\b/i.test(hostname)) return false;
+    return !BLOCKED_DOMAINS.has(hostname);
+  } catch {
+    return false;
+  }
+}
+
 async function runBraveSearch(query, retries = 2) {
   const apiKey = process.env.BRAVE_SEARCH_API_KEY;
   if (!apiKey) return [];
@@ -915,6 +939,7 @@ async function runBraveSearch(query, retries = 2) {
   searchUrl.searchParams.set("search_lang", "en");
   searchUrl.searchParams.set("country", "us");
   searchUrl.searchParams.set("freshness", "pw"); // past week
+  searchUrl.searchParams.set("safesearch", "strict"); // block adult content at API level
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -937,7 +962,9 @@ async function runBraveSearch(query, retries = 2) {
         return [];
       }
       const data = await res.json();
-      return data?.web?.results ?? [];
+      const results = data?.web?.results ?? [];
+      // Secondary filter: drop any result that slipped through safe-search
+      return results.filter(r => isSafeUrl(r.url));
     } catch (err) {
       console.error(`[bg-job] Brave Search error for "${query}":`, err.message);
       return [];
