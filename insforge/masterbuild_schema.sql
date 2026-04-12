@@ -29,7 +29,8 @@ create table if not exists public.missions (
 create table if not exists public.agents (
   id uuid primary key default gen_random_uuid(),
   mission_id uuid references public.missions(id) on delete cascade,
-  agent_id integer not null unique check (agent_id between 1 and 5),
+  agent_id integer not null check (agent_id between 1 and 5),
+  unique(mission_id, agent_id),
   name text not null,
   platform text not null check (platform in ('youtube', 'x', 'reddit', 'substack', 'market_research')),
   role text not null,
