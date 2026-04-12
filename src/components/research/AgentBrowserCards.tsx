@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type SyntheticEvent } from "react";
 import { Badge } from "@/components/ui/badge";
 import { AGENTS, PLATFORM_COLORS, type AgentData, type DiscoveredContent } from "@/hooks/useAgentData";
 
@@ -6,6 +6,12 @@ interface Props {
   agents: AgentData[];
   discoveries: DiscoveredContent[];
   isRunning: boolean;
+  latestMission?: {
+    liveUrl: string | null;
+    liveUrl2: string | null;
+    liveUrl3: string | null;
+    liveUrl4: string | null;
+  } | null;
 }
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
@@ -33,18 +39,81 @@ function statusColor(status: AgentData["status"]) {
   }
 }
 
+function isAbsoluteHttpUrl(value: string | null | undefined): value is string {
+  return typeof value === "string" && /^https?:\/\//i.test(value);
+}
+
 /** Poll interval (ms) — high frequency for smooth livestream feel (~8fps) */
 const PREVIEW_POLL_MS = 120;
 
-export function AgentBrowserCards({ agents, discoveries, isRunning }: Props) {
+export function AgentBrowserCards({ agents, discoveries, isRunning, latestMission }: Props) {
   const [refreshKey, setRefreshKey] = useState(0);
+  const [cloudEmbedEnabled, setCloudEmbedEnabled] = useState<Record<number, boolean>>({});
+  const [cloudEmbedLoaded, setCloudEmbedLoaded] = useState<Record<number, boolean>>({});
+  const cloudUrlByAgentId: Record<number, string | null> = {
+    1: isAbsoluteHttpUrl(latestMission?.liveUrl) ? latestMission.liveUrl : null,
+    2: isAbsoluteHttpUrl(latestMission?.liveUrl2) ? latestMission.liveUrl2 : null,
+    3: isAbsoluteHttpUrl(latestMission?.liveUrl3) ? latestMission.liveUrl3 : null,
+    4: isAbsoluteHttpUrl(latestMission?.liveUrl4) ? latestMission.liveUrl4 : null,
+  };
+  const hasAllCloudPreviewsReady = [1, 2, 3, 4].every((agentId) => (
+    Boolean(cloudUrlByAgentId[agentId])
+    && cloudEmbedEnabled[agentId] !== false
+    && cloudEmbedLoaded[agentId] === true
+  ));
 
-  // While the mission is running, poll frames at high frequency (local JPEGs from browser-use / preview stream).
   useEffect(() => {
-    if (!isRunning) return;
+    setCloudEmbedEnabled({});
+    setCloudEmbedLoaded({});
+  }, [
+    latestMission?.liveUrl,
+    latestMission?.liveUrl2,
+    latestMission?.liveUrl3,
+    latestMission?.liveUrl4,
+  ]);
+
+  useEffect(() => {
+    const timers: number[] = [];
+    for (const agentId of [1, 2, 3, 4]) {
+      const hasCloudUrl = Boolean(cloudUrlByAgentId[agentId]);
+      const embedDisabled = cloudEmbedEnabled[agentId] === false;
+      const embedLoaded = cloudEmbedLoaded[agentId] === true;
+      if (!hasCloudUrl || embedDisabled || embedLoaded) continue;
+      const timer = window.setTimeout(() => {
+        setCloudEmbedEnabled((prev) => ({ ...prev, [agentId]: false }));
+      }, 8000);
+      timers.push(timer);
+    }
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [
+    cloudUrlByAgentId[1], cloudUrlByAgentId[2], cloudUrlByAgentId[3], cloudUrlByAgentId[4],
+    cloudEmbedEnabled[1], cloudEmbedEnabled[2], cloudEmbedEnabled[3], cloudEmbedEnabled[4],
+    cloudEmbedLoaded[1], cloudEmbedLoaded[2], cloudEmbedLoaded[3], cloudEmbedLoaded[4],
+  ]);
+
+  // While the mission is running, poll local fallback frames unless all four cloud sessions are available.
+  useEffect(() => {
+    if (!isRunning || hasAllCloudPreviewsReady) return;
     const interval = setInterval(() => setRefreshKey((k) => k + 1), PREVIEW_POLL_MS);
     return () => clearInterval(interval);
-  }, [isRunning]);
+  }, [isRunning, hasAllCloudPreviewsReady]);
+
+  const handleCloudIframeLoad = (agentId: number, event: SyntheticEvent<HTMLIFrameElement>) => {
+    const frame = event.currentTarget;
+    try {
+      const href = frame.contentWindow?.location?.href ?? "";
+      if (!href || href === "about:blank") {
+        setCloudEmbedEnabled((prev) => ({ ...prev, [agentId]: false }));
+        setCloudEmbedLoaded((prev) => ({ ...prev, [agentId]: false }));
+        return;
+      }
+    } catch {
+      // Cross-origin frames throw on location access; treat that as successfully loaded.
+    }
+    setCloudEmbedLoaded((prev) => ({ ...prev, [agentId]: true }));
+  };
 
   const discoveryCounts = useMemo(() => {
     const counts: Record<number, number> = {};
@@ -73,6 +142,13 @@ export function AgentBrowserCards({ agents, discoveries, isRunning }: Props) {
           const currentUrl = data?.current_url ?? "";
           const color = PLATFORM_COLORS[def.platform] ?? def.color;
           const count = discoveryCounts[def.agentId] ?? 0;
+          const liveCloudUrl = cloudUrlByAgentId[def.agentId] ?? null;
+          const useCloudEmbed = Boolean(liveCloudUrl) && cloudEmbedEnabled[def.agentId] !== false;
+          const cloudEmbedVisible = cloudEmbedLoaded[def.agentId] === true;
+          const cloudPreviewSrc = liveCloudUrl
+            ? `${liveCloudUrl}${String(liveCloudUrl).includes("?") ? "&" : "?"}ui=false`
+            : "";
+          const fallbackPreviewSrc = `${API_BASE}/api/agent-stream/${def.agentId}/frame?t=${refreshKey}`;
 
           const isActive = ["searching", "exploiting", "found_trend", "reassigning"].includes(status);
 
@@ -104,11 +180,37 @@ export function AgentBrowserCards({ agents, discoveries, isRunning }: Props) {
               {/* Preview image */}
               <div className="relative aspect-video bg-slate-100 dark:bg-slate-800 overflow-hidden">
                 <img
-                  src={`${API_BASE}/api/agent-stream/${def.agentId}/frame?t=${refreshKey}`}
+                  src={fallbackPreviewSrc}
                   alt={`Agent ${def.name} preview`}
                   className="w-full h-full object-cover"
                   loading="eager"
                 />
+                {useCloudEmbed && (
+                  <iframe
+                    src={cloudPreviewSrc}
+                    title={`Agent ${def.name} cloud preview`}
+                    className={`absolute inset-0 w-full h-full border-0 transition-opacity duration-300 ${
+                      cloudEmbedVisible ? "opacity-100" : "opacity-0"
+                    }`}
+                    loading="eager"
+                    allow="autoplay"
+                    onLoad={(event) => handleCloudIframeLoad(def.agentId, event)}
+                    onError={() => {
+                      setCloudEmbedEnabled((prev) => ({ ...prev, [def.agentId]: false }));
+                      setCloudEmbedLoaded((prev) => ({ ...prev, [def.agentId]: false }));
+                    }}
+                  />
+                )}
+                {liveCloudUrl && (
+                  <a
+                    href={liveCloudUrl}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="absolute bottom-2 left-2 rounded bg-black/65 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-white"
+                  >
+                    Open cloud
+                  </a>
+                )}
                 {/* Platform badge */}
                 <Badge
                   className="absolute top-2 left-2 text-[10px] font-bold uppercase tracking-wider border-0"

@@ -163,7 +163,21 @@ export function MarketResearch() {
             <div className="flex-1 overflow-y-auto dark:bg-slate-950/20">
               {/* Agent browser preview cards */}
               <div className="px-4 pt-4 pb-2">
-                <AgentBrowserCards agents={agents} discoveries={discoveries} isRunning={isRunning} />
+                <AgentBrowserCards
+                  agents={agents}
+                  discoveries={discoveries}
+                  isRunning={isRunning}
+                  latestMission={
+                    latestMission
+                      ? {
+                          liveUrl: latestMission.liveUrl,
+                          liveUrl2: latestMission.liveUrl2,
+                          liveUrl3: latestMission.liveUrl3,
+                          liveUrl4: latestMission.liveUrl4,
+                        }
+                      : null
+                  }
+                />
               </div>
 
               {/* Discovery grid + Mission logs side by side */}
@@ -245,6 +259,7 @@ export function MarketResearch() {
                 missionPrompt={latestMission?.prompt ?? ""}
                 isRunning={isRunning}
                 missionStatus={latestMission?.status ?? null}
+                finalOptions={latestMission?.finalOptions ?? null}
               />
             </div>
 

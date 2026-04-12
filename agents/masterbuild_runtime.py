@@ -62,6 +62,8 @@ GENERIC_DISCOVERY_SUMMARIES = {
     "substack",
     "substack.com",
 }
+BROWSER_USE_CLOUD_TERMINAL_STATUSES: set[str] = {"idle", "stopped", "timed_out", "error"}
+URL_PATTERN = re.compile(r"https?://[^\s<>()\"']+")
 
 
 def is_valid_platform_content_url(platform: str, url: str) -> bool:
@@ -657,6 +659,268 @@ class BraveSearchClient:
                 if len(curated) >= max_results:
                     return curated
         return curated
+
+
+def _first_string(payload: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _clean_url(url: str) -> str:
+    candidate = str(url or "").strip().rstrip(".,);]}>'\"")
+    if candidate.startswith("http://") or candidate.startswith("https://"):
+        return candidate
+    return ""
+
+
+def _collect_urls(value: Any, urls: set[str], *, depth: int = 0, max_depth: int = 4) -> None:
+    if depth > max_depth:
+        return
+    if isinstance(value, str):
+        for match in URL_PATTERN.findall(value):
+            cleaned = _clean_url(match)
+            if cleaned:
+                urls.add(cleaned)
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_lower = str(key).lower()
+            if key_lower in {"url", "href", "source_url", "current_url", "link"} and isinstance(item, str):
+                cleaned = _clean_url(item)
+                if cleaned:
+                    urls.add(cleaned)
+                continue
+            _collect_urls(item, urls, depth=depth + 1, max_depth=max_depth)
+        return
+    if isinstance(value, list):
+        for item in value[:50]:
+            _collect_urls(item, urls, depth=depth + 1, max_depth=max_depth)
+
+
+def _extract_urls_from_cloud_message(message: dict[str, Any]) -> list[str]:
+    urls: set[str] = set()
+    _collect_urls(message.get("summary", ""), urls)
+    _collect_urls(message.get("data", {}), urls)
+    _collect_urls(message.get("raw", {}), urls)
+    return sorted(urls)
+
+
+def _normalize_cloud_findings(output: Any) -> list[dict[str, str]]:
+    payload = output
+    if isinstance(output, str):
+        text = output.strip()
+        if text:
+            try:
+                payload = extract_json_block(text)
+            except Exception:
+                payload = {}
+        else:
+            payload = {}
+
+    findings_raw: Any = []
+    if isinstance(payload, dict):
+        findings_raw = payload.get("findings", [])
+    elif isinstance(payload, list):
+        findings_raw = payload
+
+    if not isinstance(findings_raw, list):
+        return []
+
+    findings: list[dict[str, str]] = []
+    for entry in findings_raw:
+        if not isinstance(entry, dict):
+            continue
+        finding = {
+            "title": str(entry.get("title", "")).strip(),
+            "url": _clean_url(str(entry.get("url", "")).strip()),
+            "summary": str(entry.get("summary", "")).strip(),
+            "keywords": str(entry.get("keywords", "")).strip(),
+        }
+        if finding["url"]:
+            findings.append(finding)
+    return findings
+
+
+class BrowserUseCloudClient:
+    def __init__(self) -> None:
+        self.api_key = os.getenv("BROWSER_USE_API_KEY", "").strip()
+        self.base_url = os.getenv("BROWSER_USE_API_BASE_URL", "https://api.browser-use.com/api/v3").rstrip("/")
+        self.default_model = os.getenv("MASTERBUILD_BROWSER_CLOUD_MODEL", "claude-sonnet-4.6").strip() or "claude-sonnet-4.6"
+        self.proxy_country_code = os.getenv("MASTERBUILD_BROWSER_CLOUD_PROXY_COUNTRY", "us").strip().lower() or "us"
+        self.poll_seconds = max(0.8, float(os.getenv("MASTERBUILD_BROWSER_CLOUD_POLL_SECONDS", "2")))
+        self.max_findings = max(3, min(12, int(os.getenv("MASTERBUILD_BROWSER_CLOUD_MAX_FINDINGS", "6"))))
+        timeout_seconds = float(os.getenv("MASTERBUILD_BROWSER_CLOUD_TIMEOUT_SECONDS", "35"))
+        self._client = (
+            httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=httpx.Timeout(connect=10.0, read=timeout_seconds, write=15.0, pool=10.0),
+                headers={
+                    "X-Browser-Use-API-Key": self.api_key,
+                    "Content-Type": "application/json",
+                },
+            )
+            if self.api_key
+            else None
+        )
+
+    @property
+    def enabled(self) -> bool:
+        return self._client is not None
+
+    async def close(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+
+    async def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        retries: int = 4,
+        **kwargs: Any,
+    ) -> Any:
+        if self._client is None:
+            raise RuntimeError("Browser Use Cloud API key missing.")
+
+        last_error: Exception | None = None
+        for attempt in range(retries):
+            try:
+                response = await self._client.request(method, path, **kwargs)
+                if response.status_code == 429 and attempt < retries - 1:
+                    wait_seconds = min(2 ** (attempt + 1), 12)
+                    await asyncio.sleep(wait_seconds)
+                    continue
+                response.raise_for_status()
+                if not response.content:
+                    return {}
+                return response.json()
+            except httpx.HTTPStatusError as error:
+                last_error = error
+                if error.response.status_code in {429, 500, 502, 503, 504} and attempt < retries - 1:
+                    wait_seconds = min(2 ** (attempt + 1), 12)
+                    await asyncio.sleep(wait_seconds)
+                    continue
+                raise
+            except Exception as error:
+                last_error = error
+                if attempt < retries - 1:
+                    await asyncio.sleep(min(2 ** (attempt + 1), 12))
+                    continue
+                raise
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError(f"Browser Use Cloud request failed: {method} {path}")
+
+    def _normalize_session(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": _first_string(payload, "id"),
+            "status": _first_string(payload, "status").lower(),
+            "live_url": _first_string(payload, "liveUrl", "live_url"),
+            "output": payload.get("output"),
+            "last_step_summary": _first_string(payload, "lastStepSummary", "last_step_summary", "title"),
+            "step_count": int(payload.get("stepCount", payload.get("step_count", 0)) or 0),
+            "is_task_successful": bool(payload.get("isTaskSuccessful", payload.get("is_task_successful", False))),
+            "screenshot_url": _first_string(payload, "screenshotUrl", "screenshot_url"),
+        }
+
+    async def create_session(
+        self,
+        *,
+        task: str,
+        model: str | None = None,
+        output_schema: dict[str, Any] | None = None,
+        keep_alive: bool = False,
+        proxy_country_code: str | None = None,
+        profile_id: str | None = None,
+        workspace_id: str | None = None,
+        enable_recording: bool = False,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "task": task,
+            "model": (model or self.default_model),
+            "keepAlive": keep_alive,
+            "agentmail": False,
+            "enableRecording": enable_recording,
+        }
+        if proxy_country_code:
+            body["proxyCountryCode"] = proxy_country_code
+        elif self.proxy_country_code:
+            body["proxyCountryCode"] = self.proxy_country_code
+        if output_schema:
+            body["outputSchema"] = output_schema
+        if profile_id:
+            body["profileId"] = profile_id
+        if workspace_id:
+            body["workspaceId"] = workspace_id
+        payload = await self._request_json("POST", "/sessions", json=body)
+        if not isinstance(payload, dict):
+            raise RuntimeError("Invalid Browser Use Cloud create session payload.")
+        return self._normalize_session(payload)
+
+    async def get_session(self, session_id: str) -> dict[str, Any]:
+        payload = await self._request_json("GET", f"/sessions/{session_id}")
+        if not isinstance(payload, dict):
+            raise RuntimeError("Invalid Browser Use Cloud get session payload.")
+        return self._normalize_session(payload)
+
+    async def list_messages(
+        self,
+        session_id: str,
+        *,
+        after: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"limit": max(1, min(limit, 100))}
+        if after:
+            params["after"] = after
+        payload = await self._request_json("GET", f"/sessions/{session_id}/messages", params=params)
+        if not isinstance(payload, dict):
+            return {"messages": [], "has_more": False, "last_cursor": after}
+
+        rows = payload.get("messages", [])
+        messages: list[dict[str, Any]] = []
+        last_cursor = after
+        if isinstance(rows, list):
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                message_id = _first_string(row, "id")
+                if message_id:
+                    last_cursor = message_id
+                messages.append(
+                    {
+                        "id": message_id,
+                        "role": _first_string(row, "role"),
+                        "type": _first_string(row, "type"),
+                        "summary": _first_string(row, "summary", "content"),
+                        "data": row.get("data"),
+                        "screenshot_url": _first_string(row, "screenshotUrl", "screenshot_url"),
+                        "raw": row,
+                    }
+                )
+
+        return {
+            "messages": messages,
+            "has_more": bool(payload.get("hasMore", payload.get("has_more", False))),
+            "last_cursor": last_cursor,
+        }
+
+    async def stop_session(self, session_id: str, *, strategy: str = "session") -> None:
+        try:
+            await self._request_json(
+                "POST",
+                f"/sessions/{session_id}/stop",
+                json={"strategy": strategy},
+                retries=2,
+            )
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code in {404, 409}:
+                return
+            raise
 
 
 class InsForgeRuntimeClient:
@@ -1794,9 +2058,12 @@ class MasterBuildOrchestrator:
         self.preview_manager = PreviewManager()
         self.ai = MasterBuildAI()
         self.brave = BraveSearchClient()
+        self.browser_cloud = BrowserUseCloudClient()
         self.stop_event = asyncio.Event()
         self.blackboard = deque(maxlen=24)
         self.headless = os.getenv("MASTERBUILD_HEADLESS", "true").lower() != "false"
+        self.browser_mode = os.getenv("MASTERBUILD_BROWSER_MODE", "cloud").strip().lower() or "cloud"
+        self.browser_cloud_enabled = self.browser_mode == "cloud"
         self.agent_cycle_delay = float(os.getenv("MASTERBUILD_AGENT_CYCLE_DELAY", "3"))
         self.navigation_wait = float(os.getenv("MASTERBUILD_NAVIGATION_WAIT", "2"))
         self.watch_poll_seconds = float(os.getenv("MASTERBUILD_WATCH_POLL_SECONDS", "1"))
@@ -1816,7 +2083,12 @@ class MasterBuildOrchestrator:
         self.auto_complete_poll_seconds = float(os.getenv("MASTERBUILD_AUTO_COMPLETE_POLL_SECONDS", "2"))
         self.auto_complete_min_discoveries = int(os.getenv("MASTERBUILD_AUTO_COMPLETE_MIN_DISCOVERIES", "6"))
         self.auto_complete_sweep_grace_seconds = float(os.getenv("MASTERBUILD_AUTO_COMPLETE_SWEEP_GRACE_SECONDS", "10"))
-        self.enable_browser_showcase = os.getenv("MASTERBUILD_ENABLE_BROWSER_SHOWCASE", "false").lower() == "true"
+        self.auto_complete_missing_data_grace_seconds = float(
+            os.getenv("MASTERBUILD_AUTO_COMPLETE_MISSING_DATA_GRACE_SECONDS", "30")
+        )
+        # Keep visual browser sessions on by default so the UI always has live preview movement,
+        # especially when cloud sessions are unavailable and we fall back to API sweep mode.
+        self.enable_browser_showcase = os.getenv("MASTERBUILD_ENABLE_BROWSER_SHOWCASE", "true").lower() == "true"
         self.showcase_render_wait_seconds = float(os.getenv("MASTERBUILD_SHOWCASE_RENDER_WAIT_SECONDS", "0.75"))
         self.showcase_step_wait_seconds = float(os.getenv("MASTERBUILD_SHOWCASE_STEP_WAIT_SECONDS", "0.35"))
         self.sweep_result_limit = int(os.getenv("MASTERBUILD_SWEEP_RESULT_LIMIT", "4"))
@@ -1972,6 +2244,7 @@ class MasterBuildOrchestrator:
         return self._llm_health_ok
 
     async def close(self) -> None:
+        await self.browser_cloud.close()
         await self.brave.close()
         await self.ai.close()
         await self.client.close()
@@ -2028,12 +2301,20 @@ class MasterBuildOrchestrator:
         )
         openai_platforms = ", ".join(sorted(self.OPENAI_PLATFORMS)) if self._openai_available else "none (fallback to MiniMax)"
         minimax_platforms = ", ".join(sorted(self.MINIMAX_PLATFORMS))
+        cloud_mode_status = "enabled" if (self.browser_cloud_enabled and self.browser_cloud.enabled) else "disabled"
         await self.client.append_log(
             mission_id,
             agent_id=None,
             log_type="status",
-            message=f"Mission activated — Dual-LLM routing: OpenAI [{openai_platforms}] | MiniMax [{minimax_platforms}]",
-            metadata={"brave_enabled": self.brave.enabled, "openai_available": self._openai_available, "openai_model": self._openai_browser_model},
+            message=f"Mission activated — Dual-LLM routing: OpenAI [{openai_platforms}] | MiniMax [{minimax_platforms}] | Browser cloud {cloud_mode_status}",
+            metadata={
+                "brave_enabled": self.brave.enabled,
+                "openai_available": self._openai_available,
+                "openai_model": self._openai_browser_model,
+                "browser_mode": self.browser_mode,
+                "browser_cloud_enabled": self.browser_cloud_enabled,
+                "browser_cloud_ready": self.browser_cloud.enabled,
+            },
         )
         if not self.brave.enabled:
             await self.client.append_log(
@@ -2042,6 +2323,24 @@ class MasterBuildOrchestrator:
                 log_type="error",
                 message="⚠ BRAVE_SEARCH_API_KEY is missing. Source agents will fall back to direct platform browsing.",
                 metadata={},
+            )
+        use_cloud_agents = self.browser_cloud_enabled and self.browser_cloud.enabled
+        if self.browser_cloud_enabled and not self.browser_cloud.enabled:
+            await self.client.append_log(
+                mission_id,
+                agent_id=None,
+                log_type="error",
+                message="⚠ MASTERBUILD_BROWSER_MODE=cloud but BROWSER_USE_API_KEY is missing. Falling back to API sweep agents.",
+                metadata={},
+            )
+        if use_cloud_agents:
+            await self.client.update_mission(
+                mission_id,
+                live_url_1=None,
+                live_url_2=None,
+                live_url_3=None,
+                live_url_4=None,
+                live_url_5=None,
             )
 
         platform_labels = {
@@ -2063,7 +2362,7 @@ class MasterBuildOrchestrator:
             for platform in BROWSING_PLATFORMS
         }
 
-        # ── Phase 1: Fast API sweep agents (all 4 in parallel, no browser) ──
+        # ── Phase 1: Parallel source agents (cloud browser or API sweep) ──
         sweep_tasks = []
         market_research_spec: AgentSpec | None = None
         for spec in AGENT_SPECS:
@@ -2071,9 +2370,16 @@ class MasterBuildOrchestrator:
                 market_research_spec = spec
                 continue
 
+            if use_cloud_agents:
+                runner = self.run_cloud_browser_agent
+                assignment = "cloud browser"
+            else:
+                runner = self.run_api_sweep_agent
+                assignment = "api sweep"
+
             sweep_tasks.append(
                 asyncio.create_task(
-                    self.run_api_sweep_agent(
+                    runner(
                         spec,
                         mission_id=mission_id,
                         mission_prompt=prompt,
@@ -2081,6 +2387,13 @@ class MasterBuildOrchestrator:
                         curated_links=curated_links.get(spec.platform, []),
                     )
                 )
+            )
+            await self.client.append_log(
+                mission_id,
+                agent_id=spec.agent_id,
+                log_type="status",
+                message=f"Assigned {spec.name} to {assignment} ({spec.platform}).",
+                metadata={},
             )
 
         # Market research agent (Atlas) monitors discoveries as they arrive
@@ -2112,6 +2425,15 @@ class MasterBuildOrchestrator:
         showcase_task: asyncio.Task[Any] | None = None
 
         try:
+            if use_cloud_agents:
+                showcase_task = asyncio.create_task(asyncio.sleep(0))
+                await self.client.append_log(
+                    mission_id,
+                    agent_id=None,
+                    log_type="status",
+                    message="Running Browser Use Cloud mode with 4 parallel cloud sessions.",
+                    metadata={"agent_count": 4},
+                )
             pending = tasks + [control_task, completion_task]
             while pending and not self.stop_event.is_set():
                 done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
@@ -2120,6 +2442,8 @@ class MasterBuildOrchestrator:
 
                 # Check if all sweep agents are done → launch browser showcase
                 if (
+                    not use_cloud_agents
+                    and
                     self.enable_browser_showcase
                     and showcase_task is None
                     and all(t.done() for t in sweep_tasks)
@@ -2472,6 +2796,29 @@ class MasterBuildOrchestrator:
 
                 if all_sweeps_done and sweep_completed_at is None:
                     sweep_completed_at = now
+
+                if (
+                    all_sweeps_done
+                    and not discoveries
+                    and sweep_completed_at is not None
+                    and (now - sweep_completed_at) >= self.auto_complete_missing_data_grace_seconds
+                ):
+                    await self.client.append_log(
+                        mission_id,
+                        agent_id=None,
+                        log_type="status",
+                        message=(
+                            "Sweep workers finished but discovery reads are rate limited. "
+                            "Finalizing to avoid a stuck active mission."
+                        ),
+                        metadata={
+                            "elapsed_seconds": round(elapsed, 1),
+                            "grace_seconds": self.auto_complete_missing_data_grace_seconds,
+                            "reason": "no_discoveries_after_sweeps",
+                        },
+                    )
+                    self.stop_event.set()
+                    return "sweep_done_no_data"
 
                 if coverage["readyForLovable"] and len(valid_discoveries) >= self.auto_complete_min_discoveries:
                     await self.client.append_log(
@@ -3531,6 +3878,305 @@ class MasterBuildOrchestrator:
             f"- If blocked, recover naturally: wait, scroll, back out, switch result, or return to the direct search URL.\n"
             f"- Your output directly shapes a live business plan and a Lovable build brief, so gather signal with enough detail to make product decisions.\n"
         )
+
+    def _build_cloud_agent_task(
+        self,
+        spec: AgentSpec,
+        mission_prompt: str,
+        seed_queries: list[str],
+        curated_links: list[dict[str, str]],
+    ) -> str:
+        query_lines = "\n".join(f"- {query}" for query in seed_queries[:4]) or f"- {mission_prompt}"
+        curated_lines = "\n".join(
+            f"- {item.get('title') or item.get('url')}: {item.get('url')}"
+            for item in curated_links[:6]
+            if item.get("url")
+        ) or "- None available; start from native platform search."
+
+        platform_hints = {
+            "youtube": "Inspect shorts/videos and focus on engagement hooks, audience demand language, and monetization patterns.",
+            "x": "Inspect live posts/threads and focus on urgent pain points, objections, and requests by real operators/users.",
+            "reddit": "Inspect detailed threads and comments for repeated pain points, workaround behavior, and willingness to pay.",
+            "substack": "Inspect essays/newsletters for category narratives, pricing references, and strategic market signals.",
+        }
+        return (
+            f"You are Agent {spec.agent_id} ({spec.name}), platform specialist for {spec.platform}.\n\n"
+            f"Mission objective:\n{mission_prompt}\n\n"
+            f"Platform execution hint:\n{platform_hints.get(spec.platform, 'Find high-signal social evidence and actionable market insights.')}\n\n"
+            f"Seed searches to run:\n{query_lines}\n\n"
+            f"High-priority links (check first):\n{curated_lines}\n\n"
+            "Execution requirements:\n"
+            "- Open and inspect at least 5 distinct content pages on your platform.\n"
+            "- Prioritize real post/video/thread/article URLs (not generic search/home pages).\n"
+            "- Capture concrete signals: pain points, buyer language, metrics, pricing, engagement, workflow behavior.\n"
+            "- Avoid login/signup flows and skip pages blocked by auth walls.\n"
+            "- If blocked on one URL, continue with the next candidate immediately.\n\n"
+            "Final output contract:\n"
+            "Return JSON matching the schema with:\n"
+            "- findings[]: title, url, keywords, summary\n"
+            "- agent_summary: concise recap of strongest market evidence from your run.\n"
+        )
+
+    def _cloud_output_schema(self, max_findings: int) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "findings": {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": max_findings,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "url": {"type": "string"},
+                            "keywords": {"type": "string"},
+                            "summary": {"type": "string"},
+                        },
+                        "required": ["title", "url", "keywords", "summary"],
+                    },
+                },
+                "agent_summary": {"type": "string"},
+            },
+            "required": ["findings", "agent_summary"],
+        }
+
+    async def run_cloud_browser_agent(
+        self,
+        spec: AgentSpec,
+        *,
+        mission_id: str,
+        mission_prompt: str,
+        seed_queries: list[str],
+        curated_links: list[dict[str, str]],
+    ) -> None:
+        session_id = ""
+        live_url = ""
+        cursor: str | None = None
+        primary_query = seed_queries[0] if seed_queries else mission_prompt
+        message_hints: dict[str, dict[str, str]] = {}
+        existing_urls = await self.client.get_all_discovered_urls(mission_id)
+        terminal_snapshot: dict[str, Any] | None = None
+        last_agent_url = ""
+        loop = asyncio.get_running_loop()
+        last_agent_sync = 0.0
+
+        try:
+            await self.preview_manager.publish(
+                spec.agent_id,
+                status="searching",
+                title="Launching cloud browser",
+                current_url="",
+                note="Preparing Browser Use Cloud session.",
+                screenshot_path=None,
+            )
+            await self.client.update_agent(
+                spec.agent_id,
+                mission_id=mission_id,
+                status="searching",
+                current_url="",
+                assignment=f"Launching cloud {spec.platform} browser",
+                energy=100,
+                last_heartbeat=utc_now(),
+            )
+            await self.client.append_log(
+                mission_id,
+                agent_id=spec.agent_id,
+                log_type="status",
+                message=f"☁️ Agent {spec.name} launching Browser Use Cloud session.",
+                metadata={"platform": spec.platform},
+            )
+
+            task_description = self._build_cloud_agent_task(spec, mission_prompt, seed_queries, curated_links)
+            session = await self.browser_cloud.create_session(
+                task=task_description,
+                output_schema=self._cloud_output_schema(self.browser_cloud.max_findings),
+                keep_alive=False,
+            )
+            session_id = session["id"]
+            live_url = session["live_url"]
+            if not session_id:
+                raise RuntimeError("Browser Use Cloud did not return a session ID.")
+
+            if live_url:
+                await self.client.update_mission(mission_id, **{f"live_url_{spec.agent_id}": live_url})
+                await self.client.append_log(
+                    mission_id,
+                    agent_id=spec.agent_id,
+                    log_type="status",
+                    message=f"Cloud live browser ready: {live_url}",
+                    metadata={"live_url": live_url},
+                )
+
+            while not self.stop_event.is_set():
+                messages_payload = await self.browser_cloud.list_messages(session_id, after=cursor, limit=100)
+                cursor = str(messages_payload.get("last_cursor") or cursor or "")
+                for message in messages_payload.get("messages", []):
+                    if not isinstance(message, dict):
+                        continue
+                    summary = str(message.get("summary", "")).strip()
+                    urls = _extract_urls_from_cloud_message(message)
+                    for url in urls:
+                        if not is_valid_platform_content_url(spec.platform, url):
+                            continue
+                        hint = message_hints.setdefault(url, {"title": "", "summary": ""})
+                        if summary and len(summary) > len(hint.get("summary", "")):
+                            hint["summary"] = summary[:360]
+                        if not hint.get("title"):
+                            hint["title"] = summary[:120] or url
+                    for url in urls:
+                        if is_valid_platform_content_url(spec.platform, url):
+                            last_agent_url = url
+                            break
+
+                snapshot = await self.browser_cloud.get_session(session_id)
+                terminal_snapshot = snapshot
+                status = str(snapshot.get("status", "")).lower()
+                is_terminal = status in BROWSER_USE_CLOUD_TERMINAL_STATUSES
+
+                now = loop.time()
+                if (
+                    is_terminal
+                    or last_agent_url != ""
+                    or (now - last_agent_sync) >= 4.0
+                ):
+                    await self.client.update_agent(
+                        spec.agent_id,
+                        mission_id=mission_id,
+                        status="searching" if not is_terminal else ("found_trend" if snapshot.get("is_task_successful") else "weak"),
+                        current_url=last_agent_url,
+                        assignment=snapshot.get("last_step_summary", f"Cloud run: {spec.platform}")[:100],
+                        energy=65 if not is_terminal else 45,
+                        last_heartbeat=utc_now(),
+                    )
+                    last_agent_sync = now
+
+                if is_terminal:
+                    break
+
+                await asyncio.sleep(self.browser_cloud.poll_seconds)
+
+            if self.stop_event.is_set() and session_id:
+                await self.browser_cloud.stop_session(session_id, strategy="task")
+                terminal_snapshot = await self.browser_cloud.get_session(session_id)
+
+            findings = _normalize_cloud_findings((terminal_snapshot or {}).get("output"))
+            if not findings:
+                for url, hint in list(message_hints.items())[: self.browser_cloud.max_findings]:
+                    findings.append(
+                        {
+                            "title": hint.get("title", "") or url,
+                            "url": url,
+                            "summary": hint.get("summary", ""),
+                            "keywords": "",
+                        }
+                    )
+
+            discoveries_written = 0
+            for finding in findings:
+                url = _clean_url(finding.get("url", ""))
+                if not url or url in existing_urls:
+                    continue
+                if not is_valid_platform_content_url(spec.platform, url):
+                    continue
+
+                title = str(finding.get("title", "")).strip() or url
+                summary_text = str(finding.get("summary", "")).strip()
+                keywords = str(finding.get("keywords", "")).strip()
+
+                if not summary_text or not keywords:
+                    ai_keywords, ai_summary = await self.ai.summarize_discovery(
+                        mission_prompt,
+                        primary_query,
+                        title,
+                        url,
+                        summary_text,
+                        platform=spec.platform,
+                    )
+                    if not keywords:
+                        keywords = ai_keywords
+                    if not summary_text:
+                        summary_text = ai_summary
+
+                keywords = keywords.strip() or title[:80]
+                summary_text = summary_text.strip()
+                if not summary_text or keywords.lower() in GENERIC_DISCOVERY_SUMMARIES:
+                    continue
+
+                agent_context.log_discovery(spec.agent_id, spec.platform, keywords, summary_text, url)
+                await self.client.append_discovery(
+                    mission_id,
+                    agent_id=spec.agent_id,
+                    platform=spec.platform,
+                    title=title[:200],
+                    source_url=url,
+                    thumbnail_url=f"/api/agent-stream/{spec.agent_id}/frame",
+                    keywords=keywords[:180],
+                    summary=summary_text[:600],
+                )
+                await self.client.append_log(
+                    mission_id,
+                    agent_id=spec.agent_id,
+                    log_type="discovery",
+                    message=f"Found: {keywords[:80]}",
+                    metadata={"url": url},
+                )
+                existing_urls.add(url)
+                discoveries_written += 1
+
+            await self.client.update_agent(
+                spec.agent_id,
+                mission_id=mission_id,
+                status="found_trend",
+                assignment=f"Cloud complete: {discoveries_written} discoveries",
+                current_url=last_agent_url,
+                energy=50,
+                last_heartbeat=utc_now(),
+            )
+            await self.client.append_log(
+                mission_id,
+                agent_id=spec.agent_id,
+                log_type="status",
+                message=f"✅ Agent {spec.name} cloud run complete: {discoveries_written} discoveries",
+                metadata={"session_id": session_id, "live_url": live_url},
+            )
+            agent_context.log_agent_action(spec.agent_id, "done", f"cloud run: {discoveries_written} discoveries")
+            await self.client.update_mission(mission_id, **{f"live_url_{spec.agent_id}": None})
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            await self.client.update_agent(
+                spec.agent_id,
+                mission_id=mission_id,
+                status="error",
+                energy=0,
+                last_heartbeat=utc_now(),
+            )
+            await self.client.append_log(
+                mission_id,
+                agent_id=spec.agent_id,
+                log_type="error",
+                message=f"Agent {spec.name} cloud error: {error}",
+                metadata={"session_id": session_id, "live_url": live_url},
+            )
+            agent_context.log_agent_action(spec.agent_id, "error", str(error)[:200])
+            await self.client.update_mission(mission_id, **{f"live_url_{spec.agent_id}": None})
+        finally:
+            if session_id:
+                try:
+                    await self.browser_cloud.stop_session(session_id, strategy="session")
+                except Exception:
+                    pass
+            await self.client.update_agent(
+                spec.agent_id,
+                mission_id=mission_id,
+                status="stopped",
+                session_id=None,
+                preview_bucket=None,
+                preview_key=None,
+                preview_updated_at=None,
+                last_heartbeat=utc_now(),
+            )
 
     # ── API Sweep Agent (fast, no browser) ────────────────────────────
 

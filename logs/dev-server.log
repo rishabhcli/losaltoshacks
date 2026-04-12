@@ -1,0 +1,9 @@
+
+> @palantir/pilot-template@0.78.0 dev /Users/rishabhbansal/Documents/GitHub/losaltoshacks
+> vite --port 3000
+
+
+  VITE v7.3.2  ready in 136 ms
+
+  ➜  Local:   http://localhost:3000/
+  ➜  Network: use --host to expose

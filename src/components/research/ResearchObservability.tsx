@@ -4,6 +4,7 @@ import { AgentFeed } from "./AgentFeed";
 import { BusinessPlanPanel } from "./BusinessPlanPanel";
 import { SharedMemoryPanel } from "./SharedMemoryPanel";
 import type { AgentData, AgentMemoryEntry, AgentSignal, AgentThought, BusinessPlan, DiscoveredContent, LogEntry } from "@/hooks/useAgentData";
+import type { FinalOptionsPayload } from "@/hooks/useMasterBuildDashboard";
 
 interface Props {
   thoughts: AgentThought[];
@@ -16,6 +17,7 @@ interface Props {
   missionPrompt: string;
   isRunning: boolean;
   missionStatus: "queued" | "active" | "stopping" | "stopped" | "completed" | "error" | null;
+  finalOptions: FinalOptionsPayload | null;
 }
 
 function deriveObservabilityStatus({
@@ -30,7 +32,7 @@ function deriveObservabilityStatus({
   agents: AgentData[];
   discoveries: DiscoveredContent[];
   businessPlans: BusinessPlan[];
-}) {
+}): { label: string; tone: "blue" | "green" | "amber" | "red" | "slate"; detail: string } {
   const latestLog = [...logs]
     .sort((a, b) => b.timestamp - a.timestamp)
     .find((log) => log.type === "status" || log.type === "error" || log.type === "final_options" || log.type === "market_research");
@@ -157,7 +159,7 @@ function statusToneClasses(tone: "blue" | "green" | "amber" | "red" | "slate") {
 }
 
 export function ResearchObservability({
-  thoughts, signals, logs, memory, businessPlans, agents, discoveries, missionPrompt, isRunning, missionStatus,
+  thoughts, signals, logs, memory, businessPlans, agents, discoveries, missionPrompt, isRunning, missionStatus, finalOptions,
 }: Props) {
   const statusSummary = deriveObservabilityStatus({
     missionStatus,
@@ -213,21 +215,22 @@ export function ResearchObservability({
         </TabsTrigger>
       </TabsList>
 
-      <TabsContent value="feed" className="flex-1 mt-3 overflow-hidden">
+      <TabsContent value="feed" className="flex-1 mt-3 min-h-0 overflow-auto">
         <AgentFeed thoughts={thoughts} signals={signals} logs={logs} />
       </TabsContent>
 
-      <TabsContent value="plan" className="flex-1 mt-3 overflow-hidden">
+      <TabsContent value="plan" className="flex-1 mt-3 min-h-0 overflow-auto">
         <BusinessPlanPanel
           plans={businessPlans}
           agents={agents}
           discoveries={discoveries}
           missionPrompt={missionPrompt}
           isRunning={isRunning}
+          finalOptions={finalOptions}
         />
       </TabsContent>
 
-      <TabsContent value="memory" className="flex-1 mt-3 overflow-hidden">
+      <TabsContent value="memory" className="flex-1 mt-3 min-h-0 overflow-auto">
         <SharedMemoryPanel memory={memory} />
       </TabsContent>
     </Tabs>

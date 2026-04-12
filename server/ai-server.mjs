@@ -115,6 +115,22 @@ function filterUserFacingMissions(rows) {
   return rows.filter((row) => !isBackgroundMissionPrompt(row?.prompt));
 }
 
+function normalizeMissionPreviewUrls(row) {
+  if (!row || typeof row !== "object") return row;
+  const mission = { ...row };
+  for (const agentId of [1, 2, 3, 4]) {
+    const key = `live_url_${agentId}`;
+    const value = mission[key];
+    if (typeof value !== "string" || value.trim() === "") {
+      mission[key] = `/agent-stream/${agentId}`;
+    }
+  }
+  if (typeof mission.live_url_5 !== "string" || mission.live_url_5.trim() === "") {
+    mission.live_url_5 = "/agent-stream/5";
+  }
+  return mission;
+}
+
 async function resolveMissionId(insforge, missionId) {
   if (missionId) return missionId;
 
@@ -205,10 +221,10 @@ async function handleMissionCreate(request, response) {
     id: missionId,
     prompt,
     status: "queued",
-    live_url_1: "/agent-stream/1",
-    live_url_2: "/agent-stream/2",
-    live_url_3: "/agent-stream/3",
-    live_url_4: "/agent-stream/4",
+    live_url_1: null,
+    live_url_2: null,
+    live_url_3: null,
+    live_url_4: null,
     live_url_5: "/agent-stream/5",
     created_at: timestamp,
     updated_at: timestamp,
@@ -448,7 +464,7 @@ async function fetchDashboardSnapshot() {
   if (missionRowsResult.error) throw missionRowsResult.error;
 
   const missionRows = missionRowsResult.data ?? [];
-  const mission = selectLatestUserFacingMission(missionRows);
+  const mission = normalizeMissionPreviewUrls(selectLatestUserFacingMission(missionRows));
 
   const missionId =
     mission && typeof mission === "object" && "id" in mission
@@ -485,7 +501,7 @@ async function fetchDashboardSnapshot() {
 
   return {
     mission,
-    recentMissions: filterUserFacingMissions(missionRows).slice(0, 12),
+    recentMissions: filterUserFacingMissions(missionRows).map((row) => normalizeMissionPreviewUrls(row)).slice(0, 12),
     agents: agentResult.data ?? [],
     discoveries: discoveryResult.data ?? [],
     logs: logResult.data ?? [],
@@ -1648,8 +1664,8 @@ async function runBackgroundDataRefresh(force = false) {
   // Create the mission
   const missionInsert = await insforge.database.from("missions").insert([{
     id: missionId, prompt, status: "active",
-    live_url_1: "/agent-stream/1", live_url_2: "/agent-stream/2",
-    live_url_3: "/agent-stream/3", live_url_4: "/agent-stream/4",
+    live_url_1: null, live_url_2: null,
+    live_url_3: null, live_url_4: null,
     live_url_5: "/agent-stream/5",
     created_at: timestamp, updated_at: timestamp,
   }]);
