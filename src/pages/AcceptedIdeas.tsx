@@ -15,7 +15,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { StatusBadge } from "@/components/market/StatusBadge";
 import { LoadingState } from "@/components/market/LoadingState";
 import { RecDetailModal, type RecObj } from "@/components/market/RecDetailModal";
-import { usePreferences } from "@/hooks/usePreferences";
 import { useTheme } from "@/lib/theme";
 import { generateTrendTimeSeries, type TimeFrame } from "@/lib/trendChartData";
 import { ChartControls } from "@/components/market/ChartControls";
@@ -25,7 +24,6 @@ const CHART_COLORS_LIGHT = ["#1e40af", "#7e22ce", "#be185d", "#b45309", "#047857
 const CHART_COLORS_DARK = ["#f472b6", "#facc15", "#fb923c", "#34d399", "#60a5fa", "#c084fc", "#f87171", "#a78bfa"];
 
 export function AcceptedIdeas() {
-  const { preferences } = usePreferences();
   const { theme } = useTheme();
   const isDark = theme === "dark";
   const [priorityFilter, setPriorityFilter] = useState("all");
@@ -65,13 +63,6 @@ export function AcceptedIdeas() {
     if (!recommendations) return [];
     let result = [...recommendations];
 
-    if (preferences.industry !== "All") {
-      result = result.filter(r => {
-        const linked = trendMap.get(r.trendId ?? "");
-        return linked ? linked.industry === preferences.industry : true;
-      });
-    }
-
     if (priorityFilter !== "all") {
       result = result.filter(r => r.priority === priorityFilter);
     }
@@ -79,7 +70,7 @@ export function AcceptedIdeas() {
       result = result.filter(r => r.productCategory === categoryFilter);
     }
     return result;
-  }, [recommendations, priorityFilter, categoryFilter, preferences.industry, trendMap]);
+  }, [recommendations, priorityFilter, categoryFilter, trendMap]);
 
   // One chart line per accepted recommendation, using its linked trend's data
   const acceptedLines = useMemo(() => {
@@ -151,20 +142,20 @@ export function AcceptedIdeas() {
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3">
           <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-            <SelectTrigger className="w-[150px] glass border-slate-200 text-slate-700 text-sm rounded-lg">
+            <SelectTrigger className="w-[150px] glass border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm rounded-lg">
               <SelectValue placeholder="Priority" />
             </SelectTrigger>
-            <SelectContent className="glass border-slate-200 rounded-lg">
-              <SelectItem value="all" className="text-sm text-slate-700">
+            <SelectContent className="border-slate-200 dark:border-slate-700 rounded-lg">
+              <SelectItem value="all" className="text-sm">
                 All Priorities
               </SelectItem>
-              <SelectItem value="high" className="text-sm text-slate-700">
+              <SelectItem value="high" className="text-sm">
                 High
               </SelectItem>
-              <SelectItem value="medium" className="text-sm text-slate-700">
+              <SelectItem value="medium" className="text-sm">
                 Medium
               </SelectItem>
-              <SelectItem value="low" className="text-sm text-slate-700">
+              <SelectItem value="low" className="text-sm">
                 Low
               </SelectItem>
             </SelectContent>

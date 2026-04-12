@@ -114,7 +114,7 @@ function ResearchHistory() {
     <ScrollArea className="h-full">
       <div className="space-y-4 pb-6">
         {/* Mission summary card */}
-        <div className="border border-slate-200 dark:border-slate-700 rounded-xl p-5 bg-white dark:bg-slate-900">
+        <div className="border border-slate-200 dark:border-slate-700/60 rounded-xl p-5 glass">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-slate-800">Latest Mission</h3>
             <Badge variant={latestMission.status === "active" || latestMission.status === "queued" ? "default" : "secondary"} className="text-xs capitalize">
@@ -131,7 +131,7 @@ function ResearchHistory() {
 
         {/* Business plan summary */}
         {latest?.raw_plan && (
-          <div className="border border-slate-200 dark:border-slate-700 rounded-xl p-5 bg-white dark:bg-slate-900">
+          <div className="border border-slate-200 dark:border-slate-700/60 rounded-xl p-5 glass">
             <h3 className="text-sm font-semibold text-slate-800 mb-3">Business Plan</h3>
             <pre className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed font-sans">
               {latest.raw_plan}
@@ -141,7 +141,7 @@ function ResearchHistory() {
 
         {/* Discovery list */}
         {discoveries.length > 0 && (
-          <div className="border border-slate-200 dark:border-slate-700 rounded-xl p-5 bg-white dark:bg-slate-900">
+          <div className="border border-slate-200 dark:border-slate-700/60 rounded-xl p-5 glass">
             <h3 className="text-sm font-semibold text-slate-800 mb-3">Discoveries ({discoveries.length})</h3>
             <div className="space-y-2">
               {discoveries.slice(0, 20).map((d) => (

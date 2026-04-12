@@ -821,8 +821,12 @@ async function handleRecommendations(_request, response) {
   if (!recsInFlight) {
     recsInFlight = generateLiveRecommendations()
       .then((result) => {
-        recsCache = result;
-        recsCachedAt = Date.now();
+        // Only cache non-empty results — a transient OpenAI failure should not
+        // poison the cache and serve empty recs for the next 5 minutes
+        if (result.recommendations && result.recommendations.length > 0) {
+          recsCache = result;
+          recsCachedAt = Date.now();
+        }
         return result;
       })
       .finally(() => { recsInFlight = null; });
@@ -830,7 +834,12 @@ async function handleRecommendations(_request, response) {
 
   try {
     const result = await recsInFlight;
-    writeJson(response, 200, result);
+    // If fresh generation returned empty but we have stale cached recs, serve those instead
+    if ((!result.recommendations || result.recommendations.length === 0) && recsCache) {
+      writeJson(response, 200, recsCache);
+    } else {
+      writeJson(response, 200, result);
+    }
   } catch (error) {
     console.error("[ai-server] handleRecommendations error:", error);
     if (recsCache) {

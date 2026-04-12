@@ -63,7 +63,7 @@ export function VoiceButton({ getText, className = "", label = "Hear", size = "s
           ? "bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100 dark:bg-purple-950/30 dark:border-purple-800 dark:text-purple-400"
           : state === "loading"
             ? "bg-slate-50 border-slate-200 text-slate-400 cursor-wait dark:bg-slate-800 dark:border-slate-700"
-            : "bg-white border-slate-200 text-slate-500 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-600 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400 dark:hover:text-blue-400"
+            : "bg-white border-slate-200 text-slate-500 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-600 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-blue-900/30 dark:hover:border-blue-700 dark:hover:text-blue-400"
       } ${className}`}
     >
       {state === "loading" ? (
