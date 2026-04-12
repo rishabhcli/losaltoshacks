@@ -277,7 +277,7 @@ export function Briefing() {
         </div>
 
         {/* Audio Player Card */}
-        <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+        <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
           {/* Waveform Visualizer */}
           <div className="flex items-end justify-center gap-[2px] h-20 mb-6 px-4">
             {waveformBars.map((height, i) => {
@@ -375,7 +375,7 @@ export function Briefing() {
         </div>
 
         {/* Transcript */}
-        <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+        <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
           <h2 className="text-[10px] font-medium uppercase tracking-widest text-slate-400 mb-4">Transcript</h2>
           <div className="space-y-3">
             {paragraphs.map((paragraph, idx) => (
@@ -396,7 +396,7 @@ export function Briefing() {
         </div>
 
         {/* Covered trends */}
-        <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+        <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
           <h2 className="text-[10px] font-medium uppercase tracking-widest text-slate-400 mb-4">
             Trends Covered in This Briefing
           </h2>

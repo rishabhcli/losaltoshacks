@@ -13,6 +13,33 @@ const defaultPreferences: UserPreferences = {
   hasCompletedSetup: false,
 };
 
+const USER_KEY = "marketpulse-current-user";
+
+function loadCachedUser(): CurrentUser | null {
+  try {
+    const stored = localStorage.getItem(USER_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored) as CurrentUser;
+      if (parsed.id && parsed.email) return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function saveCachedUser(user: CurrentUser | null) {
+  try {
+    if (user) {
+      localStorage.setItem(USER_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(USER_KEY);
+    }
+  } catch {
+    // ignore
+  }
+}
+
 function loadPreferences(email: string | null): UserPreferences {
   if (!email) return defaultPreferences;
   try {
@@ -37,9 +64,12 @@ function savePreferences(email: string | null, prefs: UserPreferences) {
 }
 
 export function PreferencesProvider({ children }: { children: ReactNode }) {
-  const [isAuthReady, setIsAuthReady] = useState(false);
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
-  const [preferences, setPreferences] = useState<UserPreferences>(defaultPreferences);
+  const cachedUser = loadCachedUser();
+  const [isAuthReady, setIsAuthReady] = useState(cachedUser !== null);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(cachedUser);
+  const [preferences, setPreferences] = useState<UserPreferences>(
+    loadPreferences(cachedUser?.email ?? null),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -51,8 +81,11 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
 
       if (error) {
         console.error(getAuthErrorMessage(error, "Failed to restore InsForge session"));
-        setCurrentUser(null);
-        setPreferences(defaultPreferences);
+        // If we have a cached user, keep it rather than kicking to login
+        if (!cachedUser) {
+          setCurrentUser(null);
+          setPreferences(defaultPreferences);
+        }
         setIsAuthReady(true);
         return;
       }
@@ -60,9 +93,11 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
       if (data?.user?.email) {
         const user = toCurrentUser(data.user);
         setCurrentUser(user);
+        saveCachedUser(user);
         setPreferences(loadPreferences(user.email));
-      } else {
+      } else if (!cachedUser) {
         setCurrentUser(null);
+        saveCachedUser(null);
         setPreferences(defaultPreferences);
       }
 
@@ -99,6 +134,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback((user: CurrentUser) => {
     setCurrentUser(user);
+    saveCachedUser(user);
     setPreferences(loadPreferences(user.email));
   }, []);
 
@@ -108,6 +144,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
       console.error(getAuthErrorMessage(error, "Failed to sign out"));
     }
     setCurrentUser(null);
+    saveCachedUser(null);
     setPreferences(defaultPreferences);
   }, []);
 

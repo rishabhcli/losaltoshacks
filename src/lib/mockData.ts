@@ -3,6 +3,11 @@
 // All pages import from here via the osdk-shims hooks
 // ============================================================
 
+/** Generates an ISO date string for N hours ago from now */
+function hoursAgo(h: number): string {
+  return new Date(Date.now() - h * 60 * 60 * 1000).toISOString();
+}
+
 export interface MockTrend {
   $primaryKey: string;
   trendId: string;
@@ -82,7 +87,7 @@ export const MOCK_TRENDS: MockTrend[] = [
     industry: "fashion-retail", category: "Apparel", status: "growing",
     trendScore: 92, mentionCount: 845000, growthRate: 34.2,
     sentimentScore: 0.72, topKeywords: "quiet luxury, old money, stealth wealth, minimalism, cashmere",
-    detectedAt: "2025-01-15T10:00:00Z",
+    detectedAt: hoursAgo(6),   // ~6 hours ago
   },
   {
     $primaryKey: "t2", trendId: "t2",
@@ -91,7 +96,7 @@ export const MOCK_TRENDS: MockTrend[] = [
     industry: "travel-hospitality", category: "Hotels & Lodging", status: "emerging",
     trendScore: 87, mentionCount: 620000, growthRate: 28.5,
     sentimentScore: 0.65, topKeywords: "workcation, bleisure, remote work, digital nomad, extended stay",
-    detectedAt: "2025-01-22T08:30:00Z",
+    detectedAt: hoursAgo(18),  // ~18 hours ago
   },
   {
     $primaryKey: "t3", trendId: "t3",
@@ -100,7 +105,7 @@ export const MOCK_TRENDS: MockTrend[] = [
     industry: "food-beverage", category: "Beverages", status: "growing",
     trendScore: 85, mentionCount: 512000, growthRate: 41.3,
     sentimentScore: 0.78, topKeywords: "adaptogens, ashwagandha, functional beverages, wellness, nootropics",
-    detectedAt: "2025-02-02T09:15:00Z",
+    detectedAt: hoursAgo(36),  // ~1.5 days ago
   },
   {
     $primaryKey: "t4", trendId: "t4",
@@ -109,7 +114,7 @@ export const MOCK_TRENDS: MockTrend[] = [
     industry: "fashion-retail", category: "Recommerce", status: "growing",
     trendScore: 83, mentionCount: 730000, growthRate: 29.1,
     sentimentScore: 0.63, topKeywords: "resale, recommerce, circular fashion, thrift, depop",
-    detectedAt: "2025-01-28T14:00:00Z",
+    detectedAt: hoursAgo(52),  // ~2 days ago
   },
   {
     $primaryKey: "t5", trendId: "t5",
@@ -118,7 +123,7 @@ export const MOCK_TRENDS: MockTrend[] = [
     industry: "travel-hospitality", category: "Food & Beverage", status: "emerging",
     trendScore: 79, mentionCount: 340000, growthRate: 22.7,
     sentimentScore: 0.71, topKeywords: "farm-to-table, local cuisine, food tourism, artisan, heritage",
-    detectedAt: "2025-02-10T11:00:00Z",
+    detectedAt: hoursAgo(72),  // ~3 days ago
   },
   {
     $primaryKey: "t6", trendId: "t6",
@@ -127,7 +132,7 @@ export const MOCK_TRENDS: MockTrend[] = [
     industry: "beauty-skincare", category: "Beauty & Skincare", status: "emerging",
     trendScore: 77, mentionCount: 490000, growthRate: 38.9,
     sentimentScore: 0.69, topKeywords: "AI skincare, personalization, custom formulation, beauty tech, skin analysis",
-    detectedAt: "2025-02-18T10:00:00Z",
+    detectedAt: hoursAgo(96),  // ~4 days ago
   },
   {
     $primaryKey: "t7", trendId: "t7",
@@ -136,7 +141,7 @@ export const MOCK_TRENDS: MockTrend[] = [
     industry: "fashion-retail", category: "Accessories", status: "emerging",
     trendScore: 72, mentionCount: 280000, growthRate: 18.4,
     sentimentScore: 0.55, topKeywords: "color blocking, maximalism, statement accessories, bold fashion, Y2K",
-    detectedAt: "2025-03-01T09:00:00Z",
+    detectedAt: hoursAgo(120), // ~5 days ago
   },
   {
     $primaryKey: "t8", trendId: "t8",
@@ -145,7 +150,7 @@ export const MOCK_TRENDS: MockTrend[] = [
     industry: "wellness-fitness", category: "Wellness", status: "growing",
     trendScore: 81, mentionCount: 412000, growthRate: 31.6,
     sentimentScore: 0.82, topKeywords: "digital detox, wellness retreat, mindfulness, burnout recovery, spa",
-    detectedAt: "2025-02-08T13:00:00Z",
+    detectedAt: hoursAgo(132), // ~5.5 days ago
   },
   {
     $primaryKey: "t9", trendId: "t9",
@@ -154,7 +159,7 @@ export const MOCK_TRENDS: MockTrend[] = [
     industry: "beauty-skincare", category: "Sustainability", status: "growing",
     trendScore: 76, mentionCount: 375000, growthRate: 26.4,
     sentimentScore: 0.74, topKeywords: "regenerative agriculture, sustainability, carbon-neutral, clean label, B-corp",
-    detectedAt: "2025-01-30T12:00:00Z",
+    detectedAt: hoursAgo(150), // ~6 days ago
   },
   {
     $primaryKey: "t10", trendId: "t10",
@@ -163,7 +168,7 @@ export const MOCK_TRENDS: MockTrend[] = [
     industry: "fashion-retail", category: "Technical Apparel", status: "emerging",
     trendScore: 68, mentionCount: 210000, growthRate: 15.2,
     sentimentScore: 0.58, topKeywords: "techwear, performance fabric, functional fashion, urban commuting, Gore-Tex",
-    detectedAt: "2025-03-05T10:00:00Z",
+    detectedAt: hoursAgo(162), // ~6.75 days ago
   },
 ];
 
@@ -267,7 +272,7 @@ export const MOCK_RECOMMENDATIONS: MockRecommendation[] = [
     description: "Develop a 12-piece capsule targeting professional women 28-45 focused on neutral tones, premium fabrics, and no visible branding. Price point $180-$450.",
     productCategory: "Apparel", targetDemographic: "Professional Women 28-45",
     confidenceScore: 0.89, estimatedRevenuePotential: "$3.2M first year",
-    priority: "high", status: "new",
+    priority: "high", status: "accepted",
     actionPlan: "Source cashmere and merino from certified suppliers. Partner with 3 micro-influencers in the #OldMoney space. Launch DTC-first with editorial photography shoot.",
     createdAt: "2025-04-06T10:00:00Z",
   },
@@ -276,7 +281,7 @@ export const MOCK_RECOMMENDATIONS: MockRecommendation[] = [
     title: "Create Extended Stay Workcation Package",
     description: "Bundle complimentary high-speed Wi-Fi upgrade, ergonomic desk setup, daily credit for café purchases, and flex checkout times for stays of 5+ nights.",
     productCategory: "Hotel Packages", targetDemographic: "Remote Workers 25-40",
-    confidenceScore: 0.84, estimatedRevenuePotential: "$1.8M incremental RevPAR",
+    confidenceScore: 0.84, estimatedRevenuePotential: "$1.8M additional hotel revenue",
     priority: "high", status: "new",
     actionPlan: "Retrofit 20% of room inventory with standing desks and monitor arms. Partner with local coworking spaces for day passes. Target digital nomad communities on LinkedIn and Reddit.",
     createdAt: "2025-04-05T11:00:00Z",
@@ -296,7 +301,7 @@ export const MOCK_RECOMMENDATIONS: MockRecommendation[] = [
     title: "Partner with Recommerce Platform for Brand Resale",
     description: "Launch an authenticated resale program via The Real Real or Vestiaire Collective, capturing a 15% platform revenue share while extending brand lifecycle and attracting price-sensitive new customers.",
     productCategory: "Recommerce", targetDemographic: "Eco-Conscious Gen Z",
-    confidenceScore: 0.76, estimatedRevenuePotential: "$900K in platform fees avoided",
+    confidenceScore: 0.76, estimatedRevenuePotential: "$900K cost savings",
     priority: "medium", status: "new",
     actionPlan: "Negotiate co-branded 'Certified Resale' page. Train CS team on authentication flow. Integrate resale program into loyalty points system.",
     createdAt: "2025-04-07T14:00:00Z",
@@ -306,8 +311,8 @@ export const MOCK_RECOMMENDATIONS: MockRecommendation[] = [
     title: "Launch Digital Detox Weekend Package",
     description: "Create a tech-free wellness experience: silent spa mornings, guided forest bathing, no-TV rooms, and analog activities (pottery, journaling, stargazing). Premium pricing at 2.2x standard room rate.",
     productCategory: "Wellness Packages", targetDemographic: "High-Income Millennials",
-    confidenceScore: 0.79, estimatedRevenuePotential: "$1.1M in incremental bookings",
-    priority: "high", status: "new",
+    confidenceScore: 0.79, estimatedRevenuePotential: "$1.1M additional bookings",
+    priority: "high", status: "accepted",
     actionPlan: "Convert one wing (12 rooms) to analog-only. Train staff on silent service protocols. Market via mental health and mindfulness influencer partnerships.",
     createdAt: "2025-04-06T13:00:00Z",
   },
@@ -316,8 +321,8 @@ export const MOCK_RECOMMENDATIONS: MockRecommendation[] = [
     title: "Curate Local Chef's Table Experiences",
     description: "Partner with 5 local farms and 3 heritage chefs to create monthly rotating farm-to-table dining nights. Offer as hotel package add-on or standalone booking.",
     productCategory: "F&B Experiences", targetDemographic: "Food Tourism Enthusiasts",
-    confidenceScore: 0.72, estimatedRevenuePotential: "$600K additional F&B revenue",
-    priority: "medium", status: "new",
+    confidenceScore: 0.72, estimatedRevenuePotential: "$600K food & dining revenue",
+    priority: "medium", status: "accepted",
     actionPlan: "Source local pantry suppliers within 50-mile radius. Create storytelling content documenting each chef's heritage. Promote via Eater and local lifestyle publications.",
     createdAt: "2025-04-08T10:00:00Z",
   },
@@ -326,7 +331,7 @@ export const MOCK_RECOMMENDATIONS: MockRecommendation[] = [
     title: "AI Skin Consultation At-Home Kit",
     description: "Develop a smartphone camera-based skin diagnostic tool that generates a personalized 6-product routine. Gate detailed results behind a $49 subscription; sample kit shipped free.",
     productCategory: "Beauty Tech", targetDemographic: "Beauty Enthusiasts 22-38",
-    confidenceScore: 0.77, estimatedRevenuePotential: "$4.1M ARR at scale",
+    confidenceScore: 0.77, estimatedRevenuePotential: "$4.1M annual recurring revenue",
     priority: "high", status: "dismissed",
     actionPlan: "Partner with dermatology AI startup for model licensing. Prototype app in 3 months. Beta test with 1,000 loyal customers.",
     createdAt: "2025-04-03T12:00:00Z",
@@ -336,7 +341,7 @@ export const MOCK_RECOMMENDATIONS: MockRecommendation[] = [
     title: "Regenerative Farm Partnership Certification Program",
     description: "Co-launch a regenerative sourcing certification with 3 key ingredient suppliers, enabling on-pack 'Regenerative Certified' seal similar to Rainforest Alliance.",
     productCategory: "Sustainability", targetDemographic: "ESG-Driven Retailers & B2B Buyers",
-    confidenceScore: 0.68, estimatedRevenuePotential: "$700K in premium retailer placement",
+    confidenceScore: 0.68, estimatedRevenuePotential: "$700K from premium retail partnerships",
     priority: "medium", status: "accepted",
     actionPlan: "Engage sustainability consulting firm for certification framework. Pilot with 2 suppliers. Brief retail buyers 6 months ahead of launch.",
     createdAt: "2025-04-02T10:00:00Z",
@@ -346,8 +351,8 @@ export const MOCK_RECOMMENDATIONS: MockRecommendation[] = [
     title: "Launch Barrier-First Routine Builder",
     description: "Package AI skin analysis with a barrier-repair starter routine, refill reminders, and dermatologist-backed education modules. Position the product line around skin resilience instead of aggressive active cycling.",
     productCategory: "Beauty & Skincare", targetDemographic: "Ingredient-Conscious Shoppers 20-40",
-    confidenceScore: 0.83, estimatedRevenuePotential: "$2.9M DTC uplift",
-    priority: "high", status: "new",
+    confidenceScore: 0.83, estimatedRevenuePotential: "$2.9M direct-to-consumer sales",
+    priority: "high", status: "accepted",
     actionPlan: "Bundle cleanser, serum, and moisturizer SKUs with guided onboarding. Rework PDP copy around skin barrier recovery. Test subscription replenishment at 45-day cadence.",
     createdAt: "2025-04-09T10:00:00Z",
   },

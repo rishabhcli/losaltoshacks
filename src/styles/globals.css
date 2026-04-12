@@ -131,6 +131,76 @@
   }
 }
 
+/* Dark mode overrides — outside @layer so they aren't purged */
+.dark body {
+  background: linear-gradient(135deg, #030712 0%, #0a0a0a 50%, #030712 100%);
+  color: #e2e8f0;
+}
+.dark h1,
+.dark h2,
+.dark h3,
+.dark h4,
+.dark h5,
+.dark h6 {
+  color: #f8fafc;
+}
+.dark ::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+
+/*
+ * Remap slate text for dark-mode contrast.
+ * Shifts each shade brighter so secondary/muted text stays readable
+ * against dark backgrounds without touching every component file.
+ */
+.dark {
+  /* Slate — invert for dark-mode contrast */
+  --color-slate-900: #f8fafc;
+  --color-slate-800: #f1f5f9;
+  --color-slate-700: #e2e8f0;
+  --color-slate-600: #cbd5e1;
+  --color-slate-500: #94a3b8;
+  --color-slate-400: #94a3b8;
+  --color-slate-300: #64748b;
+  --color-slate-200: #475569;
+  --color-slate-100: #334155;
+  --color-slate-50: #1e293b;
+
+  /* Blue — brighter for dark backgrounds */
+  --color-blue-50: rgba(30, 58, 138, 0.3);  /* dark tinted bg */
+  --color-blue-100: rgba(30, 58, 138, 0.4);
+  --color-blue-200: #60a5fa;
+  --color-blue-600: #60a5fa;  /* primary blue text → bright */
+  --color-blue-700: #93c5fd;
+
+  /* Green/emerald — badges & status */
+  --color-emerald-50: rgba(6, 78, 59, 0.3);
+  --color-emerald-200: #34d399;
+  --color-emerald-600: #34d399;
+
+  /* Amber — badges & status */
+  --color-amber-50: rgba(120, 53, 15, 0.3);
+  --color-amber-200: #fbbf24;
+  --color-amber-600: #fbbf24;
+
+  /* Indigo — badges & status */
+  --color-indigo-50: rgba(49, 46, 129, 0.3);
+  --color-indigo-200: #a5b4fc;
+  --color-indigo-600: #a5b4fc;
+
+  /* Red — danger/error states */
+  --color-red-50: rgba(127, 29, 29, 0.3);
+  --color-red-100: rgba(127, 29, 29, 0.4);
+  --color-red-200: #f87171;
+  --color-red-600: #f87171;
+
+  /* White backgrounds → dark */
+  --color-white: #0f172a;
+}
+
 /* Bubble floating animation — drifts top-left to bottom-right on scroll */
 @keyframes bubble-float {
   0% {
@@ -152,4 +222,15 @@
 
 .bubble-float {
   animation: bubble-float infinite ease-in-out;
+}
+
+/* Apple-style glass */
+.glass {
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+.dark .glass {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(148, 163, 184, 0.15);
 }

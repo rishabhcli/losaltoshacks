@@ -12,7 +12,9 @@ import {
   FileText,
 } from "lucide-react";
 import { usePreferences } from "@/hooks/usePreferences";
+import { SearchBar } from "@/components/market/SearchBar";
 import { SettingsMenu } from "@/components/market/SettingsMenu";
+import { ThemeToggle } from "@/components/market/ThemeToggle";
 import { BackgroundBubbles } from "@/components/market/BackgroundBubbles";
 import { ErrorBoundary } from "@/components/market/ErrorBoundary";
 import { SplashScreen } from "@/components/market/SplashScreen";
@@ -68,8 +70,8 @@ export function AppLayout() {
         onClick={() => navigate(item.path)}
         className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all cursor-pointer text-sm font-medium ${
           isActive
-            ? "text-blue-600 bg-blue-50/80 font-semibold"
-            : "text-slate-500 hover:text-slate-800 hover:bg-white/50"
+            ? "text-blue-600 dark:text-blue-400 bg-blue-50/80 dark:bg-blue-950/40 font-semibold"
+            : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-white/50 dark:hover:bg-slate-800/50"
         }`}
         aria-label={item.label}
         aria-current={isActive ? "page" : undefined}
@@ -90,7 +92,7 @@ export function AppLayout() {
       >
         {/* Sidebar */}
         <nav
-          className="flex flex-col w-60 min-w-60 h-full border-r border-teal-200/40 bg-teal-50/70 backdrop-blur-xl"
+          className="flex flex-col w-60 min-w-60 h-full border-r border-white/30 dark:border-white/10 glass backdrop-blur-xl"
           aria-label="Main navigation"
         >
           {/* Logo */}
@@ -111,10 +113,10 @@ export function AppLayout() {
             >
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
             </svg>
-            <span className="text-base font-semibold text-slate-800 tracking-tight">MarketPulse</span>
+            <span className="text-base font-semibold text-slate-800 dark:text-slate-100 tracking-tight">MarketPulse</span>
           </button>
 
-          <div className="h-px bg-blue-100/50 mx-4" />
+          <div className="h-px bg-blue-100/50 dark:bg-slate-700/50 mx-4" />
 
           {/* Nav Items */}
           <div className="flex flex-col gap-1 mt-4 px-3">{navItems.map(renderNavItem)}</div>
@@ -124,9 +126,14 @@ export function AppLayout() {
 
           {/* Industry badge */}
           <div className="px-4 pb-2">
-            <div className="text-[11px] font-medium text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg text-center truncate">
+            <div className="text-[11px] font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 px-3 py-1.5 rounded-lg text-center truncate">
               {getIndustryLabel(preferences.industry)}
             </div>
+          </div>
+
+          {/* Search */}
+          <div className="px-3 pb-1">
+            <SearchBar />
           </div>
 
           {/* Settings */}
@@ -134,11 +141,17 @@ export function AppLayout() {
             <SettingsMenu />
           </div>
 
+          {/* Theme toggle */}
+          <div className="px-3 pb-1 flex items-center justify-between">
+            <span className="text-xs font-medium text-slate-400 dark:text-slate-500 pl-3">Theme</span>
+            <ThemeToggle />
+          </div>
+
           {/* Logout */}
           <div className="px-3 pb-4">
             <button
               onClick={handleLogout}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all cursor-pointer text-sm font-medium text-slate-400 hover:text-slate-600 hover:bg-white/50 w-full"
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all cursor-pointer text-sm font-medium text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-white/50 dark:hover:bg-slate-800/50 w-full"
               aria-label="Log out"
             >
               <LogOut className="w-5 h-5" />

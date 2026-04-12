@@ -1,3 +1,4 @@
+import { useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useOsdkObject, useOsdkAction, useLinks, $Actions, marketTrend } from "@/lib/osdk-shims";
 import {
@@ -22,13 +23,31 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { StatusBadge } from "@/components/market/StatusBadge";
 import { LoadingState } from "@/components/market/LoadingState";
 import { toast } from "sonner";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer,
+} from "recharts";
 import { usePreferences } from "@/hooks/usePreferences";
+import { useTheme } from "@/lib/theme";
 import { getIndustryLabel } from "@/lib/industry";
+import { generateTrendTimeSeries, type TimeFrame } from "@/lib/trendChartData";
+import { ChartControls } from "@/components/market/ChartControls";
+import { StabilityBadge } from "@/components/market/StabilityBadge";
+import { useChartZoom } from "@/hooks/useChartZoom";
 
 export function TrendDetail() {
   const { trendId } = useParams<{ trendId: string }>();
   const navigate = useNavigate();
   const { preferences } = usePreferences();
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
+
+  const [timeFrame, setTimeFrame] = useState<TimeFrame>("7d");
 
   const { object: trend, isLoading: trendLoading } = useOsdkObject(marketTrend, trendId ?? "");
 
@@ -107,7 +126,7 @@ export function TrendDetail() {
         )}
 
         {/* Hero section */}
-        <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-6 lg:p-8 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+        <div className="border border-slate-200 glass rounded-xl p-6 lg:p-8 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
           <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 mb-2">
@@ -162,6 +181,26 @@ export function TrendDetail() {
             </div>
           )}
         </div>
+
+        {/* Stability Assessment */}
+        <StabilityBadge
+          trendId={trend.trendId ?? ""}
+          score={trend.trendScore ?? 0}
+          growthRate={trend.growthRate ?? 0}
+          mentionCount={trend.mentionCount ?? 0}
+          variant="full"
+        />
+
+        {/* Trend Score Chart */}
+        <TrendChart
+          trendId={trend.trendId ?? ""}
+          score={trend.trendScore ?? 0}
+          growthRate={trend.growthRate ?? 0}
+          mentionCount={trend.mentionCount ?? 0}
+          timeFrame={timeFrame}
+          onTimeFrameChange={setTimeFrame}
+          isDark={isDark}
+        />
 
         {/* Trend Forecast */}
         <ForecastCard
@@ -280,7 +319,7 @@ interface SourceObj {
 function SourceCard({ source }: { source: SourceObj }) {
   const platform = (source.platform ?? "unknown").toLowerCase();
   return (
-    <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all">
+    <div className="border border-slate-200 glass rounded-xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all">
       <div className="flex items-center gap-2 mb-3">
         <span className="text-blue-600">{platformIcons[platform] ?? <Globe className="w-4 h-4" />}</span>
         <span className="font-semibold text-sm text-slate-800 capitalize">{source.platform}</span>
@@ -317,7 +356,7 @@ interface DemoObj {
 
 function DemographicCard({ demo }: { demo: DemoObj }) {
   return (
-    <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all">
+    <div className="border border-slate-200 glass rounded-xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all">
       <div className="flex items-center gap-2 mb-3">
         <span className="font-medium text-xs border border-slate-200 text-slate-700 px-2 py-0.5 rounded-md">
           {demo.ageGroup}
@@ -380,7 +419,7 @@ interface RecObj {
 
 function RecommendationCard({ rec }: { rec: RecObj }) {
   return (
-    <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all">
+    <div className="border border-slate-200 glass rounded-xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all">
       <div className="flex items-start justify-between gap-2 mb-2">
         <h3 className="font-semibold text-sm text-slate-800">{rec.title}</h3>
         <StatusBadge value={rec.priority} />
@@ -446,6 +485,99 @@ function ForecastCard({
           <p className="text-sm text-slate-600 mt-1 leading-relaxed">{forecast.message}</p>
         </div>
       </div>
+    </div>
+  );
+}
+
+function TrendChart({
+  trendId,
+  score,
+  growthRate,
+  mentionCount,
+  timeFrame,
+  onTimeFrameChange,
+  isDark,
+}: {
+  trendId: string;
+  score: number;
+  growthRate: number;
+  mentionCount: number;
+  timeFrame: TimeFrame;
+  onTimeFrameChange: (tf: TimeFrame) => void;
+  isDark: boolean;
+}) {
+  const fullData = useMemo(
+    () => generateTrendTimeSeries(trendId, score, growthRate, mentionCount, timeFrame),
+    [trendId, score, growthRate, mentionCount, timeFrame],
+  );
+  const { visibleData, isZoomed, zoomIn, zoomOut, resetZoom } = useChartZoom(fullData);
+
+  return (
+    <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+      <h2 className="font-semibold text-lg text-slate-900 mb-1">Trend Score Over Time</h2>
+      <p className="text-xs text-slate-400 mb-2">Score and mention volume trajectory</p>
+      <ChartControls
+        timeFrame={timeFrame}
+        onTimeFrameChange={onTimeFrameChange}
+        onZoomIn={zoomIn}
+        onZoomOut={zoomOut}
+        onResetZoom={resetZoom}
+        isZoomed={isZoomed}
+      />
+      <ResponsiveContainer width="100%" height={260}>
+        <AreaChart data={visibleData}>
+          <defs>
+            <linearGradient id="trendDetailGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={isDark ? "#60a5fa" : "#1e40af"} stopOpacity={isDark ? 0.3 : 0.35} />
+              <stop offset="100%" stopColor={isDark ? "#60a5fa" : "#1e40af"} stopOpacity={0.03} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid stroke={isDark ? "#475569" : "#94A3B8"} strokeDasharray="3 3" vertical={false} />
+          <XAxis
+            dataKey="label"
+            tick={{ fill: isDark ? "#cbd5e1" : "#334155", fontSize: 11, fontFamily: "DM Sans", fontWeight: 500 }}
+            axisLine={{ stroke: isDark ? "#475569" : "#94A3B8" }}
+            tickLine={false}
+          />
+          <YAxis
+            tick={{ fill: isDark ? "#cbd5e1" : "#334155", fontSize: 11, fontFamily: "DM Sans", fontWeight: 500 }}
+            axisLine={{ stroke: isDark ? "#475569" : "#94A3B8" }}
+            tickLine={false}
+          />
+          <RechartsTooltip
+            contentStyle={{
+              background: isDark ? "rgba(30,41,59,0.90)" : "rgba(255,255,255,0.85)",
+              backdropFilter: "blur(12px)",
+              border: isDark ? "1px solid #475569" : "1px solid #CBD5E1",
+              borderRadius: 8,
+              color: isDark ? "#f1f5f9" : "#1e293b",
+              fontFamily: "DM Sans",
+              fontSize: 13,
+              boxShadow: isDark ? "0 4px 12px rgba(0,0,0,0.30)" : "0 4px 12px rgba(0,0,0,0.10)",
+            }}
+          />
+          <Area
+            type="monotone"
+            dataKey="score"
+            stroke={isDark ? "#60a5fa" : "#1e40af"}
+            strokeWidth={3}
+            fill="url(#trendDetailGrad)"
+            dot={{ fill: isDark ? "#f472b6" : "#6d28d9", r: 5, strokeWidth: 0 }}
+            activeDot={{ fill: isDark ? "#fb923c" : "#be185d", r: 7, strokeWidth: 0 }}
+            name="Trend Score"
+          />
+          <Area
+            type="monotone"
+            dataKey="mentions"
+            stroke={isDark ? "#c084fc" : "#7e22ce"}
+            strokeWidth={2.5}
+            fillOpacity={0}
+            dot={{ fill: isDark ? "#facc15" : "#1e40af", r: 4, strokeWidth: 0 }}
+            activeDot={{ fill: isDark ? "#f97316" : "#9333ea", r: 6, strokeWidth: 0 }}
+            name="Mentions"
+          />
+        </AreaChart>
+      </ResponsiveContainer>
     </div>
   );
 }

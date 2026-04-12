@@ -95,7 +95,7 @@ export function PipelineProgress({ autoPlay = true, onComplete, compact = false 
   }
 
   return (
-    <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+    <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>

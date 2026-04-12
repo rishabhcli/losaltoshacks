@@ -138,7 +138,7 @@ export function Report() {
 
         {/* Trend Selector */}
         {!isGenerated && (
-          <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+          <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-semibold text-sm text-slate-900">
                 Select Trends ({selectedTrendIds.size} of {filteredTrends.length})
@@ -211,7 +211,7 @@ export function Report() {
         {isGenerated && (
           <div className="space-y-6 print:space-y-4">
             {/* Report Header */}
-            <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-8 shadow-[0_1px_3px_rgba(0,0,0,0.04)] print:border-0 print:shadow-none">
+            <div className="border border-slate-200 glass rounded-xl p-8 shadow-[0_1px_3px_rgba(0,0,0,0.04)] print:border-0 print:shadow-none">
               <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-widest text-blue-600 mb-3">
                 <BarChart3 className="w-3.5 h-3.5" />
                 MarketPulse Intelligence Report
@@ -231,7 +231,7 @@ export function Report() {
             </div>
 
             {/* Executive Summary */}
-            <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+            <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
               <h3 className="font-semibold text-lg text-slate-900 mb-3 flex items-center gap-2">
                 <TrendingUp className="w-5 h-5 text-blue-600" />
                 Executive Summary
@@ -251,7 +251,7 @@ export function Report() {
             </div>
 
             {/* Key Findings */}
-            <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+            <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
               <h3 className="font-semibold text-lg text-slate-900 mb-4 flex items-center gap-2">
                 <Lightbulb className="w-5 h-5 text-blue-600" />
                 Key Findings
@@ -311,7 +311,7 @@ export function Report() {
 
             {/* Recommendations */}
             {relatedRecs.length > 0 && (
-              <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+              <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
                 <h3 className="font-semibold text-lg text-slate-900 mb-4 flex items-center gap-2">
                   <Lightbulb className="w-5 h-5 text-blue-600" />
                   Recommendations
@@ -349,7 +349,7 @@ export function Report() {
 
             {/* Risks & Considerations */}
             {relatedInsights.length > 0 && (
-              <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+              <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
                 <h3 className="font-semibold text-lg text-slate-900 mb-4 flex items-center gap-2">
                   <AlertTriangle className="w-5 h-5 text-amber-500" />
                   Related Insights & Alerts

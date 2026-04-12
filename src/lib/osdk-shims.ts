@@ -5,7 +5,7 @@
  * Returns mock data so the app works without any Palantir / Foundry connection.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore, useCallback } from "react";
 import {
   MOCK_TRENDS,
   MOCK_INSIGHTS,
@@ -32,8 +32,30 @@ export const $Actions = {
 
 type ObjectType = typeof marketTrend | typeof marketInsight | typeof marketRecommendation;
 
-// Mutable recommendation state (in-memory, survives re-renders via module scope)
-let _recs: MockRecommendation[] = MOCK_RECOMMENDATIONS.map(r => ({ ...r }));
+// User status overrides (accept/dismiss) applied on top of source data
+const _statusOverrides = new Map<string, string>();
+
+// Reactive version counter — subscribers re-render when data changes
+let _version = 0;
+const _listeners = new Set<() => void>();
+function _notify() {
+  _version++;
+  _listeners.forEach(fn => fn());
+}
+function _subscribe(fn: () => void) {
+  _listeners.add(fn);
+  return () => _listeners.delete(fn);
+}
+function _getVersion() {
+  return _version;
+}
+
+function getRecs(): MockRecommendation[] {
+  return MOCK_RECOMMENDATIONS.map(r => {
+    const override = _statusOverrides.get(r.$primaryKey);
+    return override ? { ...r, status: override } : { ...r };
+  });
+}
 
 function getObjects(objectType: ObjectType, opts?: Record<string, unknown>): unknown[] {
   if (objectType === "marketTrend") {
@@ -69,7 +91,7 @@ function getObjects(objectType: ObjectType, opts?: Record<string, unknown>): unk
   }
 
   if (objectType === "marketRecommendation") {
-    let result = [..._recs];
+    let result = getRecs();
     const where = (opts as { where?: { status?: { $eq?: string } } } | undefined)?.where;
     if (where?.status?.$eq) {
       result = result.filter(r => r.status === where.status!.$eq);
@@ -91,9 +113,10 @@ function getObjects(objectType: ObjectType, opts?: Record<string, unknown>): unk
 
 // ─── useOsdkObjects ───────────────────────────────────────────────────────────
 export function useOsdkObjects(objectType: ObjectType, opts?: Record<string, unknown>) {
-  const data = useMemo(() => getObjects(objectType, opts) as (MockTrend | MockInsight | MockRecommendation)[], 
+  const version = useSyncExternalStore(_subscribe, _getVersion);
+  const data = useMemo(() => getObjects(objectType, opts) as (MockTrend | MockInsight | MockRecommendation)[],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [objectType, JSON.stringify(opts)]
+    [objectType, JSON.stringify(opts), version]
   );
   return { data, isLoading: false };
 }
@@ -102,7 +125,7 @@ export function useOsdkObjects(objectType: ObjectType, opts?: Record<string, unk
 export function useOsdkObject(objectType: ObjectType, id: string) {
   const object = useMemo(() => {
     if (objectType === "marketTrend") return MOCK_TRENDS.find(t => t.trendId === id || t.$primaryKey === id);
-    if (objectType === "marketRecommendation") return _recs.find(r => r.recommendationId === id);
+    if (objectType === "marketRecommendation") return getRecs().find(r => r.recommendationId === id);
     return undefined;
   }, [objectType, id]);
   return { object, isLoading: false };
@@ -126,7 +149,7 @@ export function useLinks(
       return MOCK_DEMOGRAPHICS.filter(d => d.trendId === trendId) as MockDemographic[];
     }
     if (linkType.includes("Recommendations")) {
-      return _recs.filter(r => r.trendId === trendId) as MockRecommendation[];
+      return getRecs().filter(r => r.trendId === trendId) as MockRecommendation[];
     }
     return [];
   }, [obj, linkType]);
@@ -145,8 +168,8 @@ export function useOsdkAction(actionType: string) {
     if (actionType === "updateRecommendationStatus") {
       const rec = params.recommendation as MockRecommendation;
       const status = params.status as string;
-      const idx = _recs.findIndex(r => r.$primaryKey === rec.$primaryKey);
-      if (idx !== -1) _recs[idx] = { ..._recs[idx], status };
+      _statusOverrides.set(rec.$primaryKey, status);
+      _notify();
     }
 
     if (actionType === "bookmarkTrend") {

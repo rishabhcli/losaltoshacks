@@ -3,24 +3,19 @@ import { useNavigate } from "react-router-dom";
 import { useOsdkObjects, marketTrend, marketInsight } from "@/lib/osdk-shims";
 import { TrendingUp, ArrowUpRight, ArrowDownRight, Zap, Eye, BarChart3 } from "lucide-react";
 import { getTrendForecast, forecastColors } from "@/lib/trendForecast";
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip as RechartsTooltip,
-  ResponsiveContainer,
-} from "recharts";
 import { StatusBadge } from "@/components/market/StatusBadge";
 import { LoadingState } from "@/components/market/LoadingState";
 import { PipelineProgress } from "@/components/market/PipelineProgress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { usePreferences } from "@/hooks/usePreferences";
+import { useTheme } from "@/lib/theme";
 import { getIndustryLabel, INDUSTRY_OPTIONS } from "@/lib/industry";
+import { TrendSparkline } from "@/components/market/TrendSparkline";
 
 export function Dashboard() {
   const { preferences } = usePreferences();
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
   const [activeIndustry, setActiveIndustry] = useState<string>(preferences.industry);
   const [showPipeline, setShowPipeline] = useState(true);
   const navigate = useNavigate();
@@ -62,22 +57,6 @@ export function Dashboard() {
   // Top 5 trends
   const topTrends = useMemo(() => {
     return filteredTrends.filter(t => t.status === "emerging" || t.status === "growing").slice(0, 5);
-  }, [filteredTrends]);
-
-  // Chart data — trends by detection date
-  const chartData = useMemo(() => {
-    if (!filteredTrends.length) return [];
-    const sorted = [...filteredTrends].sort((a, b) => {
-      const aDate = a.detectedAt ? new Date(a.detectedAt).getTime() : 0;
-      const bDate = b.detectedAt ? new Date(b.detectedAt).getTime() : 0;
-      return aDate - bDate;
-    });
-    return sorted.map(t => ({
-      name: t.title ?? "Untitled",
-      score: t.trendScore ?? 0,
-      mentions: (t.mentionCount ?? 0) / 1000,
-      date: t.detectedAt ? new Date(t.detectedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "",
-    }));
   }, [filteredTrends]);
 
   // Latest insights (non-KPI) — filtered by industry preference
@@ -175,67 +154,6 @@ export function Dashboard() {
               )}
             </div>
 
-            {/* Trend Velocity Chart */}
-            <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-              <h2 className="font-semibold text-lg text-slate-900 mb-1">Trend Velocity</h2>
-              <p className="text-xs text-slate-400 mb-5">Score and momentum across detected trends</p>
-              {chartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={280}>
-                  <AreaChart data={chartData}>
-                    <defs>
-                      <linearGradient id="blueGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#2563EB" stopOpacity={0.15} />
-                        <stop offset="100%" stopColor="#2563EB" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid stroke="#E2E8F0" strokeDasharray="3 3" vertical={false} />
-                    <XAxis
-                      dataKey="date"
-                      tick={{ fill: "#94A3B8", fontSize: 11, fontFamily: "DM Sans" }}
-                      axisLine={{ stroke: "#E2E8F0" }}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tick={{ fill: "#94A3B8", fontSize: 11, fontFamily: "DM Sans" }}
-                      axisLine={{ stroke: "#E2E8F0" }}
-                      tickLine={false}
-                    />
-                    <RechartsTooltip
-                      contentStyle={{
-                        background: "#f0fdfa",
-                        border: "1px solid #E2E8F0",
-                        borderRadius: 8,
-                        color: "#334155",
-                        fontFamily: "DM Sans",
-                        fontSize: 13,
-                        boxShadow: "0 4px 12px rgba(0,0,0,0.06)",
-                      }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="score"
-                      stroke="#2563EB"
-                      strokeWidth={2}
-                      fill="url(#blueGrad)"
-                      name="Trend Score"
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="mentions"
-                      stroke="#93C5FD"
-                      strokeWidth={1}
-                      fillOpacity={0}
-                      name="Mentions (K)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-[280px] flex items-center justify-center text-slate-300 text-sm">
-                  No trend data available
-                </div>
-              )}
-            </div>
-
             {/* Top Emerging Trends */}
             <div>
               <h2 className="font-semibold text-lg text-slate-900 mb-4">Top Emerging Trends</h2>
@@ -245,7 +163,7 @@ export function Dashboard() {
                     <button
                       key={trend.$primaryKey}
                       onClick={() => navigate(`/trends/${trend.trendId}`)}
-                      className="flex items-center gap-4 p-4 border border-slate-200 bg-teal-50/80 rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all text-left group cursor-pointer"
+                      className="flex items-center gap-4 p-4 border border-slate-200 glass rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all text-left group cursor-pointer"
                     >
                       <span className="font-semibold text-2xl text-slate-200 w-8 tabular-nums">
                         {String(idx + 1).padStart(2, "0")}
@@ -259,6 +177,15 @@ export function Dashboard() {
                         <p className="text-xs text-slate-400 mt-0.5 truncate">
                           {getIndustryLabel(trend.industry ?? "")} &middot; {trend.category}
                         </p>
+                      </div>
+                      <div className="w-24 shrink-0">
+                        <TrendSparkline
+                          trendId={trend.trendId ?? trend.$primaryKey as string}
+                          score={trend.trendScore ?? 0}
+                          growthRate={trend.growthRate ?? 0}
+                          mentionCount={trend.mentionCount ?? 0}
+                          height={36}
+                        />
                       </div>
                       <div className="text-right shrink-0">
                         <span className="font-semibold text-2xl text-blue-600">{trend.trendScore?.toFixed(0)}</span>
@@ -290,7 +217,7 @@ export function Dashboard() {
       </div>
 
       {/* Right panel — Latest AI Insights */}
-      <aside className="hidden lg:block w-80 xl:w-96 border-l border-white/30 bg-teal-50/80/70 backdrop-blur-xl">
+      <aside className="hidden lg:block w-80 xl:w-96 border-l border-white/30 dark:border-white/10 glass backdrop-blur-xl">
         <ScrollArea className="h-screen">
           <div className="p-5">
             <h2 className="font-semibold text-sm uppercase tracking-wider text-slate-400 mb-4">Latest AI Insights</h2>
@@ -326,7 +253,7 @@ interface KpiInsight {
 function KpiCard({ insight }: { insight: KpiInsight }) {
   const isPositive = (insight.changePercent ?? 0) >= 0;
   return (
-    <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all">
+    <div className="border border-slate-200 glass rounded-xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all">
       <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400 mb-2 truncate">{insight.title}</p>
       <p className="font-semibold text-[44px] leading-none text-slate-900 tabular-nums">
         {insight.metricValue != null ? formatNumber(insight.metricValue) : "--"}
@@ -360,7 +287,7 @@ function SummaryKpiCard({
   change: number | null;
 }) {
   return (
-    <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all">
+    <div className="border border-slate-200 glass rounded-xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all">
       <div className="flex items-center gap-2 mb-2">
         <span className="text-blue-600">{icon}</span>
         <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">{label}</p>
@@ -397,7 +324,7 @@ function InsightCard({ insight }: { insight: InsightObj }) {
   };
 
   return (
-    <div className="border border-slate-200 bg-teal-50/80 rounded-xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all">
+    <div className="border border-slate-200 glass rounded-xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all">
       <div className="flex items-center gap-2 mb-1">
         <span
           className={`text-[10px] font-medium uppercase tracking-widest ${typeColors[insight.insightType ?? ""] ?? "text-slate-400"}`}

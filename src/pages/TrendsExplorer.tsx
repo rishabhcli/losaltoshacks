@@ -10,6 +10,8 @@ import { StatusBadge } from "@/components/market/StatusBadge";
 import { LoadingState } from "@/components/market/LoadingState";
 import { usePreferences } from "@/hooks/usePreferences";
 import { getIndustryLabel } from "@/lib/industry";
+import { TrendSparkline } from "@/components/market/TrendSparkline";
+import { StabilityBadge } from "@/components/market/StabilityBadge";
 
 type SortField = "trendScore" | "mentionCount" | "growthRate";
 
@@ -95,15 +97,15 @@ export function TrendsExplorer() {
               placeholder="Search trends..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="pl-9 bg-teal-50/80 border-slate-200 text-slate-800 placeholder:text-slate-300 rounded-lg"
+              className="pl-9 glass border-slate-200 text-slate-800 placeholder:text-slate-300 rounded-lg"
             />
           </div>
 
           <Select value={industryFilter} onValueChange={setIndustryFilter}>
-            <SelectTrigger className="w-[180px] bg-teal-50/80 border-slate-200 text-slate-700 text-sm rounded-lg">
+            <SelectTrigger className="w-[180px] glass border-slate-200 text-slate-700 text-sm rounded-lg">
               <SelectValue placeholder="Industry" />
             </SelectTrigger>
-            <SelectContent className="bg-teal-50/80 border-slate-200 rounded-lg">
+            <SelectContent className="glass border-slate-200 rounded-lg">
               <SelectItem value="all" className="text-sm text-slate-700">
                 All Industries
               </SelectItem>
@@ -116,10 +118,10 @@ export function TrendsExplorer() {
           </Select>
 
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[150px] bg-teal-50/80 border-slate-200 text-slate-700 text-sm rounded-lg">
+            <SelectTrigger className="w-[150px] glass border-slate-200 text-slate-700 text-sm rounded-lg">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
-            <SelectContent className="bg-teal-50/80 border-slate-200 rounded-lg">
+            <SelectContent className="glass border-slate-200 rounded-lg">
               <SelectItem value="all" className="text-sm text-slate-700">
                 All Statuses
               </SelectItem>
@@ -132,10 +134,10 @@ export function TrendsExplorer() {
           </Select>
 
           <Select value={sortBy} onValueChange={v => setSortBy(v as SortField)}>
-            <SelectTrigger className="w-[160px] bg-teal-50/80 border-slate-200 text-slate-700 text-sm rounded-lg">
+            <SelectTrigger className="w-[160px] glass border-slate-200 text-slate-700 text-sm rounded-lg">
               <SelectValue placeholder="Sort by" />
             </SelectTrigger>
-            <SelectContent className="bg-teal-50/80 border-slate-200 rounded-lg">
+            <SelectContent className="glass border-slate-200 rounded-lg">
               <SelectItem value="trendScore" className="text-sm text-slate-700">
                 Trend Score
               </SelectItem>
@@ -191,7 +193,7 @@ function TrendCard({ trend, onClick }: { trend: TrendObj; onClick: () => void })
   return (
     <button
       onClick={onClick}
-      className="border border-slate-200 bg-teal-50/80 rounded-xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all text-left group cursor-pointer w-full"
+      className="border border-slate-200 glass rounded-xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all text-left group cursor-pointer w-full"
     >
       {/* Top row */}
       <div className="flex items-start justify-between gap-2 mb-3">
@@ -202,6 +204,17 @@ function TrendCard({ trend, onClick }: { trend: TrendObj; onClick: () => void })
           <p className="text-[11px] text-slate-400 font-medium mt-0.5">{getIndustryLabel(trend.industry ?? "")}</p>
         </div>
         <StatusBadge value={trend.status} />
+      </div>
+
+      {/* Sparkline */}
+      <div className="mb-3">
+        <TrendSparkline
+          trendId={trend.$primaryKey as string}
+          score={trend.trendScore ?? 0}
+          growthRate={trend.growthRate ?? 0}
+          mentionCount={trend.mentionCount ?? 0}
+          height={48}
+        />
       </div>
 
       {/* Description */}
@@ -231,8 +244,16 @@ function TrendCard({ trend, onClick }: { trend: TrendObj; onClick: () => void })
         )}
       </div>
 
-      {/* Forecast badge */}
-      <ForecastBadge status={trend.status} growthRate={trend.growthRate} />
+      {/* Forecast + Stability badges */}
+      <div className="flex flex-wrap items-center gap-2 mt-3">
+        <ForecastBadge status={trend.status} growthRate={trend.growthRate} />
+        <StabilityBadge
+          trendId={trend.$primaryKey as string}
+          score={trend.trendScore ?? 0}
+          growthRate={trend.growthRate ?? 0}
+          mentionCount={trend.mentionCount ?? 0}
+        />
+      </div>
 
       {/* Keywords */}
       {keywords.length > 0 && (
@@ -254,7 +275,7 @@ function ForecastBadge({ status, growthRate }: { status: string | undefined; gro
   const Icon = forecast.icon;
 
   return (
-    <div className={`flex items-center gap-1.5 mt-3 px-2.5 py-1 rounded-md w-fit ${colors.bg}`}>
+    <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md w-fit ${colors.bg}`}>
       <Icon className={`w-3 h-3 ${colors.iconColor}`} />
       <span className={`text-[11px] font-medium ${colors.text}`}>{forecast.label}</span>
     </div>

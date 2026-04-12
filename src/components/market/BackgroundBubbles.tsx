@@ -1,6 +1,7 @@
 import { useEffect } from "react";
+import { useTheme } from "@/lib/theme";
 
-const bubbles = [
+const lightBubbles = [
   { size: 420, x: "5%", y: "-5%", color: "rgba(37, 99, 235, 0.45)", duration: 28, delay: 0 },
   { size: 350, x: "60%", y: "-10%", color: "rgba(139, 92, 246, 0.40)", duration: 34, delay: 2 },
   { size: 280, x: "80%", y: "20%", color: "rgba(16, 185, 129, 0.35)", duration: 24, delay: 4 },
@@ -9,7 +10,19 @@ const bubbles = [
   { size: 320, x: "-5%", y: "40%", color: "rgba(16, 185, 129, 0.38)", duration: 26, delay: 5 },
 ] as const;
 
+const darkBubbles = [
+  { size: 420, x: "5%", y: "-5%", color: "rgba(29, 78, 216, 0.45)", duration: 28, delay: 0 },
+  { size: 350, x: "60%", y: "-10%", color: "rgba(126, 34, 206, 0.40)", duration: 34, delay: 2 },
+  { size: 280, x: "80%", y: "20%", color: "rgba(5, 150, 105, 0.35)", duration: 24, delay: 4 },
+  { size: 500, x: "20%", y: "30%", color: "rgba(29, 78, 216, 0.40)", duration: 38, delay: 1 },
+  { size: 240, x: "45%", y: "10%", color: "rgba(126, 34, 206, 0.35)", duration: 30, delay: 3 },
+  { size: 320, x: "-5%", y: "40%", color: "rgba(5, 150, 105, 0.38)", duration: 26, delay: 5 },
+] as const;
+
 export function BackgroundBubbles() {
+  const { theme } = useTheme();
+  const bubbles = theme === "dark" ? darkBubbles : lightBubbles;
+
   useEffect(() => {
     function onScroll() {
       const scrollY = window.scrollY || document.documentElement.scrollTop;

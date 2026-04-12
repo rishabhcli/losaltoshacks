@@ -71,7 +71,7 @@ export function BusinessType() {
                   className={`relative text-left p-4 rounded-xl border transition-all cursor-pointer ${
                     isSelected
                       ? "border-blue-600 bg-blue-50 shadow-[0_0_0_3px_rgba(37,99,235,0.12)]"
-                      : "border-slate-200 bg-teal-50/80 hover:border-slate-300 hover:bg-teal-50 hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)]"
+                      : "border-slate-200 dark:border-slate-600 glass hover:border-slate-300 dark:hover:border-slate-500 hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)]"
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
