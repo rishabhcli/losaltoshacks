@@ -95,5 +95,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
   }
 }

@@ -8,6 +8,7 @@ import { getIndustryLabel } from "@/lib/industry";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { inferWithOpenAI } from "@/lib/openai";
+import { generateAudio } from "@/lib/elevenlabs";
 
 /** Generates a realistic executive briefing script from trend and insight data */
 function generateBriefingScript(
@@ -88,12 +89,17 @@ export function Briefing() {
   const { preferences } = usePreferences();
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
   const [highlightedParagraph, setHighlightedParagraph] = useState(0);
   const [liveScript, setLiveScript] = useState<string | null>(null);
   const [liveModel, setLiveModel] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const playIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
+  const [playRequested, setPlayRequested] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const { data: trends, isLoading: trendsLoading } = useOsdkObjects(marketTrend, {
     orderBy: { trendScore: "desc" },
@@ -126,9 +132,23 @@ export function Briefing() {
 
   const paragraphs = useMemo(() => displayedScript.split("\n\n").filter(Boolean), [displayedScript]);
 
+  const resetPlayback = useCallback(() => {
+    setIsPlaying(false);
+    setPlayRequested(false);
+    setCurrentTime(0);
+    setAudioUrl(null);
+    setDuration(0);
+    setHighlightedParagraph(0);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+  }, []);
+
   const generateLiveBriefing = useCallback(async () => {
     setIsGenerating(true);
     setGenerationError(null);
+    resetPlayback();
 
     try {
       const result = await inferWithOpenAI({
@@ -140,86 +160,112 @@ export function Briefing() {
 
       setLiveScript(result.text);
       setLiveModel(result.model);
-      setCurrentTime(0);
-      setHighlightedParagraph(0);
-      setIsPlaying(false);
     } catch (error) {
       setGenerationError(error instanceof Error ? error.message : "OpenAI generation failed.");
     } finally {
       setIsGenerating(false);
     }
-  }, [filteredInsights, filteredTrends, preferences.industry]);
+  }, [filteredInsights, filteredTrends, preferences.industry, resetPlayback]);
 
   const useDraftBriefing = useCallback(() => {
     setLiveScript(null);
     setLiveModel(null);
     setGenerationError(null);
-    setCurrentTime(0);
-    setHighlightedParagraph(0);
-    setIsPlaying(false);
-  }, []);
+    resetPlayback();
+  }, [resetPlayback]);
+
+  // Pre-fetch audio as soon as script is ready
+  useEffect(() => {
+    if (displayedScript.trim() && !audioUrl && !isGeneratingAudio) {
+      // Debounce pre-fetch slightly to avoid hitting API during rapid filter changes
+      const timer = setTimeout(() => {
+        void (async () => {
+          setIsGeneratingAudio(true);
+          setGenerationError(null);
+          try {
+            const url = await generateAudio(displayedScript);
+            setAudioUrl(url);
+          } catch (error) {
+            console.error("Audio pre-fetch failed", error);
+            // Don't show blocking error for background pre-fetch,
+            // only if user actually requested play (handled in togglePlay)
+          } finally {
+            setIsGeneratingAudio(false);
+          }
+        })();
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [displayedScript, audioUrl, isGeneratingAudio]);
+
+  // Handle Play/Pause
+  const togglePlay = useCallback(async () => {
+    if (isPlaying) {
+      setIsPlaying(false);
+      setPlayRequested(false);
+      audioRef.current?.pause();
+    } else {
+      if (!audioUrl) {
+        // If not loaded yet, set a flag to play as soon as pre-fetch finishes
+        setPlayRequested(true);
+        if (!isGeneratingAudio) {
+          // If pre-fetch hasn't even started (or failed), trigger it now
+          setIsGeneratingAudio(true);
+          try {
+            const url = await generateAudio(displayedScript);
+            setAudioUrl(url);
+          } catch (error) {
+            setGenerationError(error instanceof Error ? error.message : "Audio generation failed.");
+            setPlayRequested(false);
+          } finally {
+            setIsGeneratingAudio(false);
+          }
+        }
+      } else {
+        setIsPlaying(true);
+        audioRef.current?.play().catch(e => console.error("Audio playback failed:", e));
+      }
+    }
+  }, [isPlaying, audioUrl, displayedScript, isGeneratingAudio]);
+
+  // Automatically start playing once the audio URL is set if the user clicked play early
+  useEffect(() => {
+    if (audioUrl && playRequested && !isPlaying && audioRef.current) {
+      setIsPlaying(true);
+      setPlayRequested(false);
+      audioRef.current.play().catch(e => {
+        console.error("Audio playback failed", e);
+        setIsPlaying(false);
+      });
+    }
+  }, [audioUrl, playRequested, isPlaying]);
+
+  // Reset playback if the industry/preferences change
+  useEffect(() => {
+    resetPlayback();
+  }, [preferences.industry, resetPlayback]);
 
   // Estimated duration: ~150 words per minute speaking rate
   const wordCount = displayedScript.trim() ? displayedScript.trim().split(/\s+/).length : 0;
   const estimatedDuration = Math.ceil((wordCount / 150) * 60); // seconds
+  const actualDuration = duration > 0 && duration !== Infinity ? duration : estimatedDuration;
 
   const formatTime = (seconds: number) => {
+    if (!isFinite(seconds)) return "0:00";
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
-  const togglePlay = useCallback(() => {
-    if (isPlaying) {
-      setIsPlaying(false);
-      if (playIntervalRef.current) {
-        clearInterval(playIntervalRef.current);
-        playIntervalRef.current = null;
-      }
-    } else {
-      if (currentTime >= estimatedDuration) {
-        setCurrentTime(0);
-        setHighlightedParagraph(0);
-      }
-      setIsPlaying(true);
-    }
-  }, [isPlaying, currentTime, estimatedDuration]);
-
-  // Simulate playback timer
-  useEffect(() => {
-    if (isPlaying) {
-      playIntervalRef.current = setInterval(() => {
-        setCurrentTime(prev => {
-          const next = prev + 1;
-          if (next >= estimatedDuration) {
-            setIsPlaying(false);
-            if (playIntervalRef.current) clearInterval(playIntervalRef.current);
-            return estimatedDuration;
-          }
-          return next;
-        });
-      }, 1000);
-    }
-    return () => {
-      if (playIntervalRef.current) clearInterval(playIntervalRef.current);
-    };
-  }, [isPlaying, estimatedDuration]);
-
   // Update highlighted paragraph based on time
   useEffect(() => {
-    if (paragraphs.length === 0) return;
-    const timePerParagraph = estimatedDuration / paragraphs.length;
+    if (paragraphs.length === 0 || actualDuration === 0) return;
+    const timePerParagraph = actualDuration / paragraphs.length;
     const idx = Math.min(Math.floor(currentTime / timePerParagraph), paragraphs.length - 1);
     setHighlightedParagraph(idx);
-  }, [currentTime, paragraphs.length, estimatedDuration]);
+  }, [currentTime, paragraphs.length, actualDuration]);
 
-  useEffect(() => {
-    if (currentTime > estimatedDuration) {
-      setCurrentTime(0);
-    }
-  }, [currentTime, estimatedDuration]);
-
-  const progress = estimatedDuration > 0 ? (currentTime / estimatedDuration) * 100 : 0;
+  const progress = actualDuration > 0 ? (currentTime / actualDuration) * 100 : 0;
 
   // Generate stable visual variation without restricted randomness.
   const waveformBars = useMemo(
@@ -267,7 +313,7 @@ export function Briefing() {
         {generationError ? (
           <Alert variant="destructive">
             <AlertTriangle />
-            <AlertTitle>MiniMax request failed</AlertTitle>
+            <AlertTitle>System Error</AlertTitle>
             <AlertDescription>{generationError}</AlertDescription>
           </Alert>
         ) : null}
@@ -278,6 +324,18 @@ export function Briefing() {
 
         {/* Audio Player Card */}
         <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+          <audio
+            ref={audioRef}
+            src={audioUrl || undefined}
+            onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+            onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+            onDurationChange={(e) => setDuration(e.currentTarget.duration)}
+            onEnded={() => {
+              setIsPlaying(false);
+              setCurrentTime(0);
+            }}
+          />
+
           {/* Waveform Visualizer */}
           <div className="flex items-end justify-center gap-[2px] h-20 mb-6 px-4">
             {waveformBars.map((height, i) => {
@@ -310,7 +368,11 @@ export function Briefing() {
             onClick={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
               const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-              setCurrentTime(Math.floor(pct * estimatedDuration));
+              const newTime = pct * actualDuration;
+              setCurrentTime(newTime);
+              if (audioRef.current && audioUrl) {
+                audioRef.current.currentTime = newTime;
+              }
             }}
             aria-label="Jump to a position in the briefing"
           >
@@ -327,13 +389,17 @@ export function Briefing() {
           {/* Time labels */}
           <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium tabular-nums mb-5">
             <span>{formatTime(currentTime)}</span>
-            <span>{formatTime(estimatedDuration)}</span>
+            <span>{formatTime(actualDuration)}</span>
           </div>
 
           {/* Playback controls */}
           <div className="flex items-center justify-center gap-4">
             <button
-              onClick={() => setCurrentTime(Math.max(0, currentTime - 10))}
+              onClick={() => {
+                const newTime = Math.max(0, currentTime - 10);
+                setCurrentTime(newTime);
+                if (audioRef.current && audioUrl) audioRef.current.currentTime = newTime;
+              }}
               className="w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all cursor-pointer"
               aria-label="Skip back 10 seconds"
             >
@@ -342,14 +408,27 @@ export function Briefing() {
 
             <button
               onClick={togglePlay}
-              className="w-14 h-14 rounded-full bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700 shadow-lg hover:shadow-xl transition-all cursor-pointer"
+              disabled={isGeneratingAudio && playRequested}
+              className={`w-14 h-14 rounded-full text-white flex items-center justify-center shadow-lg transition-all cursor-pointer ${
+                (isGeneratingAudio && playRequested) ? "bg-slate-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 hover:shadow-xl"
+              }`}
               aria-label={isPlaying ? "Pause" : "Play"}
             >
-              {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-0.5" />}
+              {(isGeneratingAudio && playRequested) ? (
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : isPlaying ? (
+                <Pause className="w-6 h-6" />
+              ) : (
+                <Play className="w-6 h-6 ml-0.5" />
+              )}
             </button>
 
             <button
-              onClick={() => setCurrentTime(Math.min(estimatedDuration, currentTime + 10))}
+              onClick={() => {
+                const newTime = Math.min(actualDuration, currentTime + 10);
+                setCurrentTime(newTime);
+                if (audioRef.current && audioUrl) audioRef.current.currentTime = newTime;
+              }}
               className="w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all cursor-pointer"
               aria-label="Skip forward 10 seconds"
             >
@@ -361,11 +440,11 @@ export function Briefing() {
           <div className="flex items-center justify-center gap-4 mt-4 text-[11px] text-slate-400">
             <div className="flex items-center gap-1">
               <Clock className="w-3 h-3" />
-              <span>~{Math.ceil(estimatedDuration / 60)} min briefing</span>
+              <span>~{Math.ceil(actualDuration / 60)} min briefing</span>
             </div>
             <div className="flex items-center gap-1">
               <Sparkles className="w-3 h-3" />
-              <span>{liveScript ? "MiniMax-generated" : "Draft-generated"}</span>
+              <span>ElevenLabs Voice</span>
             </div>
             <div className="flex items-center gap-1">
               <FileText className="w-3 h-3" />

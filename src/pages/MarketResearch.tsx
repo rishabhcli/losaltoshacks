@@ -1,0 +1,285 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { BarChart3, Eye, Radio, RotateCcw, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { useMasterBuildDashboard } from "@/hooks/useMasterBuildDashboard";
+import { MissionControl } from "@/components/research/MissionControl";
+import { AgentStatusGrid } from "@/components/research/AgentStatusGrid";
+import { AgentBrowserCards } from "@/components/research/AgentBrowserCards";
+import { ResearchObservability } from "@/components/research/ResearchObservability";
+import { DiscoveryGrid } from "@/components/research/DiscoveryGrid";
+import { FinalOptionsPanel } from "@/components/research/FinalOptionsPanel";
+import { BusinessPlanPanel } from "@/components/research/BusinessPlanPanel";
+import { AgentFeed } from "@/components/research/AgentFeed";
+
+type ViewMode = "command" | "observe";
+
+export function MarketResearch() {
+  const {
+    latestMission, agents, discoveries, logs, signals, thoughts, memory, businessPlans,
+    isLoading, isCreatingMission, error,
+    createMission, stopAll, resetAll,
+  } = useMasterBuildDashboard();
+
+  const [viewMode, setViewMode] = useState<ViewMode>("command");
+  const [showFinalOptions, setShowFinalOptions] = useState(false);
+
+  const isRunning = useMemo(() => {
+    const status = latestMission?.status;
+    return status === "queued" || status === "active";
+  }, [latestMission?.status]);
+
+  const activeAgentCount = useMemo(
+    () => agents.filter((a) => ["searching", "found_trend", "exploiting", "reassigning"].includes(a.status)).length,
+    [agents],
+  );
+
+  // Auto-show final options modal when they arrive
+  useEffect(() => {
+    if (latestMission?.finalOptions) setShowFinalOptions(true);
+  }, [latestMission?.finalOptions]);
+
+  const handleReset = useCallback(async () => {
+    if (isRunning) {
+      stopAll();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    resetAll();
+  }, [isRunning, stopAll, resetAll]);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-sm text-slate-400">Loading research dashboard...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* ── Top Header Bar ────────────────────────────────────── */}
+      <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200/60 bg-white/70 backdrop-blur-sm shrink-0">
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-semibold text-slate-900 tracking-tight">
+            Market Research
+          </h1>
+          {activeAgentCount > 0 && (
+            <Badge className="bg-green-100 text-green-700 border-0 gap-1.5 text-[11px] font-medium">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500" />
+              </span>
+              {activeAgentCount} active
+            </Badge>
+          )}
+          {!isRunning && discoveries.length > 0 && (
+            <Badge variant="secondary" className="text-[11px] bg-slate-100 text-slate-500">
+              {discoveries.length} discoveries
+            </Badge>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+        {/* Reset button */}
+        {latestMission && (
+          <button
+            onClick={handleReset}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-500 border border-red-200/60 hover:bg-red-50 transition-colors"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            Reset
+          </button>
+        )}
+
+        {/* View mode toggle */}
+        <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200/60">
+          <button
+            onClick={() => setViewMode("command")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+              viewMode === "command"
+                ? "bg-white text-blue-600 shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            Command
+          </button>
+          <button
+            onClick={() => setViewMode("observe")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+              viewMode === "observe"
+                ? "bg-white text-blue-600 shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            <Eye className="w-3.5 h-3.5" />
+            Observe
+          </button>
+        </div>
+        </div>
+      </div>
+
+      {/* ── Main Content Area (fills viewport) ──────────────── */}
+      <div className="flex-1 flex overflow-hidden min-h-0">
+
+        {viewMode === "command" ? (
+          /* ── COMMAND VIEW ──────────────────────────────────── */
+          /* Left: Business Plan pipeline + report                */
+          /* Right: Agent grid + Discovery grid (stacked)         */
+          <>
+            {/* Left Panel */}
+            <div className="w-[400px] min-w-[320px] border-r border-slate-200/60 flex flex-col overflow-hidden bg-slate-50/30">
+              <div className="flex-1 overflow-hidden">
+                <BusinessPlanPanel
+                  plans={businessPlans}
+                  agents={agents}
+                  discoveries={discoveries}
+                  missionPrompt={latestMission?.prompt ?? ""}
+                  isRunning={isRunning}
+                  finalOptions={latestMission?.finalOptions ?? null}
+                  onStopAll={stopAll}
+                />
+              </div>
+            </div>
+
+            {/* Right Panel */}
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Agent browser preview cards */}
+              <div className="shrink-0 px-4 pt-4 pb-2">
+                <AgentBrowserCards agents={agents} discoveries={discoveries} />
+              </div>
+
+              {/* Discovery grid + Mission logs side by side */}
+              <div className="flex-1 flex overflow-hidden min-h-0">
+                {/* Discoveries */}
+                <div className="flex-1 flex flex-col overflow-hidden px-4 pb-3">
+                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Discoveries</h3>
+                  <div className="flex-1 overflow-hidden">
+                    <DiscoveryGrid discoveries={discoveries} />
+                  </div>
+                </div>
+
+                {/* Mission Logs (floating-style right sidebar) */}
+                <div className="w-[300px] shrink-0 border-l border-slate-200/40 bg-slate-50/50 flex flex-col overflow-hidden">
+                  <div className="px-3 py-2.5 border-b border-slate-200/40">
+                    <div className="flex items-center gap-1.5">
+                      <Radio className="w-3.5 h-3.5 text-slate-400" />
+                      <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Live Feed</span>
+                      {logs.length > 0 && (
+                        <Badge variant="secondary" className="text-[9px] ml-auto bg-slate-200/60 text-slate-500">{logs.length}</Badge>
+                      )}
+                    </div>
+                  </div>
+                  <ScrollArea className="flex-1">
+                    <div className="p-2 space-y-1">
+                      {logs.length === 0 && thoughts.length === 0 && (
+                        <div className="text-xs text-slate-400 text-center py-8">
+                          Agent activity will appear here
+                        </div>
+                      )}
+                      {[...thoughts.map(t => ({
+                        id: t._id,
+                        agentId: t.agent_id,
+                        message: t.response_summary || t.prompt_summary,
+                        time: t.timestamp,
+                        type: "thought" as const,
+                      })), ...logs.map(l => ({
+                        id: l._id,
+                        agentId: l.agent_id,
+                        message: l.message,
+                        time: l.timestamp * 1000,
+                        type: "log" as const,
+                      }))]
+                        .sort((a, b) => b.time - a.time)
+                        .slice(0, 35)
+                        .map((item) => {
+                          const agent = agents.find(a => a.agent_id === item.agentId);
+                          return (
+                            <div
+                              key={item.id}
+                              className="text-[11px] leading-relaxed text-slate-600 px-2 py-1.5 rounded-md hover:bg-white/60 transition-colors"
+                            >
+                              <span className="text-[10px] text-slate-400">
+                                {new Date(item.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                              </span>
+                              {" "}
+                              <span className="text-slate-700 line-clamp-2">{item.message}</span>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </ScrollArea>
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          /* ── OBSERVE VIEW ─────────────────────────────────── */
+          /* Left: Full observability dashboard (tabs)            */
+          /* Right: Discovery grid                                */
+          <>
+            {/* Left Panel — Observability */}
+            <div className="flex-1 flex flex-col overflow-hidden p-4">
+              <ResearchObservability
+                thoughts={thoughts}
+                signals={signals}
+                logs={logs}
+                memory={memory}
+                businessPlans={businessPlans}
+                agents={agents}
+                discoveries={discoveries}
+                missionPrompt={latestMission?.prompt ?? ""}
+                isRunning={isRunning}
+              />
+            </div>
+
+            {/* Right Panel — Discoveries */}
+            <div className="w-[420px] shrink-0 border-l border-slate-200/60 flex flex-col overflow-hidden p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Discoveries</h3>
+                {discoveries.length > 0 && (
+                  <Badge variant="secondary" className="text-[9px] bg-slate-100 text-slate-500">{discoveries.length}</Badge>
+                )}
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <DiscoveryGrid discoveries={discoveries} />
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ── Bottom Command Bar (sticky) ───────────────────── */}
+      <MissionControl
+        isRunning={isRunning}
+        isCreatingMission={isCreatingMission}
+        missionPrompt={latestMission?.prompt ?? ""}
+        missionStatus={latestMission?.status ?? null}
+        error={error}
+        onCreateMission={createMission}
+        onStopAll={stopAll}
+        onResetAll={resetAll}
+      />
+
+      {/* ── Final Options Modal (auto-shows when results arrive) ── */}
+      {showFinalOptions && latestMission?.finalOptions && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center pt-20" role="dialog" aria-modal="true">
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setShowFinalOptions(false)} />
+          {/* Modal */}
+          <div className="relative w-[min(760px,calc(100vw-400px))] max-h-[calc(100vh-160px)] bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 shrink-0">
+              <h2 className="text-sm font-semibold text-slate-800">Market Research Results</h2>
+              <button onClick={() => setShowFinalOptions(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <ScrollArea className="flex-1 p-5">
+              <FinalOptionsPanel finalOptions={latestMission.finalOptions} />
+            </ScrollArea>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
