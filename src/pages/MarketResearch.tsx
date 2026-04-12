@@ -4,13 +4,11 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useMasterBuildDashboard } from "@/hooks/useMasterBuildDashboard";
 import { MissionControl } from "@/components/research/MissionControl";
-import { AgentStatusGrid } from "@/components/research/AgentStatusGrid";
 import { AgentBrowserCards } from "@/components/research/AgentBrowserCards";
 import { ResearchObservability } from "@/components/research/ResearchObservability";
 import { DiscoveryGrid } from "@/components/research/DiscoveryGrid";
 import { FinalOptionsPanel } from "@/components/research/FinalOptionsPanel";
 import { BusinessPlanPanel } from "@/components/research/BusinessPlanPanel";
-import { AgentFeed } from "@/components/research/AgentFeed";
 import { useTheme } from "@/lib/theme";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
@@ -209,21 +207,18 @@ export function MarketResearch() {
                       }))]
                         .sort((a, b) => b.time - a.time)
                         .slice(0, 35)
-                        .map((item) => {
-                          const agent = agents.find(a => a.agent_id === item.agentId);
-                          return (
-                            <div
-                              key={item.id}
-                              className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300 px-2 py-1.5 rounded-md hover:bg-white/60 dark:hover:bg-slate-900/80 transition-colors"
-                            >
-                              <span className="text-[10px] text-slate-400">
-                                {new Date(item.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-                              </span>
-                              {" "}
-                              <span className="text-slate-700 dark:text-slate-100 line-clamp-2">{item.message}</span>
-                            </div>
-                          );
-                        })}
+                        .map((item) => (
+                          <div
+                            key={item.id}
+                            className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300 px-2 py-1.5 rounded-md hover:bg-white/60 dark:hover:bg-slate-900/80 transition-colors"
+                          >
+                            <span className="text-[10px] text-slate-400">
+                              {new Date(item.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                            </span>
+                            {" "}
+                            <span className="text-slate-700 dark:text-slate-100 line-clamp-2">{item.message}</span>
+                          </div>
+                        ))}
                     </div>
                   </ScrollArea>
                 </div>
@@ -247,6 +242,7 @@ export function MarketResearch() {
                 discoveries={discoveries}
                 missionPrompt={latestMission?.prompt ?? ""}
                 isRunning={isRunning}
+                missionStatus={latestMission?.status ?? null}
               />
             </div>
 
@@ -282,7 +278,12 @@ export function MarketResearch() {
       {showFinalOptions && latestMission?.finalOptions && (
         <div className="fixed inset-0 z-50 flex items-start justify-center pt-20" role="dialog" aria-modal="true">
           {/* Backdrop */}
-          <div className="absolute inset-0 bg-black/20 dark:bg-black/50 backdrop-blur-sm" onClick={() => setShowFinalOptions(false)} />
+          <button
+            type="button"
+            aria-label="Close results"
+            className="absolute inset-0 bg-black/20 dark:bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowFinalOptions(false)}
+          />
           {/* Modal */}
           <div className="relative w-[min(760px,calc(100vw-400px))] max-h-[calc(100vh-160px)] bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-xl overflow-hidden flex flex-col">
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 dark:border-slate-800/80 shrink-0 bg-slate-50 dark:bg-slate-950">

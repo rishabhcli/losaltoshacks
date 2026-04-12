@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 from browser_use import BrowserSession
+from browser_use.browser.profile import BrowserProfile
 
 
 NOPECHA_EXT_DIR = str((Path(__file__).resolve().parent / "extensions" / "nopecha").resolve())
@@ -18,6 +19,34 @@ _USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
 ]
+
+_PERSISTENT_CONTEXT_KWARG_PATCHED = False
+
+
+class _PlaywrightPersistentContextArgsProxy:
+    """Filter browser_use kwargs that older Playwright builds reject."""
+
+    def __init__(self, wrapped) -> None:
+        self._wrapped = wrapped
+
+    def model_dump(self, *args, **kwargs):
+        dumped = self._wrapped.model_dump(*args, **kwargs)
+        dumped.pop("devtools", None)
+        return dumped
+
+
+def _patch_browser_use_persistent_context_kwargs() -> None:
+    global _PERSISTENT_CONTEXT_KWARG_PATCHED
+    if _PERSISTENT_CONTEXT_KWARG_PATCHED:
+        return
+
+    original = BrowserProfile.kwargs_for_launch_persistent_context
+
+    def _kwargs_for_launch_persistent_context(self):
+        return _PlaywrightPersistentContextArgsProxy(original(self))
+
+    BrowserProfile.kwargs_for_launch_persistent_context = _kwargs_for_launch_persistent_context
+    _PERSISTENT_CONTEXT_KWARG_PATCHED = True
 
 
 def _expand_path(value: str) -> str:
@@ -83,6 +112,8 @@ def _clear_stale_profile_artifacts(profile_path: str) -> None:
 
 
 def build_local_browser_session(agent_id: int, platform: str, *, headless: bool) -> BrowserSession:
+    _patch_browser_use_persistent_context_kwargs()
+
     profile_path = get_agent_profile_path(agent_id, platform)
     Path(profile_path).mkdir(parents=True, exist_ok=True)
     _clear_stale_profile_artifacts(profile_path)

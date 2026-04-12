@@ -19,11 +19,11 @@ export function History() {
     where: { status: { $eq: "dismissed" } },
     pageSize: 100,
   });
-  const { latestMission, discoveries } = useMasterBuildDashboard();
+  const { missionHistory } = useMasterBuildDashboard();
 
   const acceptedCount = acceptedRecs?.length ?? 0;
   const rejectedCount = rejectedRecs?.length ?? 0;
-  const hasResearch = !!latestMission;
+  const hasResearch = missionHistory.length > 0;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -49,7 +49,7 @@ export function History() {
             Market Research
             {hasResearch && (
               <Badge variant="secondary" className="text-[9px] px-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300">
-                {discoveries.length}
+                {missionHistory.length}
               </Badge>
             )}
           </TabsTrigger>
@@ -97,10 +97,11 @@ export function History() {
 
 /** Summary of the latest market research mission */
 function ResearchHistory() {
-  const { latestMission, discoveries, businessPlans } = useMasterBuildDashboard();
+  const { latestMission, missionHistory, discoveries, businessPlans } = useMasterBuildDashboard();
   const latest = businessPlans[0] ?? null;
+  const priorMissions = missionHistory.filter((mission) => mission.id !== latestMission?.id);
 
-  if (!latestMission) {
+  if (missionHistory.length === 0 && !latestMission) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-slate-400 py-16 gap-3">
         <Search className="w-8 h-8 opacity-40" />
@@ -160,7 +161,49 @@ function ResearchHistory() {
             </div>
           </div>
         )}
+
+        {priorMissions.length > 0 && (
+          <div className="border border-slate-200 dark:border-slate-700/60 rounded-xl p-5 glass">
+            <h3 className="text-sm font-semibold text-slate-800 mb-3">Previous Missions</h3>
+            <div className="space-y-2">
+              {priorMissions.map((mission) => (
+                <div key={mission.id} className="rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2.5 bg-white/60 dark:bg-slate-900/40">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-800 dark:text-slate-100 line-clamp-2">{mission.prompt}</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Started {formatHistoryTime(mission.createdAt)}
+                        {mission.stoppedAt ? ` · ${formatMissionEndLabel(mission.status)} ${formatHistoryTime(mission.stoppedAt)}` : ""}
+                      </p>
+                    </div>
+                    <Badge variant="secondary" className="text-[10px] capitalize shrink-0">
+                      {mission.status}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </ScrollArea>
   );
+}
+
+function formatHistoryTime(value: string | null) {
+  if (!value) return "unknown";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "unknown";
+  return parsed.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatMissionEndLabel(status: string) {
+  if (status === "completed") return "Completed";
+  if (status === "error") return "Failed";
+  return "Stopped";
 }

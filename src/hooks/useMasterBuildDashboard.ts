@@ -1,5 +1,6 @@
 import { startTransition, useCallback, useEffect, useRef, useState } from "react";
 import { insforge } from "@/lib/insforge";
+import { invalidateLiveResearchCache } from "@/lib/osdk-shims";
 import type {
   AgentData,
   AgentMemoryEntry,
@@ -103,6 +104,8 @@ interface MissionRecord {
   id: string;
   prompt: string;
   status: "queued" | "active" | "stopping" | "stopped" | "completed" | "error";
+  createdAt: string | null;
+  stoppedAt: string | null;
   liveUrl: string | null;
   liveUrl2: string | null;
   liveUrl3: string | null;
@@ -148,6 +151,7 @@ async function callMissionControlRoute<T>(path: string, body: Record<string, unk
 
 interface DashboardSnapshotPayload {
   mission: Record<string, unknown> | null;
+  recentMissions?: unknown;
   agents: unknown;
   discoveries: unknown;
   logs: unknown;
@@ -277,6 +281,8 @@ function normalizeMission(row: Record<string, unknown> | null | undefined): Miss
   if (!row || typeof row !== "object") return null;
   return {
     id: String(row.id), prompt: String(row.prompt ?? ""), status: String(row.status ?? "queued") as MissionRecord["status"],
+    createdAt: row.created_at != null ? String(row.created_at) : null,
+    stoppedAt: row.stopped_at != null ? String(row.stopped_at) : null,
     liveUrl: (row.live_url_1 as string | null) ?? null, liveUrl2: (row.live_url_2 as string | null) ?? null, liveUrl3: (row.live_url_3 as string | null) ?? null, liveUrl4: (row.live_url_4 as string | null) ?? null, liveUrl5: (row.live_url_5 as string | null) ?? null,
     finalOptions: normalizeFinalOptions(row.final_options),
   };
@@ -323,6 +329,7 @@ function normalizeBusinessPlans(rows: unknown): BusinessPlan[] {
 
 export function useMasterBuildDashboard() {
   const [latestMission, setLatestMission] = useState<MissionRecord | null>(null);
+  const [missionHistory, setMissionHistory] = useState<MissionRecord[]>([]);
   const [agents, setAgents] = useState<AgentData[]>([]);
   const [discoveries, setDiscoveries] = useState<DiscoveredContent[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -337,6 +344,7 @@ export function useMasterBuildDashboard() {
   const loadInFlightRef = useRef(false);
   const reloadQueuedRef = useRef(false);
   const refreshTimerRef = useRef<number | null>(null);
+  const previousMissionIdRef = useRef<string | null>(null);
 
   const loadDashboard = useCallback(async () => {
     if (loadInFlightRef.current) {
@@ -352,7 +360,15 @@ export function useMasterBuildDashboard() {
       if (token !== reloadTokenRef.current) return;
 
       startTransition(() => {
-        setLatestMission(normalizeMission(snapshot.mission));
+        const normalizedLatestMission = normalizeMission(snapshot.mission);
+        const normalizedMissionHistory = Array.isArray(snapshot.recentMissions)
+          ? snapshot.recentMissions
+            .map((row) => normalizeMission(row as Record<string, unknown>))
+            .filter((mission): mission is MissionRecord => mission !== null)
+          : (normalizedLatestMission ? [normalizedLatestMission] : []);
+
+        setLatestMission(normalizedLatestMission);
+        setMissionHistory(normalizedMissionHistory);
         setAgents(normalizeAgents(snapshot.agents));
         setDiscoveries(normalizeDiscoveries(snapshot.discoveries));
         setLogs(normalizeLogs(snapshot.logs));
@@ -385,6 +401,13 @@ export function useMasterBuildDashboard() {
 
   // Initial load
   useEffect(() => { void loadDashboard(); }, [loadDashboard]);
+
+  useEffect(() => {
+    const missionId = latestMission?.id ?? null;
+    if (previousMissionIdRef.current === missionId) return;
+    previousMissionIdRef.current = missionId;
+    invalidateLiveResearchCache();
+  }, [latestMission?.id]);
 
   // Realtime subscriptions
   useEffect(() => {
@@ -430,7 +453,54 @@ export function useMasterBuildDashboard() {
     if (!prompt.trim()) return;
     setIsCreatingMission(true);
     try {
-      await callMissionControlRoute("/api/mission/create", { prompt: prompt.trim() });
+      const payload = await callMissionControlRoute<{
+        mission?: { mission_id?: string; prompt?: string; status?: MissionRecord["status"] };
+      }>("/api/mission/create", { prompt: prompt.trim() });
+
+      startTransition(() => {
+        setLatestMission({
+          id: String(payload.mission?.mission_id ?? ""),
+          prompt: String(payload.mission?.prompt ?? prompt.trim()),
+          status: payload.mission?.status ?? "queued",
+          createdAt: new Date().toISOString(),
+          stoppedAt: null,
+          liveUrl: null,
+          liveUrl2: null,
+          liveUrl3: null,
+          liveUrl4: null,
+          liveUrl5: null,
+          finalOptions: null,
+        });
+        setMissionHistory((current) => {
+          const currentMission = current[0];
+          const archived = currentMission ? current : [];
+          return [
+            {
+              id: String(payload.mission?.mission_id ?? ""),
+              prompt: String(payload.mission?.prompt ?? prompt.trim()),
+              status: payload.mission?.status ?? "queued",
+              createdAt: new Date().toISOString(),
+              stoppedAt: null,
+              liveUrl: null,
+              liveUrl2: null,
+              liveUrl3: null,
+              liveUrl4: null,
+              liveUrl5: null,
+              finalOptions: null,
+            },
+            ...archived,
+          ];
+        });
+        setAgents([]);
+        setDiscoveries([]);
+        setLogs([]);
+        setSignals([]);
+        setThoughts([]);
+        setMemory([]);
+        setBusinessPlans([]);
+        setError(null);
+      });
+      invalidateLiveResearchCache();
       await loadDashboard();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create mission.");
@@ -451,8 +521,10 @@ export function useMasterBuildDashboard() {
   const resetAll = useCallback(async () => {
     try {
       await callMissionControlRoute("/api/mission/reset", { missionId: latestMission?.id ?? null });
+      invalidateLiveResearchCache(false);
       startTransition(() => {
         setLatestMission(null);
+        setMissionHistory([]);
         setAgents([]);
         setDiscoveries([]);
         setLogs([]);
@@ -469,7 +541,7 @@ export function useMasterBuildDashboard() {
   }, [latestMission?.id, loadDashboard]);
 
   return {
-    latestMission, agents, discoveries, logs, signals, thoughts, memory, businessPlans,
+    latestMission, missionHistory, agents, discoveries, logs, signals, thoughts, memory, businessPlans,
     isLoading, isCreatingMission, error,
     createMission, stopAll, resetAll,
   };
