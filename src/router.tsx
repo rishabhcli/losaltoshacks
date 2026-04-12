@@ -11,6 +11,7 @@ import { BusinessType } from "./pages/BusinessType";
 import { AcceptedIdeas } from "./pages/AcceptedIdeas";
 import { RejectedIdeas } from "./pages/RejectedIdeas";
 import { MarketResearch } from "./pages/MarketResearch";
+import { History } from "./pages/History";
 import { LoginPage } from "./pages/LoginPage";
 
 export const router: ReturnType<typeof createBrowserRouter> = createBrowserRouter(
@@ -53,6 +54,10 @@ export const router: ReturnType<typeof createBrowserRouter> = createBrowserRoute
         {
           path: "/business-type",
           element: <BusinessType />,
+        },
+        {
+          path: "/history",
+          element: <History />,
         },
         {
           path: "/accepted-ideas",

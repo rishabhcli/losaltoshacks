@@ -65,6 +65,16 @@ const SIGNAL_COLUMNS = "id,from_agent,to_agent,message,signal_type,created_at";
 const THOUGHT_COLUMNS = "id,agent_id,thought_type,prompt_summary,response_summary,action_taken,model,tokens_used,duration_ms,created_at";
 const MEMORY_COLUMNS = "id,filename,content,version,updated_by,updated_at";
 const BUSINESS_PLAN_COLUMNS = "id,version,market_opportunity,competitive_landscape,revenue_models,user_acquisition,risk_analysis,confidence_score,discovery_count,is_final,raw_plan,created_at";
+const DASHBOARD_CACHE_TTL_MS = 1500;
+
+let dashboardSnapshotCache = null;
+let dashboardSnapshotFetchedAt = 0;
+let dashboardSnapshotInFlight = null;
+
+function invalidateDashboardSnapshot() {
+  dashboardSnapshotCache = null;
+  dashboardSnapshotFetchedAt = 0;
+}
 
 async function resolveMissionId(insforge, missionId) {
   if (missionId) return missionId;
@@ -147,6 +157,8 @@ async function handleMissionCreate(request, response) {
     throw insertError;
   }
 
+  invalidateDashboardSnapshot();
+
   writeJson(response, 200, {
     ok: true,
     mission: { mission_id: missionId, prompt, status: "queued" },
@@ -189,6 +201,8 @@ async function handleMissionStop(request, response) {
     .update({ status: "stopped", energy: 0 })
     .eq("mission_id", targetId);
   if (agentUpdate.error) throw agentUpdate.error;
+
+  invalidateDashboardSnapshot();
 
   writeJson(response, 200, { ok: true, missionId: targetId });
 }
@@ -246,6 +260,18 @@ async function handleMissionReset(request, response) {
     .eq("mission_id", targetId);
   if (agentReset.error) throw agentReset.error;
 
+  // Clear browser preview screenshots
+  try {
+    const envRuntime = process.env.MASTERBUILD_RUNTIME_DIR;
+    const runtimeDir = envRuntime
+      ? (path.isAbsolute(envRuntime) ? envRuntime : path.join(process.cwd(), "agents", envRuntime))
+      : path.join(process.cwd(), "agents", "runtime");
+    for (let aid = 1; aid <= 5; aid++) {
+      const framePath = path.join(runtimeDir, "previews", `agent-${aid}`, "latest.jpg");
+      if (fs.existsSync(framePath)) fs.unlinkSync(framePath);
+    }
+  } catch { /* ignore cleanup errors */ }
+
   // Reset mission to stopped
   const missionReset = await insforge.database
     .from("missions")
@@ -258,6 +284,8 @@ async function handleMissionReset(request, response) {
     .eq("id", targetId);
   if (missionReset.error) throw missionReset.error;
 
+  invalidateDashboardSnapshot();
+
   writeJson(response, 200, { ok: true, missionId: targetId });
 }
 
@@ -265,7 +293,7 @@ async function handleMissionReset(request, response) {
 /*  Route: GET /api/dashboard                                          */
 /* ------------------------------------------------------------------ */
 
-async function handleDashboard(_request, response) {
+async function fetchDashboardSnapshot() {
   const insforge = createServerInsforgeClient();
 
   const missionResult = await insforge.database
@@ -283,7 +311,7 @@ async function handleDashboard(_request, response) {
       : "";
 
   if (!missionId) {
-    return writeJson(response, 200, {
+    return {
       mission: null,
       agents: [],
       discoveries: [],
@@ -292,7 +320,7 @@ async function handleDashboard(_request, response) {
       thoughts: [],
       memory: [],
       businessPlans: [],
-    });
+    };
   }
 
   const [agentResult, discoveryResult, logResult, signalResult, thoughtsResult, memoryResult, businessPlanResult] =
@@ -309,7 +337,7 @@ async function handleDashboard(_request, response) {
   const firstError = agentResult.error ?? discoveryResult.error ?? logResult.error ?? signalResult.error;
   if (firstError) throw firstError;
 
-  writeJson(response, 200, {
+  return {
     mission: missionResult.data ?? null,
     agents: agentResult.data ?? [],
     discoveries: discoveryResult.data ?? [],
@@ -318,7 +346,39 @@ async function handleDashboard(_request, response) {
     thoughts: thoughtsResult.error ? [] : (thoughtsResult.data ?? []),
     memory: memoryResult.error ? [] : (memoryResult.data ?? []),
     businessPlans: businessPlanResult.error ? [] : (businessPlanResult.data ?? []),
-  });
+  };
+}
+
+async function handleDashboard(_request, response) {
+  const now = Date.now();
+  if (dashboardSnapshotCache && now - dashboardSnapshotFetchedAt < DASHBOARD_CACHE_TTL_MS) {
+    writeJson(response, 200, dashboardSnapshotCache);
+    return;
+  }
+
+  if (!dashboardSnapshotInFlight) {
+    dashboardSnapshotInFlight = fetchDashboardSnapshot()
+      .then((snapshot) => {
+        dashboardSnapshotCache = snapshot;
+        dashboardSnapshotFetchedAt = Date.now();
+        return snapshot;
+      })
+      .finally(() => {
+        dashboardSnapshotInFlight = null;
+      });
+  }
+
+  try {
+    const snapshot = await dashboardSnapshotInFlight;
+    writeJson(response, 200, snapshot);
+  } catch (error) {
+    console.error("[ai-server] Failed to load dashboard snapshot.", error);
+    if (dashboardSnapshotCache) {
+      writeJson(response, 200, dashboardSnapshotCache);
+      return;
+    }
+    throw error;
+  }
 }
 
 /* ------------------------------------------------------------------ */

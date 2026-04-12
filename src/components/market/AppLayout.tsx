@@ -5,8 +5,7 @@ import {
   TrendingUp,
   Lightbulb,
   Building2,
-  CheckCircle2,
-  XCircle,
+  Clock,
   LogOut,
   Volume2,
   FileText,
@@ -29,8 +28,7 @@ const navItems = [
   { path: "/recommendations", icon: Lightbulb, label: "Recommendations" },
   { path: "/briefing", icon: Volume2, label: "Briefing" },
   { path: "/report", icon: FileText, label: "Report" },
-  { path: "/accepted-ideas", icon: CheckCircle2, label: "Accepted Ideas" },
-  { path: "/rejected-ideas", icon: XCircle, label: "Rejected Ideas" },
+  { path: "/history", icon: Clock, label: "History" },
   { path: "/business-type", icon: Building2, label: "Business Type" },
 ];
 

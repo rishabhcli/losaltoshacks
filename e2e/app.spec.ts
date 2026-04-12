@@ -59,6 +59,36 @@ test.describe("Authenticated app", () => {
     await expect(page.getByText("Live Feed")).toBeVisible();
   });
 
+  test("Market Research: dark theme keeps research surfaces dark", async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("marketpulse-theme", "dark");
+    });
+
+    await page.goto("/market-research");
+    await expect(page.getByRole("heading", { name: "Market Research" })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("Echo")).toBeVisible();
+
+    const surfaceState = await page.evaluate(() => {
+      const browserCards = Array.from(document.querySelectorAll("div.rounded-xl")).filter((card) => {
+        const text = card.textContent ?? "";
+        return text.includes("Echo") || text.includes("Pulse") || text.includes("Thread") || text.includes("Ledger");
+      }) as HTMLElement[];
+
+      return {
+        darkClassApplied: document.documentElement.classList.contains("dark"),
+        cardClassNames: browserCards.map((card) => card.className),
+      };
+    });
+
+    expect(surfaceState.darkClassApplied).toBe(true);
+    expect(surfaceState.cardClassNames.length).toBeGreaterThan(0);
+
+    for (const className of surfaceState.cardClassNames) {
+      expect(className).toContain("dark:bg-slate-950/90");
+      expect(className).toContain("dark:border-slate-800/80");
+    }
+  });
+
   test("Market Research: observe view shows tabs", async ({ page }) => {
     await page.goto("/market-research");
     await expect(page.getByRole("heading", { name: "Market Research" })).toBeVisible({ timeout: 10000 });
