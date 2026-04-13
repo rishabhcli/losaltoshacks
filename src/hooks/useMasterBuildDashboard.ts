@@ -386,7 +386,7 @@ export function useMasterBuildDashboard() {
       loadInFlightRef.current = false;
       if (reloadQueuedRef.current) {
         reloadQueuedRef.current = false;
-        window.setTimeout(() => { void loadDashboard(); }, 250);
+        window.setTimeout(() => { void loadDashboard(); }, 2000);
       }
     }
   }, []);
@@ -396,7 +396,7 @@ export function useMasterBuildDashboard() {
     refreshTimerRef.current = window.setTimeout(() => {
       refreshTimerRef.current = null;
       void loadDashboard();
-    }, 400);
+    }, 3000);
   }, [loadDashboard]);
 
   // Initial load

@@ -87,7 +87,7 @@ const SIGNAL_COLUMNS = "id,from_agent,to_agent,message,signal_type,created_at";
 const THOUGHT_COLUMNS = "id,agent_id,thought_type,prompt_summary,response_summary,action_taken,model,tokens_used,duration_ms,created_at";
 const MEMORY_COLUMNS = "id,filename,content,version,updated_by,updated_at";
 const BUSINESS_PLAN_COLUMNS = "id,version,market_opportunity,competitive_landscape,revenue_models,user_acquisition,risk_analysis,confidence_score,discovery_count,is_final,raw_plan,created_at";
-const DASHBOARD_CACHE_TTL_MS = 1500;
+const DASHBOARD_CACHE_TTL_MS = 10000;
 const USER_MISSION_LOOKBACK_LIMIT = 100;
 
 let dashboardSnapshotCache = null;
@@ -540,7 +540,7 @@ async function handleDashboard(_request, response) {
       writeJson(response, 200, dashboardSnapshotCache);
       return;
     }
-    throw error;
+    writeJson(response, 500, { error: error.message || "Internal Server Error" });
   }
 }
 
@@ -1499,7 +1499,7 @@ async function handleRecommendations(request, response) {
 /*  Background Data Refresh (Brave Search)                            */
 /* ------------------------------------------------------------------ */
 
-const BG_JOB_INTERVAL_MS = 6 * 60 * 60 * 1000;  // re-run every 6 hours
+const BG_JOB_INTERVAL_MS = 12 * 60 * 60 * 1000;  // re-run every 12 hours
 const BG_JOB_MIN_AGE_MS  = 4 * 60 * 60 * 1000;  // skip if latest mission < 4h old
 
 // One query per industry — 12 queries × ≤10 results = ≤120 discoveries per run
@@ -1805,10 +1805,10 @@ Rules:
 }
 
 function scheduleBackgroundJob() {
-  // Run 8 seconds after server starts so it's fully ready
+  // Run 60 seconds after server starts so it's fully ready
   setTimeout(() => {
     runBackgroundDataRefresh().catch(err => console.error("[bg-job] Startup run error:", err));
-  }, 8000);
+  }, 60000);
 
   // Then repeat every 6 hours
   setInterval(() => {
