@@ -1,0 +1,22 @@
+{
+  "repo": "losaltoshacks",
+  "generatedAt": "2026-05-09T19:45:01.231151+00:00",
+  "eligibleMarkdown": [
+    "README.md",
+    "docs/design.md",
+    "docs/devpost-submission.md",
+    "docs/minimax-ai-setup.md",
+    "docs/mongodb-env-setup.md"
+  ],
+  "protectedMarkdown": [
+    "AGENTS.md",
+    "GEMINI.md"
+  ],
+  "htmlPages": [
+    "docs-html/pages/README.html",
+    "docs-html/pages/docs/design.html",
+    "docs-html/pages/docs/devpost-submission.html",
+    "docs-html/pages/docs/minimax-ai-setup.html",
+    "docs-html/pages/docs/mongodb-env-setup.html"
+  ]
+}
