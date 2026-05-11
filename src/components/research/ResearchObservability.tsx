@@ -2,8 +2,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { AgentFeed } from "./AgentFeed";
 import { BusinessPlanPanel } from "./BusinessPlanPanel";
+import { MissionTimeline } from "./MissionTimeline";
+import { MissionTrustAudit } from "./MissionTrustAudit";
 import { SharedMemoryPanel } from "./SharedMemoryPanel";
-import type { AgentData, AgentMemoryEntry, AgentSignal, AgentThought, BusinessPlan, DiscoveredContent, LogEntry } from "@/hooks/useAgentData";
+import {
+  isAgentActiveStatus,
+  isAgentCompleteStatus,
+  isAgentIssueStatus,
+  type AgentData,
+  type AgentMemoryEntry,
+  type AgentSignal,
+  type AgentThought,
+  type BusinessPlan,
+  type DiscoveredContent,
+  type LogEntry,
+} from "@/hooks/useAgentData";
 import type { FinalOptionsPayload } from "@/hooks/useMasterBuildDashboard";
 
 interface Props {
@@ -37,8 +50,21 @@ function deriveObservabilityStatus({
     .sort((a, b) => b.timestamp - a.timestamp)
     .find((log) => log.type === "status" || log.type === "error" || log.type === "final_options" || log.type === "market_research");
   const latestMessage = latestLog?.message ?? "";
-  const activeAgents = agents.filter((agent) => ["searching", "found_trend", "exploiting", "reassigning"].includes(agent.status)).length;
+  const activeAgents = agents.filter((agent) => isAgentActiveStatus(agent.status)).length;
+  const issueAgents = agents.filter((agent) => isAgentIssueStatus(agent.status));
   const latestPlan = businessPlans[0] ?? null;
+
+  if (issueAgents.length > 0 && (missionStatus === "active" || missionStatus === "completed")) {
+    const issueLabels = issueAgents
+      .map((agent) => `Agent ${agent.agent_id} ${agent.status}`)
+      .slice(0, 3)
+      .join(", ");
+    return {
+      label: missionStatus === "completed" ? "Mission Complete With Gaps" : "Research Needs Attention",
+      tone: missionStatus === "completed" ? "amber" : "red",
+      detail: latestMessage || `${issueAgents.length} agent${issueAgents.length === 1 ? "" : "s"} need review: ${issueLabels}.`,
+    };
+  }
 
   if (missionStatus === "queued") {
     if (/switch|preempt|stopping the previous mission|newer research request/i.test(latestMessage)) {
@@ -187,12 +213,30 @@ export function ResearchObservability({
           {statusSummary.detail}
         </p>
         <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-slate-500 dark:text-slate-400">
-          <span>{agents.filter((agent) => ["searching", "found_trend", "exploiting", "reassigning"].includes(agent.status)).length} active agents</span>
+          <span>{agents.filter((agent) => isAgentActiveStatus(agent.status)).length} active agents</span>
+          <span>{agents.filter((agent) => isAgentCompleteStatus(agent.status)).length} done/stopped</span>
+          <span>{agents.filter((agent) => isAgentIssueStatus(agent.status)).length} needs review</span>
           <span>{discoveries.length} discoveries</span>
           <span>{businessPlans.length} plan versions</span>
           <span>{logs.length} log events</span>
         </div>
       </div>
+      <MissionTimeline
+        agents={agents}
+        discoveries={discoveries}
+        businessPlans={businessPlans}
+        missionPrompt={missionPrompt}
+        missionStatus={missionStatus}
+        finalOptions={finalOptions}
+      />
+      <MissionTrustAudit
+        agents={agents}
+        discoveries={discoveries}
+        businessPlans={businessPlans}
+        missionPrompt={missionPrompt}
+        missionStatus={missionStatus}
+        finalOptions={finalOptions}
+      />
 
       <TabsList className="bg-slate-100/80 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800/80 shrink-0 w-fit">
         <TabsTrigger value="feed" className="text-xs gap-1.5 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-950 data-[state=active]:text-blue-600 dark:data-[state=active]:text-[#f8fafc] dark:data-[state=active]:border-slate-800">

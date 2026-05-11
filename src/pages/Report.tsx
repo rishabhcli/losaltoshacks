@@ -10,14 +10,25 @@ import {
   Lightbulb,
   BarChart3,
   Calendar,
+  ExternalLink,
+  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { LoadingState } from "@/components/market/LoadingState";
 import { StatusBadge } from "@/components/market/StatusBadge";
+import { AiOutputAuditTrail } from "@/components/market/AiOutputAuditTrail";
 import { usePreferences } from "@/hooks/usePreferences";
 import { getIndustryLabel } from "@/lib/industry";
 import { useMasterBuildDashboard } from "@/hooks/useMasterBuildDashboard";
+import { buildAiOutputAuditTrail } from "@/lib/ai-output-audit";
+import {
+  formatEvidenceMetric,
+  formatEvidencePlatform,
+  getEvidenceTitle,
+  normalizeEvidenceSources,
+  type EvidenceSource,
+} from "@/lib/evidence";
 
 export function Report() {
   const { preferences } = usePreferences();
@@ -127,6 +138,50 @@ export function Report() {
     if (!recommendations) return [];
     return recommendations.filter(r => selectedTrendIds.has(r.trendId ?? ""));
   }, [recommendations, selectedTrendIds]);
+
+  const evidenceSources = useMemo(() => {
+    const byUrl = new Map<string, EvidenceSource>();
+    const addSources = (sources: unknown) => {
+      for (const source of normalizeEvidenceSources(sources)) {
+        if (!byUrl.has(source.url)) byUrl.set(source.url, source);
+      }
+    };
+
+    selectedTrends.forEach((trend) => addSources((trend as { sources?: unknown[] }).sources));
+    relatedRecs.forEach((rec) => addSources((rec as { sourceEvidence?: unknown[] }).sourceEvidence));
+    return Array.from(byUrl.values()).slice(0, 12);
+  }, [relatedRecs, selectedTrends]);
+
+  const reportAuditText = useMemo(() => {
+    return [
+      latestPlan?.market_opportunity,
+      latestPlan?.competitive_landscape,
+      latestPlan?.revenue_models,
+      latestPlan?.user_acquisition,
+      latestPlan?.risk_analysis,
+      ...selectedTrends.flatMap((trend) => [trend.title, trend.description]),
+      ...relatedRecs.flatMap((rec) => [rec.title, rec.description, rec.actionPlan]),
+      ...relatedInsights.flatMap((insight) => [insight.title, insight.summary]),
+    ].filter(Boolean).join("\n");
+  }, [latestPlan, relatedInsights, relatedRecs, selectedTrends]);
+
+  const reportAuditTrail = useMemo(() => buildAiOutputAuditTrail({
+    artifact: "report",
+    mode: "local-draft",
+    missionPrompt: latestMission?.prompt,
+    outputText: reportAuditText,
+    sources: evidenceSources,
+    inputCounts: {
+      trends: selectedTrends.length,
+      recommendations: relatedRecs.length,
+      insights: relatedInsights.length,
+      sections: 4 + (latestPlan ? 1 : 0),
+    },
+    warnings: [
+      missionRunning ? "Mission still running while report is being viewed" : "",
+      !latestPlan ? "No business-plan synthesis attached" : "",
+    ].filter(Boolean),
+  }), [evidenceSources, latestMission?.prompt, latestPlan, missionRunning, relatedInsights.length, relatedRecs.length, reportAuditText, selectedTrends.length]);
 
   const handleGenerate = () => {
     setManualSelectionMode(true);
@@ -288,6 +343,8 @@ export function Report() {
               </div>
             </div>
 
+            <AiOutputAuditTrail audit={reportAuditTrail} />
+
             {/* Research Synthesis */}
             {latestPlan && (
               <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
@@ -428,6 +485,50 @@ export function Report() {
               </div>
             )}
 
+            <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+              <h3 className="font-semibold text-lg text-slate-900 mb-4 flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                Evidence Appendix
+              </h3>
+              {evidenceSources.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {evidenceSources.map((source, index) => (
+                    <a
+                      key={`${source.url}-${index}`}
+                      href={source.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="group rounded-lg border border-slate-100 bg-white/60 p-4 transition-colors hover:border-blue-200 hover:bg-blue-50/50"
+                    >
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                          {formatEvidencePlatform(source.platform)}
+                        </span>
+                        <ExternalLink className="h-3.5 w-3.5 text-slate-300 group-hover:text-blue-500" />
+                      </div>
+                      <h4 className="line-clamp-2 text-xs font-semibold text-slate-800">
+                        {getEvidenceTitle(source, `Evidence source ${index + 1}`)}
+                      </h4>
+                      {source.summary ? (
+                        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500">{source.summary}</p>
+                      ) : null}
+                      <EvidenceMetricRow source={source} />
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <AlertTriangle className="h-4 w-4" />
+                    Source evidence is missing for this report.
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed">
+                    Re-run the research mission or inspect the selected trends before using this report as a decision artifact.
+                  </p>
+                </div>
+              )}
+            </div>
+
             {/* Risks & Considerations */}
             {relatedInsights.length > 0 && (
               <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
@@ -475,6 +576,26 @@ export function Report() {
         )}
       </div>
     </ScrollArea>
+  );
+}
+
+function EvidenceMetricRow({ source }: { source: EvidenceSource }) {
+  const metrics = [
+    ["Views", formatEvidenceMetric(source.views)],
+    ["Likes", formatEvidenceMetric(source.likes)],
+    ["Comments", formatEvidenceMetric(source.comments)],
+  ].filter((entry): entry is [string, string] => Boolean(entry[1]));
+
+  if (metrics.length === 0) return null;
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-slate-400">
+      {metrics.map(([label, value]) => (
+        <span key={label}>
+          {label}: <span className="font-semibold text-slate-500">{value}</span>
+        </span>
+      ))}
+    </div>
   );
 }
 

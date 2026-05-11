@@ -1,0 +1,409 @@
+# MarketPulse Mega Build Continuation
+
+## Current State
+
+- Branch: `main`
+- Status summary: runtime stabilization, citation propagation, agent-state inspectability, live worker lifecycle persistence, richer health checks, InsForge decision persistence loops, briefing trust controls, trend memory, AI output audit trails, and a fresh live InsForge mission-queue proof implemented; working tree has scoped code/test/docs changes plus the user-provided `plans_losaltoshacks.md`.
+- Runtime modes verified: local demo mode with `MARKETPULSE_DEMO_MODE=1`; live API server mode against the fresh active InsForge backend `r5em4tn7` with OpenAI intentionally reported as missing.
+- Checked-in development env now points at `r5em4tn7`; local server-only verifiers/smokes can use the ignored `.insforge/project.json` API key when explicit service env is absent.
+- The Python worker now uses the same active InsForge env surfaces and linked-project fallback as the Node server; current preflight reaches `r5em4tn7` and reports the live LLM provider as missing.
+
+## Completed Slice
+
+- Added a deterministic demo-mode AI server contract for `/health`, `/api/dashboard`, `/api/mission/create`, `/api/mission/stop`, `/api/mission/reset`, `/api/trends`, and `/api/recommendations`.
+- Added first-class evidence rendering in Market Research discoveries and final research results.
+- Added a local/demo decision adapter so accepted/rejected recommendation status survives route reloads.
+- Added accepted/rejected decision-library review surfaces: stored-decision metrics, evidence-backed counts, review debt, review cadence, and per-card decision/rejection memos.
+- Added a briefing trust ledger and strict-evidence mode so executive briefings show source coverage, platform coverage, evidence-backed recommendation coverage, risk labels, and warnings before the user trusts the draft.
+- Added a deterministic trend memory layer for Trend Detail: lifecycle classification, detection age, momentum change, forecast confidence, source/platform mix, watch window, next checks, and evidence warnings.
+- Added a reusable AI output audit trail for generated artifacts. Reports and briefings now show artifact mode, model/source mode, mission prompt summary, source inputs, structured input counts, generated time, token estimate, uncertainty label, and review warnings.
+- Restored Market Research to the main navigation.
+- Split Vitest from Playwright with `vitest.config.ts`.
+- Added an e2e core demo flow: launch mission, inspect evidence, accept an opportunity, verify Accepted Ideas, then view Report and Briefing.
+- Propagated source evidence into recommendation objects in demo and live recommendation payloads.
+- Added recommendation, decision-library, report, and briefing citation surfaces so strategic artifacts do not lose their source trail after Market Research.
+- Added a shared evidence normalizer for consistent source titles, platform labels, and engagement metrics.
+- Added deterministic source-level evidence quality scoring for final-option source cards, including metadata completeness, engagement metadata, platform context, and missing-freshness warnings.
+- Added a normalized agent lifecycle vocabulary covering queued/searching/extracting/validating/synthesizing/done/blocked/failed/stale/stopped states.
+- Updated the deterministic demo mission to expose a partial-trust result: done agents, a failed X coverage agent, a stale Substack heartbeat, and Atlas synthesis.
+- Added command/observe UI copy for failed/stale agents, heartbeat details, agent objectives, and `Mission Complete With Gaps` summary state.
+- Added an observe-mode `MissionTimeline` that derives intake, source coverage, synthesis, decision package, and recovery phases from the actual dashboard payload, including partial coverage and retry-needed states.
+- Added an observe-mode `MissionTrustAudit` that derives evidence diversity, missing channels, agent health, heartbeat freshness, confidence, and decision readiness from the same dashboard payload.
+- Added a deterministic `Opportunity Scorecard` for final mission options. It ranks opportunities from evidence diversity, evidence volume, market timing, execution difficulty, risk pressure, contradiction pressure, and missing source channels, then exposes score drivers and warnings in the final results UI.
+- Added a follow-up research loop from the final scorecard: `Research Evidence Gap` builds a targeted pressure-test prompt from missing channels, current warnings, and market signals, closes the results modal, and launches a new mission without manual retyping.
+- Added recommendation-level follow-up research from open, accepted, and rejected recommendation details. The CTA builds a pressure-test prompt from decision status, confidence, priority, linked trend, action plan, and attached evidence, posts a new mission, and routes the user back to Market Research.
+- Added briefing-level evidence hardening: `Regenerate using stricter evidence` filters briefing inputs to evidence-backed trends/recommendations, updates the source line, and keeps audio generation on-demand instead of prefetching TTS on page load.
+- Added a generated-trend detail Playwright flow so demo missions prove the trend memory panel from the real `/trends` route instead of only unit-testing the scoring helper.
+- Extended the core demo flow so report and briefing artifacts must expose `AI Output Audit Trail`, deterministic/local mode, source inputs, token estimates, and strict-evidence audit mode before the flow passes.
+- Added a live InsForge `recommendation_decisions` table path for AI-generated recommendation decisions without requiring generated recs to exist in `market_recommendations`.
+- Updated the recommendation action shim to read/write InsForge decisions when authenticated and fall back to local storage when auth/schema/network is unavailable.
+- Added the scoped `recommendation_decisions` migration. Note: the earlier InsForge MCP target was not the MarketPulse backend, so MarketPulse SQL should be applied through the CLI context or explicit env target, not blindly through the MCP connection.
+- Expanded the live `agents` schema contract with `status_detail`, `failure_reason`, `retry_count`, `confidence`, heartbeat, and the normalized lifecycle statuses used by the UI.
+- Updated the Node AI server to select/persist the richer agent payload, with legacy schema fallbacks so older InsForge projects degrade instead of hard-crashing.
+- Updated the Python mission worker to persist richer agent lifecycle states, preserve `done`/`failed` terminal states instead of overwriting them with `stopped`, and only mark agents stopped for manual/superseded stops.
+- Added a richer `/health` report with required/optional integration checks for InsForge, OpenAI, MongoDB vector search, TTS, Brave Search, and the runtime preview directory; the InsForge check now performs a lightweight database probe instead of just checking env presence.
+- Extended `/health` with a first-class `python-worker` check so the app surfaces whether the worker can claim live missions and whether a live LLM provider is configured.
+- Added `GET /api/worker/preflight`, which runs `scripts/verify-live-worker-preflight.py` with a timeout and exposes the same non-secret JSON readiness report over HTTP. `?strict=1` returns 503 until live mission execution is ready.
+- Added short in-process caching and in-flight dedupe to `/api/worker/preflight` so repeated UI/API checks do not stampede the Python preflight or intermittently time out during longer browser runs.
+- Added `scripts/verify-masterbuild-schema.mjs` and `pnpm schema:verify:masterbuild` to verify the configured app backend has the MarketPulse mission tables/columns, independent of whichever InsForge MCP project is selected.
+- Linked the local InsForge CLI context to the actual MarketPulse project (`mdd528ty`, org `Hackathon`); `.insforge/` is ignored by git and contains the local project context.
+- Tightened the schema verifier so it compares `.insforge/project.json` with app env before querying tables, catching backend target drift before schema work.
+- Created a fresh active InsForge replacement backend, `MarketPulse-Codex-Live` (`r5em4tn7`), under `My Organization` after the official `Hackathon` org/project was blocked or paused.
+- Applied `insforge/masterbuild_schema.sql`, `insforge/masterbuild_schema_v2.sql`, and `insforge/schema.sql` to `r5em4tn7`.
+- Repointed `.env.development` and `.env.example` from the paused official backend to `r5em4tn7`, and added a local linked-project helper so server-only scripts can use `.insforge/project.json` for admin operations without command-prefix overrides.
+- Made the Playwright auth/database route helper backend-agnostic so mocked-auth e2e tests continue to intercept InsForge requests after backend URL changes.
+- Updated the Python worker to resolve InsForge from `MASTERBUILD_*`, `VITE_*`, `NEXT_PUBLIC_*`, and matching `.insforge/project.json` values, matching the live backend path without command-prefix overrides.
+- Updated the Python OpenAI paths to honor `OPENAI_BASE_URL` and `OPENAI_BROWSER_BASE_URL` so live worker inference can use an OpenAI-compatible gateway instead of being hard-wired to `api.openai.com`.
+- Added `pnpm worker:preflight` for non-secret live worker readiness checks and `pnpm worker:live` for the Python orchestrator.
+- Tightened missing-LLM worker behavior so a claimed mission becomes `error`, all five agents become `blocked`, and the log names the missing `OPENAI_API_KEY`/`MINIMAX_API_KEY` action.
+- Fixed a live schema drift bug by adding `discoveries.industry` to the MasterBuild schema and schema verifier; `/api/dashboard` had returned `column discoveries.industry does not exist` until this was repaired.
+- Added `src/lib/masterbuild-contract.ts` with the explicit `/api/dashboard` payload keys, row types, mission-create response type, and a runtime shape guard used by `useMasterBuildDashboard`.
+- Tightened the Playwright API smoke so it asserts the shared dashboard contract keys instead of only checking a few loose arrays.
+- Added `scripts/verify-recommendation-decisions.mjs` and `pnpm schema:verify:decisions` to prove the generated recommendation decision table can perform a real insert, update, readback, and delete cycle against the selected InsForge backend.
+- The decision verifier creates a temporary auth user through InsForge auth to satisfy the table's real `auth.users` foreign key, then deletes the decision row and user during cleanup.
+- Added `scripts/run-demo.mjs` and `pnpm dev:demo` as a one-command local demo runner. It starts the deterministic AI server and Vite together, supports `MARKETPULSE_FRONTEND_PORT` / `MARKETPULSE_AI_PORT`, checks ports before binding, prefixes logs, and shuts both child processes down on `Ctrl-C`/SIGTERM.
+- Added `scripts/smoke-browser-decision.mjs` and `pnpm smoke:decision:browser`. The smoke temporarily disables email verification on the disposable active backend, signs up through the real browser UI, seeds the demo mission, accepts `Launch Gen Z Recovery Planner`, verifies an `accepted` row in InsForge, restores auth config, and deletes smoke records.
+- Added a Market Research runtime health strip that surfaces demo readiness and degraded live backend checks directly in the cockpit.
+- Updated the runtime health strip to include `python-worker: missing-llm`, making the current live-worker blocker visible before a user launches or trusts a mission.
+- Added `src/hooks/useWorkerPreflight.ts` and wired the runtime strip to `/api/worker/preflight`, so Market Research shows `worker-preflight: llm-missing` plus the exact OpenAI/MiniMax action text from the real Python preflight path.
+- Added blocked/error mission recovery controls in the cockpit command bar: `Clear Mission` clears the failed state without a page-level hunt, and `Retry Prompt` resubmits the same research prompt through `/api/mission/create`.
+- Added per-agent retry recovery: failed/stale/blocked browser cards expose `Retry Agent`, `POST /api/agent/retry` writes a `retry_agent` control command, requeues the selected agent, logs the action, and reopens terminal missions to `queued`.
+- Updated the Python worker control-command monitor to recognize `retry_agent` commands and make them visible in agent/log state instead of silently ignoring the control event.
+- Added mobile Playwright coverage proving the Market Research runtime status and mission controls remain visible at a 390px-wide viewport.
+- Added focused Playwright coverage for missing-LLM live worker output so `blocked` agents, `5 needs review`, `Mission Error`, and the OpenAI/MiniMax action text remain visible in the cockpit.
+- Added focused Playwright coverage for blocked-mission recovery so reset and retry requests are observable from the UI and the cockpit returns to either an empty state or queued worker-pickup state.
+- Added focused Playwright coverage for per-agent retry so the Pulse failed-agent card posts retry, logs `Retry requested for Pulse.`, and returns the cockpit to worker pickup.
+- Added focused Playwright coverage for the mission timeline in both empty and partial mission states.
+- Fixed the app shell and Market Research cockpit for small screens: mobile now uses a horizontal top nav, stacked research panels, single-column browser cards, a stacked command bar, and an e2e assertion that the document stays within the 390px viewport while still reaching Browser Sessions and Discoveries.
+- Fixed lint blockers and warning debt under the existing `--max-warnings 0` lint gate.
+- Updated README with truthful setup, demo mode, env vars, verification commands, and the Tailwind 3.4 styling baseline.
+- Reconciled styling to the project-doc Tailwind CSS 3.4 requirement by removing `@tailwindcss/vite`, replacing v4 `@theme` usage with `tailwind.config.cjs` plus HSL CSS tokens, adding PostCSS, and switching from `tw-animate-css` to `tailwindcss-animate`.
+- Updated `docs/devpost-submission.md` so the launch story describes the current Market Research cockpit, evidence trail, InsForge runtime, deterministic demo path, verified smokes, and known live-worker/backend gaps.
+- Added `docs/acceptance-gate-audit.md` mapping `plans_losaltoshacks.md` requirements to concrete evidence, current gate status, and remaining blockers.
+
+## Commands Run
+
+- `pnpm install` initially failed because pnpm blocked the `esbuild` build script.
+- Added `pnpm-workspace.yaml` with `allowBuilds.esbuild: true`.
+- `pnpm install` passed.
+- `pnpm type-check` passed.
+- `pnpm lint` passed.
+- `pnpm test` passed; only `src/env.test.ts` is currently skipped.
+- `pnpm build` passed with the existing large-chunk warning.
+- `pnpm exec playwright test` passed: 19 tests.
+- `pnpm exec playwright test e2e/app.spec.ts -g "core demo flow"` passed during focused repair.
+- Re-ran `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`, and `pnpm exec playwright test` after citation propagation; all passed, with the same large-chunk build warning and skipped `src/env.test.ts`.
+- Re-ran `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`, focused `pnpm exec playwright test e2e/app.spec.ts -g "agent status taxonomy"`, and full `pnpm exec playwright test` after agent-state work; all passed.
+- Fetched current InsForge instructions and TypeScript database SDK docs before editing InsForge integration code.
+- Re-ran `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`, and full `pnpm exec playwright test` after decision persistence work; all passed.
+- `node --check server/ai-server.mjs` passed after live agent/health changes.
+- `python -m py_compile agents/masterbuild_runtime.py` passed after worker lifecycle changes.
+- Re-ran `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`, and full `pnpm exec playwright test` after live agent and health work; all passed. Playwright now reports 21 passed tests.
+- Direct runtime smoke: `MARKETPULSE_DEMO_MODE=1 AI_SERVER_PORT=3221 node server/ai-server.mjs`, then `curl -fsS http://127.0.0.1:3221/health` and `curl -fsS http://127.0.0.1:3221/api/dashboard` both passed.
+- `pnpm schema:verify:masterbuild` was run against the app env backend `https://mdd528ty.us-west.insforge.app` and failed as expected because the backend reports `No backend services available for app: mdd528ty`; this confirms the live schema proof is blocked by backend availability/target mismatch, not by the local verifier.
+- InsForge CLI checks:
+  - `npx @insforge/cli whoami --json` passed.
+  - `npx @insforge/cli list --json` showed `MarketPulse` (`mdd528ty`) under org `Hackathon` with status `paused`.
+  - `npx @insforge/cli link --project-id 3d84f53a-bd5b-4463-ac15-9f73f8e31cad --org-id 919f3fa4-72f5-4e8d-ab53-3ccf754556e4 --json` wrote the ignored local project context.
+  - `npx @insforge/cli current --json` confirmed the repo now points at `MarketPulse` / `mdd528ty`.
+  - `npx @insforge/cli metadata`, `db tables`, `db query`, `compute list`, `deployments list`, `secrets list`, and backend logs all failed with `OSS request failed: 503` while the project remains paused.
+  - `npx @insforge/cli diagnose` returned an old health/advisor snapshot but database-specific checks still failed with `OSS request failed: 503`.
+- Re-ran `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`, and full `pnpm exec playwright test` after the deeper health check and schema verifier; all passed. Playwright still reports 21 passed tests.
+- Re-ran `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`, and full `pnpm exec playwright test` after adding the runtime health strip; all passed. Playwright still reports 21 passed tests.
+- Focused mobile smoke `pnpm exec playwright test e2e/app.spec.ts -g "mobile command"` passed.
+- Re-ran `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`, and full `pnpm exec playwright test` after adding mobile coverage; all passed. Playwright now reports 22 passed tests.
+- Manual rendered smoke used local servers on `http://127.0.0.1:3220` and `http://127.0.0.1:3221`, loaded `/market-research` with auth/database route stubs, verified `Demo ready` and `Live backend degraded`, and saved `/tmp/losaltoshacks-runtime-health-strip.png`.
+- Browser plugin note: the in-app Browser bridge was not exposed by tool discovery, so the rendered citation smoke used the available Playwright MCP fallback.
+- `npx @insforge/cli branch create codex-marketpulse-smoke-20260511 --mode schema-only --no-switch --json` failed on the official MarketPulse project because the parent must be active and `mdd528ty` is paused.
+- `npx @insforge/cli create --name MarketPulse-Codex-Live --org-id 919f3fa4-72f5-4e8d-ab53-3ccf754556e4 --region us-west --template empty --json` failed because the `Hackathon` organization is blocked.
+- `npx @insforge/cli create --name MarketPulse-Codex-Live --org-id 7523cd18-5918-4547-b66e-6138cc50566c --region us-west --template empty --json` succeeded and created active backend `r5em4tn7`.
+- Applied schemas to `r5em4tn7` with `npx @insforge/cli db query`, including `insforge/masterbuild_schema.sql`, `insforge/masterbuild_schema_v2.sql`, and `insforge/schema.sql`.
+- `MASTERBUILD_INSFORGE_URL=$(node -p "require('./.insforge/project.json').oss_host") INSFORGE_SERVICE_ROLE_KEY=$(node -p "require('./.insforge/project.json').api_key") pnpm schema:verify:masterbuild` passed against `https://r5em4tn7.us-west.insforge.app`.
+- Live API smoke on `http://127.0.0.1:3222` proved:
+  - `/health` returned HTTP 503 because `OPENAI_API_KEY` is missing, while the InsForge check itself was `ready`.
+  - `POST /api/mission/create` created mission `6267bcbf-0061-447b-9de4-ef3df1db8ec9` with five queued agents.
+  - `GET /api/dashboard` returned that queued mission, five agents with `status_detail`, `retry_count`, and `last_heartbeat`, and one startup log.
+  - A direct InsForge SQL count saw live rows: 2 missions, 10 agents, 0 discoveries, and 1 log after repeated smoke submissions.
+- Re-ran the full verification ladder after the live schema repair and docs updates:
+  - `node --check scripts/verify-masterbuild-schema.mjs` passed.
+  - `node --check server/ai-server.mjs` passed.
+  - `python -m py_compile agents/masterbuild_runtime.py` passed.
+  - `MASTERBUILD_INSFORGE_URL=$(node -p "require('./.insforge/project.json').oss_host") INSFORGE_SERVICE_ROLE_KEY=$(node -p "require('./.insforge/project.json').api_key") pnpm schema:verify:masterbuild` passed against `r5em4tn7`.
+  - `pnpm type-check` passed.
+  - `pnpm lint` passed.
+  - `pnpm test` passed; only `src/env.test.ts` remains skipped.
+  - `pnpm build` passed with the existing large-chunk warning.
+  - `pnpm exec playwright test` passed: 22 passed.
+- Contract-slice verification:
+  - `pnpm type-check` passed after adding `src/lib/masterbuild-contract.ts`.
+  - `pnpm lint` passed.
+  - `pnpm test` passed; only `src/env.test.ts` remains skipped.
+  - `pnpm build` passed with the existing large-chunk warning.
+  - `pnpm exec playwright test` passed: 22 passed, including the tightened `/api/dashboard` contract-key assertion.
+- Checked `npx @insforge/cli metadata --json` on `r5em4tn7`: auth requires email verification by code, so a real browser-authenticated decision-persistence proof needs either a verification code/inbox path or an explicit auth-config change on the disposable backend.
+- Fetched current InsForge REST database and auth docs before adding the decision verifier.
+- `MASTERBUILD_INSFORGE_URL=$(node -p "require('./.insforge/project.json').oss_host") INSFORGE_SERVICE_ROLE_KEY=$(node -p "require('./.insforge/project.json').api_key") pnpm schema:verify:decisions` passed against `r5em4tn7`: inserted `accepted`, updated/read back `dismissed`, deleted 1 row, and deleted the temporary auth user.
+- Re-ran the full verification ladder after adding `pnpm schema:verify:decisions`:
+  - `node --check scripts/verify-recommendation-decisions.mjs` passed.
+  - `MASTERBUILD_INSFORGE_URL=$(node -p "require('./.insforge/project.json').oss_host") INSFORGE_SERVICE_ROLE_KEY=$(node -p "require('./.insforge/project.json').api_key") pnpm schema:verify:decisions` passed against `r5em4tn7`.
+  - `pnpm type-check` passed.
+  - `pnpm lint` passed.
+  - `pnpm test` passed; only `src/env.test.ts` remains skipped.
+  - `pnpm build` passed with the existing large-chunk warning.
+  - `pnpm exec playwright test` passed: 22 passed.
+  - Cleanup audit found 0 remaining `codex-marketpulse-decision-smoke` auth users.
+- One-command demo runner verification:
+  - `node --check scripts/run-demo.mjs` passed.
+  - `MARKETPULSE_FRONTEND_PORT=3330 MARKETPULSE_AI_PORT=3331 pnpm dev:demo` started both services.
+  - `curl -fsS http://127.0.0.1:3331/health` returned `ok: true`, `demoMode: true`, `status: "ready"`, and no missing required services.
+  - `curl -fsS http://127.0.0.1:3330` returned the Vite frontend.
+  - After SIGTERM cleanup, ports 3330 and 3331 had no listeners.
+- Re-ran `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`, and `pnpm exec playwright test` after adding `pnpm dev:demo`; all passed. Playwright reported 22 passed tests.
+- Browser-auth decision smoke:
+  - First run exposed an overly broad password selector; auth config was restored and cleanup found/deleted the orphan smoke user.
+  - Second run exposed that a brand-new real-auth session needs demo recommendation state seeded first; auth config was restored and cleanup found/deleted the orphan smoke user.
+  - Final `MASTERBUILD_INSFORGE_URL=$(node -p "require('./.insforge/project.json').oss_host") INSFORGE_SERVICE_ROLE_KEY=$(node -p "require('./.insforge/project.json').api_key") pnpm smoke:decision:browser` passed against `r5em4tn7`.
+  - The smoke verified recommendation id `demo-rec-demo-8571e4fa-b3bb-46bf-801b-c90d4ae50dcd-1`, title `Launch Gen Z Recovery Planner`, status `accepted`, `deletedRows: 1`, and cleanup `{ decisionDeleted: true, userDeleted: true }`.
+  - Post-smoke cleanup audit confirmed `requireEmailVerification: true`, 0 remaining `codex-marketpulse-browser-smoke` users, and no listeners on 3340/3341.
+- Re-ran the full verification ladder after adding and documenting the browser-auth decision smoke:
+  - `node --check scripts/smoke-browser-decision.mjs` passed.
+  - `MASTERBUILD_INSFORGE_URL=$(node -p "require('./.insforge/project.json').oss_host") INSFORGE_SERVICE_ROLE_KEY=$(node -p "require('./.insforge/project.json').api_key") pnpm smoke:decision:browser` passed against `r5em4tn7` and cleaned up.
+  - `pnpm type-check` passed.
+  - `pnpm lint` passed.
+  - `pnpm test` passed; only `src/env.test.ts` remains skipped.
+  - `pnpm build` passed with the existing large-chunk warning.
+  - `pnpm exec playwright test` passed: 22 passed.
+  - Final cleanup audit confirmed `requireEmailVerification: true`, 0 remaining browser/decision smoke users, and no listeners on 3340/3341/3210/3211.
+- Tailwind 3.4 migration:
+  - Removed the v4 Vite plugin and `tw-animate-css`.
+  - Added `tailwind.config.cjs` and `postcss.config.cjs`.
+  - Pinned `tailwindcss` to `3.4.17` plus exact PostCSS/autoprefixer/animate package versions.
+  - `pnpm build` passed after the migration with the existing large-chunk warning.
+- Tailwind/responsive final verification:
+  - `node --check scripts/run-demo.mjs`, `node --check scripts/smoke-browser-decision.mjs`, `node --check scripts/verify-masterbuild-schema.mjs`, `node --check scripts/verify-recommendation-decisions.mjs`, `node --check server/ai-server.mjs`, and `python -m py_compile agents/masterbuild_runtime.py` passed.
+  - `pnpm type-check`, `pnpm lint`, `pnpm test`, and `pnpm build` passed after the Tailwind 3.4 and responsive-shell changes; Vitest still has the intentional `src/env.test.ts` skip and build still has the large-chunk warning.
+  - Focused `pnpm exec playwright test e2e/app.spec.ts -g "mobile command"` passed after adding the mobile width/scroll regression assertion.
+  - Full `pnpm exec playwright test` passed: 22 passed.
+  - One-command demo visual smoke on ports `3330`/`3331` returned `/health` with `ok: true`, `demoMode: true`, `status: "ready"`, and `missingRequired: []`; screenshots were written to `/tmp/marketpulse-tailwind-responsive-desktop.png` and `/tmp/marketpulse-tailwind-responsive-mobile.png`; ports 3330/3331 were clear after cleanup.
+  - Latest `MASTERBUILD_INSFORGE_URL=$(node -p "require('./.insforge/project.json').oss_host") INSFORGE_SERVICE_ROLE_KEY=$(node -p "require('./.insforge/project.json').api_key") pnpm smoke:decision:browser` passed against `r5em4tn7`, accepted `Launch Gen Z Recovery Planner`, deleted the row/user, restored `requireEmailVerification: true`, and left 0 browser/decision smoke users.
+- No-prefix active-backend verification after repointing development env:
+  - `pnpm schema:verify:masterbuild` passed against `r5em4tn7`.
+  - `pnpm schema:verify:decisions` passed against `r5em4tn7`, inserted/updated/read/deleted the smoke row, and deleted the temporary auth user.
+  - Live AI server smoke on `http://127.0.0.1:3223` ran without `MASTERBUILD_INSFORGE_URL` or `INSFORGE_SERVICE_ROLE_KEY` command prefixes; `/health` returned HTTP 503 only because OpenAI is missing, while InsForge was `ready`; `POST /api/mission/create` wrote one real mission, five agents, and one log; `GET /api/dashboard` read them back; cleanup deleted those smoke rows.
+  - `pnpm smoke:decision:browser` passed without command-prefix overrides, accepted `Launch Gen Z Recovery Planner`, deleted the row/user, restored `requireEmailVerification: true`, and left 0 browser/decision smoke users.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "dashboard loads|mobile command"` passed after updating the e2e helper for the new backend URL.
+  - Final `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`, and full `pnpm exec playwright test` passed after the no-prefix backend changes. Playwright reported 22 passed.
+- Live worker preflight and blocked-mission proof:
+  - `python -m py_compile agents/masterbuild_runtime.py agents/orchestrator.py agents/agent_context.py agents/builder_agent.py` passed.
+  - `pnpm worker:preflight` reached `https://r5em4tn7.us-west.insforge.app`, read the `missions` table, and reported `liveMissionReady: false` only because no live LLM provider is configured.
+  - `python scripts/verify-live-worker-preflight.py --strict` exits 1 as expected in the current environment, with `liveLlmStatus: "missing"` and the action to set `OPENAI_API_KEY` or `MINIMAX_API_KEY`.
+  - Disposable worker smoke inserted one live queued mission and five agents, ran the real `MasterBuildOrchestrator.run_mission` path, verified mission status `error`, all five agents `blocked`, and the visible log: set `OPENAI_API_KEY` for OpenAI or `MINIMAX_API_KEY` for fallback. Cleanup deleted the one log, five agents, and one mission.
+  - Focused UI proof `pnpm exec playwright test e2e/app.spec.ts -g "blocked live-worker"` passed.
+  - Focused recovery proof `pnpm exec playwright test e2e/app.spec.ts -g "blocked live-worker|blocked mission"` passed: 3 passed.
+  - Runtime health UI proof now expects the `python-worker: missing-llm` and `worker-preflight: llm-missing` badges in Market Research command and mobile views, plus the worker action text in command view.
+  - Direct health proof on `http://127.0.0.1:3224/health` returned `ok: true` in demo mode with a `python-worker` check: `status: "missing-llm"`, `required: false`, and the action to set `OPENAI_API_KEY` or `MINIMAX_API_KEY`.
+  - Direct worker preflight proof on `http://127.0.0.1:3224/api/worker/preflight` returned `workerCanStart: true`, InsForge `ready`, and live LLM `missing`; strict mode returns 503 until a live LLM provider is configured.
+  - Focused health/UI proof `pnpm exec playwright test e2e/app.spec.ts -g "command view renders|mobile command|health endpoint|blocked live-worker"` passed.
+  - Rendered browser-control fallback proof on `http://127.0.0.1:3334/market-research` verified page title `MarketPulse`, heading `Market Research`, `Demo ready`, `Live backend degraded`, `python-worker: missing-llm`, and `Launch Mission`; screenshot: `/tmp/marketpulse-python-worker-health-strip.png`. The Browser plugin's Node REPL control surface was not exposed, so the available Playwright browser-control tool was used.
+  - Final verification after the worker-preflight slice: `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`, `git diff --check`, and `pnpm exec playwright test` all passed. Playwright reported 24 passed tests, including the worker-preflight route, and no listeners remained on the checked local ports.
+- Blocked mission recovery-control verification:
+  - `pnpm type-check` passed.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "blocked mission"` passed: 2 passed.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "blocked live-worker|blocked mission"` passed: 3 passed.
+  - `pnpm lint`, `pnpm test`, `pnpm build`, and `git diff --check` passed; Vitest still has the intentional `src/env.test.ts` skip and build still has the large-chunk warning.
+  - Full `pnpm exec playwright test` passed: 26 passed.
+  - Rendered Playwright fallback proof on `http://127.0.0.1:3336/market-research` verified `Clear Mission`, `Retry Prompt`, reset to `No mission`, retry prompt body `AI wellness apps for Gen Z`, and worker pickup; screenshots: `/tmp/marketpulse-blocked-recovery-controls.png`, `/tmp/marketpulse-blocked-clear-empty.png`, `/tmp/marketpulse-blocked-retry-queued.png`.
+  - The expected React Router v7 future-flag warning and mocked realtime WebSocket close warning appeared during the rendered fallback check; no app error overlay or page error appeared. Ports 3336/3337 were clear after cleanup.
+- Per-agent retry verification:
+  - Fetched current InsForge instructions and TypeScript database SDK docs before editing the InsForge-backed route.
+  - `node --check server/ai-server.mjs`, `python -m py_compile agents/masterbuild_runtime.py`, and `pnpm type-check` passed.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "failed agents can be retried|agent retry rejects"` passed: 2 passed.
+  - `pnpm lint`, `pnpm test`, `pnpm build`, and `git diff --check` passed; Vitest still has the intentional `src/env.test.ts` skip and build still has the large-chunk warning.
+  - Full `pnpm exec playwright test` passed: 28 passed.
+  - Rendered Playwright fallback proof on `http://127.0.0.1:3338/market-research` used the real demo route, launched `AI wellness apps for Gen Z`, clicked `Retry Pulse agent`, verified `Retry requested for Pulse.`, worker pickup, and the retry status detail; screenshots: `/tmp/marketpulse-agent-retry-before.png`, `/tmp/marketpulse-agent-retry-after.png`.
+  - The expected React Router v7 future-flag warning appeared during the rendered fallback check; no app error overlay or page error appeared. Ports 3338/3339 were clear after cleanup.
+- Mission timeline verification:
+  - `pnpm type-check` passed.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "observe view shows tabs|agent status taxonomy"` passed: 2 passed.
+  - `pnpm lint`, `pnpm test`, `pnpm build`, and `git diff --check` passed; Vitest still has the intentional `src/env.test.ts` skip and build still has the large-chunk warning.
+  - Full `pnpm exec playwright test` passed: 28 passed.
+  - Rendered Playwright fallback proof on `http://127.0.0.1:3342/market-research` verified `Mission Timeline`, `2 of 5 phases complete`, source coverage, decision package, and no horizontal overflow at desktop `1440x960` or mobile `390x844`; screenshots: `/tmp/marketpulse-mission-timeline-desktop.png`, `/tmp/marketpulse-mission-timeline-mobile.png`.
+  - The expected React Router v7 future-flag warning appeared during the rendered fallback check; no app error overlay or page error appeared. Ports 3342/3343 were clear after cleanup.
+- Trust audit verification:
+  - `pnpm type-check` passed.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "observe view shows tabs|agent status taxonomy"` passed: 2 passed.
+  - The focused test now verifies the empty-state audit (`No evidence yet`, `No agent issues`, `No plan confidence yet`) and the partial demo audit (`3/4 channels covered`, `Missing: x`, `1 stale heartbeat`, `Plan confidence 82%`, `2 low-confidence channels`, and `Partial package`).
+  - `node --check server/ai-server.mjs` passed after adding worker-preflight cache/dedupe.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "worker preflight endpoint"` passed: 1 passed.
+  - `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`, and `git diff --check` passed; Vitest still has the intentional `src/env.test.ts` skip and build still has the large-chunk warning.
+  - Full `pnpm exec playwright test` passed: 28 passed.
+  - Rendered Playwright fallback proof on `http://127.0.0.1:3344/market-research` used the real demo route, launched `AI wellness apps for Gen Z`, switched to Observe, verified `Trust Audit`, `3/4 channels covered`, `Missing: x`, `Plan confidence 82%`, and `Partial package`, and found no horizontal overflow at desktop `1440x960` or mobile `390x844`; screenshots: `/tmp/marketpulse-trust-audit-desktop.png`, `/tmp/marketpulse-trust-audit-mobile.png`.
+  - Ports 3344/3345/3210/3211 were clear after cleanup.
+- Opportunity scorecard verification:
+  - `pnpm test -- src/lib/opportunity-scoring.test.ts` passed: 2 passed, with the existing `src/env.test.ts` skip still reported.
+  - `pnpm type-check` passed.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "core demo flow"` passed and now verifies `Opportunity Scorecard`, `Opportunity score 64`, `Evidence diversity: 3/4 platforms`, `Missing platform coverage: x`, and `Execution difficulty: Moderate`.
+  - `pnpm lint`, `pnpm test`, `pnpm build`, and `git diff --check` passed; build still has the known large-chunk warning.
+  - Full `pnpm exec playwright test` passed: 28 passed.
+  - Rendered Playwright fallback proof on `http://127.0.0.1:3346/market-research` used the real demo route, launched `AI wellness apps for Gen Z`, opened final results, verified the scorecard and score drivers, and found no horizontal overflow at desktop `1440x960` or mobile `390x844`; screenshots: `/tmp/marketpulse-opportunity-scorecard-desktop.png`, `/tmp/marketpulse-opportunity-scorecard-mobile.png`.
+  - Ports 3346/3347/3210/3211 were clear after cleanup.
+- Evidence quality verification:
+  - `pnpm test -- src/lib/evidence-quality.test.ts src/lib/opportunity-scoring.test.ts` passed: 4 passed, with the existing `src/env.test.ts` skip still reported.
+  - `pnpm type-check` passed.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "core demo flow"` passed and now verifies `Evidence quality 81` plus `Freshness unknown` in final result source cards.
+  - `pnpm lint`, `pnpm test`, `pnpm build`, and `git diff --check` passed; build still has the known large-chunk warning.
+  - Full `pnpm exec playwright test` passed: 28 passed.
+  - Rendered Playwright fallback proof on `http://127.0.0.1:3348/market-research` used the real demo route, launched `AI wellness apps for Gen Z`, opened final results, verified `Evidence quality 81`, `Freshness unknown`, and `Opportunity Scorecard`, and found no horizontal overflow at desktop `1440x960` or mobile `390x844`; screenshots: `/tmp/marketpulse-evidence-quality-scorecard-desktop.png`, `/tmp/marketpulse-evidence-quality-scorecard-mobile.png`.
+  - Ports 3348/3349/3210/3211 were clear after cleanup.
+- Follow-up research verification:
+  - `pnpm type-check` passed after wiring the final-results CTA.
+  - `pnpm test -- src/lib/followup-research.test.ts src/lib/opportunity-scoring.test.ts src/lib/evidence-quality.test.ts` passed: 5 passed, with the existing `src/env.test.ts` skip still reported.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "core demo flow"` passed and now verifies `Research Evidence Gap`, launches the follow-up mission, closes `Market Research Results`, and shows the generated pressure-test prompt.
+  - `pnpm lint`, `pnpm test`, `pnpm build`, and `git diff --check` passed; build still has the known large-chunk warning.
+  - Full `pnpm exec playwright test` passed: 28 passed.
+  - Rendered Playwright fallback proof on `http://127.0.0.1:3350/market-research` used the real demo route, launched `AI wellness apps for Gen Z`, opened final results, verified the follow-up CTA and prompt preview, clicked `Research Evidence Gap`, verified the modal closed and the new follow-up prompt appeared in the cockpit, and found no horizontal overflow at desktop `1440x980` or mobile `390x844`; screenshots: `/tmp/marketpulse-followup-research-before.png`, `/tmp/marketpulse-followup-research-after.png`, `/tmp/marketpulse-followup-research-mobile.png`.
+  - Ports 3350/3351/3210/3211 were clear after cleanup.
+- Decision-library verification:
+  - `pnpm type-check` passed after adding the decision-library summary utility and accepted/rejected UI.
+  - `pnpm test -- src/lib/decision-library.test.ts` passed: 8 total utility tests passed across the current Vitest suite, with the existing `src/env.test.ts` skip still reported.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "core demo flow|dismissed opportunities"` passed: 2 passed, covering accepted decision-library memos and dismissed opportunities landing in the rejected decision library.
+  - `pnpm lint`, `pnpm test`, `pnpm build`, and `git diff --check` passed; build still has the known large-chunk warning.
+  - Full `pnpm exec playwright test` passed: 29 passed.
+  - Rendered Playwright fallback proof on `http://127.0.0.1:3352` used the real demo route, accepted `Launch Gen Z Recovery Planner`, verified `Decision Library`, `Evidence-backed decisions`, `Ready for pilot`, and `Review cadence: Weekly until launch`; then dismissed the same opportunity in a fresh context and verified `Rejected Decision Library`, `Archived with evidence`, `Revisit trigger: Revisit if market moves`, and `High-priority watchlist`. Desktop and 390px mobile had no horizontal overflow; screenshots: `/tmp/marketpulse-decision-library-accepted.png`, `/tmp/marketpulse-decision-library-accepted-mobile.png`, `/tmp/marketpulse-decision-library-rejected.png`, `/tmp/marketpulse-decision-library-rejected-mobile.png`.
+  - Ports 3352/3353/3210/3211 were clear after cleanup.
+- Recommendation follow-up verification:
+  - `pnpm type-check` passed after wiring the modal CTA and mission-launch hook.
+  - `pnpm test -- src/lib/recommendation-followup.test.ts src/lib/decision-library.test.ts` passed: 10 total utility tests passed across the current Vitest suite, with the existing `src/env.test.ts` skip still reported.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "dismissed opportunities"` passed and now verifies a rejected decision-library record can launch a follow-up research mission.
+  - `pnpm lint`, `pnpm test`, `pnpm build`, and `git diff --check` passed; build still has the known large-chunk warning.
+  - Full `pnpm exec playwright test` passed: 29 passed.
+  - Rendered Playwright fallback proof on `http://127.0.0.1:3354` used the real demo route, dismissed `Launch Gen Z Recovery Planner`, opened the rejected decision detail, verified `Research Follow-up`, clicked it, verified the app navigated to Market Research with `Follow-up research: reassess Launch Gen Z Recovery Planner.` and `Decision context: rejected decision with 84% confidence and high priority.`, and found no horizontal overflow at desktop `1440x980` or mobile `390x844`; screenshots: `/tmp/marketpulse-recommendation-followup-rejected-modal.png`, `/tmp/marketpulse-recommendation-followup-mission.png`, `/tmp/marketpulse-recommendation-followup-mobile.png`.
+  - Ports 3354/3355/3210/3211 were clear after cleanup.
+- Briefing trust ledger verification:
+  - `pnpm test -- src/lib/briefing-trust.test.ts` passed for strict/local evidence coverage and evidence-backed filtering.
+  - `pnpm type-check` passed after adding `BriefingTrustLedger` and strict evidence mode.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "core demo flow"` passed and now verifies `Briefing Trust Ledger`, `Local draft mode`, `Regenerate using stricter evidence`, `Strict evidence mode`, and `Strict evidence local draft from cited trends and recommendations`.
+  - Rendered Playwright fallback proof on `http://127.0.0.1:3356/briefing` verified the briefing page, trust ledger, evidence-backed briefing copy, strict-evidence toggle, strict warning copy, clean console/page errors, and no horizontal overflow at mobile `390x844`; screenshots: `/tmp/marketpulse-briefing-trust-ledger.png`, `/tmp/marketpulse-briefing-strict-evidence.png`, `/tmp/marketpulse-briefing-trust-mobile.png`.
+  - The briefing page no longer prefetches TTS audio on load; audio generation only starts from explicit playback, avoiding browser range errors from empty/stubbed audio during QA.
+  - Final verification after the briefing trust slice: `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`, `git diff --check`, and `pnpm exec playwright test` all passed. Vitest reported 12 passed and 2 intentionally skipped env tests; Playwright reported 29 passed; build still has the known large-chunk warning.
+  - Ports 3356/3357/3210/3211 were clear after cleanup.
+- Trend memory verification:
+  - `pnpm test -- src/lib/trend-memory.test.ts` passed for fresh multi-source high-confidence signals and stale unsupported watchlist signals.
+  - `pnpm type-check` passed after adding `src/lib/trend-memory.ts` and the Trend Detail memory panel.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "generated trend detail"` passed and verifies a deterministic mission-generated trend can be opened from `/trends`, then shows `Trend Memory`, `New signal`, `Forecast Confidence`, `3 sources across 3 platforms`, and `X/Twitter coverage missing`.
+  - Rendered Playwright fallback proof on `http://127.0.0.1:3358/trends/...` verified the same trend memory panel, forecast confidence, source mix, warning copy, clean page errors, and no horizontal overflow at desktop `1440x980` or mobile `390x844`; screenshots: `/tmp/marketpulse-trend-memory-detail.png`, `/tmp/marketpulse-trend-memory-mobile.png`.
+  - Browser plugin note: the in-app Browser skill was available, but the required Node REPL execution tool was not exposed by tool discovery, so rendered QA used the regular Playwright fallback.
+  - Final verification after the trend memory slice: `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`, `git diff --check`, and `pnpm exec playwright test` all passed. Vitest reported 14 passed and 2 intentionally skipped env tests; Playwright reported 30 passed; build still has the known large-chunk warning.
+  - Ports 3358/3359/3210/3211 were clear after cleanup.
+- AI output audit verification:
+  - `pnpm test -- src/lib/ai-output-audit.test.ts` passed for report/briefing audit summaries, empty-output uncertainty warnings, and token estimation.
+  - `pnpm type-check` passed after adding `src/lib/ai-output-audit.ts`, `AiOutputAuditTrail`, and report/briefing integrations.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "core demo flow"` passed and now verifies report/briefing audit trails, local deterministic draft mode, source inputs, output token estimates, and strict-evidence local draft mode.
+  - Rendered Playwright fallback proof on `http://127.0.0.1:3360` verified the report audit panel and the strict briefing audit panel at desktop `1440x980`, then verified the audit panel at mobile `390x844` with no horizontal overflow. Screenshots: `/tmp/marketpulse-ai-output-audit-report.png`, `/tmp/marketpulse-ai-output-audit-briefing.png`, `/tmp/marketpulse-ai-output-audit-mobile.png`.
+  - Browser plugin note: the in-app Browser skill was available, but the required Node REPL execution tool was not exposed by tool discovery, so rendered QA used the regular Playwright fallback.
+  - Console health during rendered fallback had 0 errors; the only warnings were the existing React Router v7 future-flag warning and the mocked InsForge realtime WebSocket close warning.
+  - Final verification after the AI output audit slice: `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`, `git diff --check`, and `pnpm exec playwright test` all passed. Vitest reported 17 passed and 2 intentionally skipped env tests; Playwright reported 30 passed; build still has the known large-chunk warning.
+  - Ports 3360/3361/3210/3211 were clear after cleanup.
+
+## Runtime Evidence
+
+- Playwright web servers:
+  - Frontend: `http://127.0.0.1:3210`
+  - AI server: `http://127.0.0.1:3211`
+- AI server `/health` returns a structured readiness report under the e2e harness, including `status: "ready"`, `missingRequired: []`, and per-integration checks.
+- Dashboard API smoke is covered by Playwright.
+- Direct AI-server smoke on `http://127.0.0.1:3221` verified:
+  - `/health` returned `ok: true`, demo mode, OpenAI demo fallback, optional MongoDB/TTS/Brave missing guidance, writable runtime-dir, and an explicit degraded/unreachable InsForge database probe for the configured `mdd528ty` backend.
+  - `/api/dashboard` returned a usable empty dashboard object before any mission.
+- Manual UI smoke inspected `http://127.0.0.1:3210/market-research` after launching a demo mission.
+- Manual screenshot artifact: `test-results/manual-market-research-evidence.png` (ignored test output).
+- Rendered citation smoke inspected `http://127.0.0.1:3210/recommendations` after launching a demo mission and verified:
+  - recommendation card shows `Source Evidence: 3`
+  - recommendation dialog shows `Evidence-backed by 3 sources`
+  - source title `Gen Z creators are packaging burnout recovery` is visible in the dialog
+  - no framework overlay was present
+  - screenshot artifact: `/tmp/losaltoshacks-citation-smoke.png`
+- Rendered agent-state smoke inspected `http://127.0.0.1:3210/market-research` after launching a demo mission and verified:
+  - `FAILED` and `STALE` browser-session badges are visible before switching views
+  - `2 agents need review` is visible in the command header
+  - `Mission Complete With Gaps` and `2 needs review` are visible in observe mode
+  - screenshot artifact: `/tmp/losaltoshacks-agent-states-smoke.png`
+- Rendered runtime-health smoke inspected `http://127.0.0.1:3220/market-research` and verified:
+  - `Demo ready` is visible
+  - `Live backend degraded` is visible when the configured InsForge backend is unavailable
+  - screenshot artifact: `/tmp/losaltoshacks-runtime-health-strip.png`
+- Tailwind/responsive smoke inspected `http://127.0.0.1:3330/market-research` after launching a demo mission and verified:
+  - desktop and 390px mobile screenshots render after Tailwind 3.4 migration
+  - mobile `documentElement.scrollWidth` and `body.scrollWidth` remain `390`
+  - `Demo ready`, `Live backend degraded`, `Launch Mission`, and `Gen Z creators are packaging burnout recovery` are visible
+  - screenshot artifacts: `/tmp/marketpulse-tailwind-responsive-desktop.png`, `/tmp/marketpulse-tailwind-responsive-mobile.png`
+- InsForge schema verification query returned `public.recommendation_decisions` with `row_count = 0` immediately after migration.
+- Live InsForge smoke inspected `http://127.0.0.1:3222` against `https://r5em4tn7.us-west.insforge.app` and verified:
+  - InsForge database readiness is green inside `/health`.
+  - OpenAI is the only required missing service in live mode.
+  - Mission creation writes real InsForge `missions`, `agents`, and `logs` rows.
+  - Dashboard reads those real rows back with rich agent lifecycle fields.
+- Python worker preflight reached `https://r5em4tn7.us-west.insforge.app`, read `missions`, and proved the remaining live-worker blocker is the missing LLM provider rather than InsForge env wiring.
+- Disposable Python worker smoke verified the real worker marks missing-LLM missions as `error` and all five agents as `blocked`, then cleans up its live rows.
+- Runtime `/health` and the Market Research strip now expose `python-worker: missing-llm` so the blocker is visible before launching a live mission.
+- Blocked/error missions now expose `Clear Mission` and `Retry Prompt` directly in the command bar; Playwright verifies clear resets the cockpit to `No mission` and retry posts the original prompt before showing worker pickup.
+- Failed/stale/blocked browser agents now expose `Retry Agent`; Playwright verifies retrying Pulse writes a visible log/status update and requeues the mission.
+- Observe mode now has a payload-derived `Mission Timeline` with phase completion, partial coverage, decision package, and recovery state.
+- Rendered recovery screenshots:
+  - `/tmp/marketpulse-blocked-recovery-controls.png`
+  - `/tmp/marketpulse-blocked-clear-empty.png`
+  - `/tmp/marketpulse-blocked-retry-queued.png`
+- Rendered agent-retry screenshots:
+  - `/tmp/marketpulse-agent-retry-before.png`
+  - `/tmp/marketpulse-agent-retry-after.png`
+- Rendered mission-timeline screenshots:
+  - `/tmp/marketpulse-mission-timeline-desktop.png`
+  - `/tmp/marketpulse-mission-timeline-mobile.png`
+- Rendered trust-audit screenshots:
+  - `/tmp/marketpulse-trust-audit-desktop.png`
+  - `/tmp/marketpulse-trust-audit-mobile.png`
+- Rendered opportunity-scorecard screenshots:
+  - `/tmp/marketpulse-opportunity-scorecard-desktop.png`
+  - `/tmp/marketpulse-opportunity-scorecard-mobile.png`
+- Rendered evidence-quality screenshots:
+  - `/tmp/marketpulse-evidence-quality-scorecard-desktop.png`
+  - `/tmp/marketpulse-evidence-quality-scorecard-mobile.png`
+- Rendered follow-up-research screenshots:
+  - `/tmp/marketpulse-followup-research-before.png`
+  - `/tmp/marketpulse-followup-research-after.png`
+  - `/tmp/marketpulse-followup-research-mobile.png`
+- Rendered decision-library screenshots:
+  - `/tmp/marketpulse-decision-library-accepted.png`
+  - `/tmp/marketpulse-decision-library-accepted-mobile.png`
+  - `/tmp/marketpulse-decision-library-rejected.png`
+  - `/tmp/marketpulse-decision-library-rejected-mobile.png`
+- Rendered recommendation-follow-up screenshots:
+  - `/tmp/marketpulse-recommendation-followup-rejected-modal.png`
+  - `/tmp/marketpulse-recommendation-followup-mission.png`
+  - `/tmp/marketpulse-recommendation-followup-mobile.png`
+- Rendered briefing trust screenshots:
+  - `/tmp/marketpulse-briefing-trust-ledger.png`
+  - `/tmp/marketpulse-briefing-strict-evidence.png`
+  - `/tmp/marketpulse-briefing-trust-mobile.png`
+- Rendered trend-memory screenshots:
+  - `/tmp/marketpulse-trend-memory-detail.png`
+  - `/tmp/marketpulse-trend-memory-mobile.png`
+- Rendered AI-output-audit screenshots:
+  - `/tmp/marketpulse-ai-output-audit-report.png`
+  - `/tmp/marketpulse-ai-output-audit-briefing.png`
+  - `/tmp/marketpulse-ai-output-audit-mobile.png`
+
+## Known Gaps
+
+- Full live InsForge-backed mission execution with the Python/browser worker and live OpenAI inference was not proven; the live proof currently covers API health, schema, mission queue writes, dashboard reads, Python worker InsForge preflight, and blocked-mission behavior when no LLM key exists.
+- The official MarketPulse project under `Hackathon` (`mdd528ty`) remains paused historically, but checked-in development env now targets the fresh active proof backend `https://r5em4tn7.us-west.insforge.app`. Local server-only commands can use the ignored `.insforge/project.json` admin key when explicit service env is absent.
+- The InsForge MCP backend is a different project with course-planning tables, so do not apply MarketPulse mission SQL through that MCP connection unless it is intentionally retargeted.
+- Decision persistence has a live table and client write path on `r5em4tn7`; service-role and browser-auth smokes now prove real persistence behavior. The browser-auth smoke deliberately uses the disposable backend and temporarily relaxes email verification, then restores it.
+- The active replacement backend normally requires email verification by code. Real production-user proof without temporarily changing auth config still needs a verification code/inbox path.
+- Trend Detail now exposes trend memory and source mix, but its linked recommendation cards could still get the same compact evidence badge treatment for parity.
+- Audio generation still depends on external TTS secrets; text briefing remains usable without them, and the page now waits for explicit playback before requesting TTS.
+
+## Next Highest-Leverage Loops
+
+1. Set `OPENAI_API_KEY` plus optional `OPENAI_BASE_URL` / `OPENAI_BROWSER_BASE_URL` for an OpenAI-compatible gateway (or `MINIMAX_API_KEY` for the worker fallback), run `python scripts/verify-live-worker-preflight.py --strict`, then run `pnpm worker:live` and prove discoveries/business plans/final options are generated from the live queue.
+2. Prove browser-authenticated decision persistence without temporarily relaxing email verification, once a verification-code inbox path exists.

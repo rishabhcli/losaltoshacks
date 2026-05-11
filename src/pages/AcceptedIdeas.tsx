@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useOsdkObjects, marketRecommendation, marketTrend } from "@/lib/osdk-shims";
-import { CheckCircle2 } from "lucide-react";
+import { CalendarClock, CheckCircle2, ClipboardCheck, ShieldCheck, AlertTriangle } from "lucide-react";
 import {
   LineChart,
   Line,
@@ -18,7 +18,11 @@ import { RecDetailModal, type RecObj } from "@/components/market/RecDetailModal"
 import { useTheme } from "@/lib/theme";
 import { generateTrendTimeSeries, type TimeFrame } from "@/lib/trendChartData";
 import { ChartControls } from "@/components/market/ChartControls";
+import { DecisionLibrarySummary } from "@/components/market/DecisionLibrarySummary";
 import { useMergedChartZoom } from "@/hooks/useChartZoom";
+import { useRecommendationFollowUpMission } from "@/hooks/useRecommendationFollowUpMission";
+import { buildDecisionMemo } from "@/lib/decision-library";
+import { normalizeEvidenceSources } from "@/lib/evidence";
 
 const CHART_COLORS_LIGHT = ["#1e40af", "#7e22ce", "#be185d", "#b45309", "#047857", "#0e7490", "#6d28d9", "#c2410c"];
 const CHART_COLORS_DARK = ["#f472b6", "#facc15", "#fb923c", "#34d399", "#60a5fa", "#c084fc", "#f87171", "#a78bfa"];
@@ -31,6 +35,7 @@ export function AcceptedIdeas() {
   const [visibleTrends, setVisibleTrends] = useState<Set<string> | null>(null);
   const [timeFrame, setTimeFrame] = useState<TimeFrame>("7d");
   const [selectedRec, setSelectedRec] = useState<RecObj | null>(null);
+  const { createFollowUpMission, isCreatingFollowUp } = useRecommendationFollowUpMission();
 
   const { data: recommendations, isLoading } = useOsdkObjects(marketRecommendation, {
     where: { status: { $eq: "accepted" } },
@@ -70,7 +75,7 @@ export function AcceptedIdeas() {
       result = result.filter(r => r.productCategory === categoryFilter);
     }
     return result;
-  }, [recommendations, priorityFilter, categoryFilter, trendMap]);
+  }, [recommendations, priorityFilter, categoryFilter]);
 
   // One chart line per accepted recommendation, using its linked trend's data
   const acceptedLines = useMemo(() => {
@@ -138,6 +143,8 @@ export function AcceptedIdeas() {
             {filteredRecs.length} accepted recommendation{filteredRecs.length !== 1 ? "s" : ""}
           </p>
         </div>
+
+        <DecisionLibrarySummary items={filteredRecs} status="accepted" />
 
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3">
@@ -221,6 +228,9 @@ export function AcceptedIdeas() {
         rec={selectedRec}
         trendTitle={selectedRec ? (trendMap.get(selectedRec.trendId ?? "")?.title ?? null) : null}
         action={{ type: "change-mind-to-rejected" }}
+        followUpStatus="accepted"
+        isCreatingFollowUp={isCreatingFollowUp}
+        onCreateFollowUpMission={createFollowUpMission}
         onClose={() => setSelectedRec(null)}
       />
     </ScrollArea>
@@ -228,8 +238,12 @@ export function AcceptedIdeas() {
 }
 
 function IdeaCard({ rec, trendTitle, onClick }: { rec: RecObj; trendTitle: string | null; onClick: () => void }) {
+  const evidenceCount = normalizeEvidenceSources(rec.sourceEvidence).length;
+  const memo = buildDecisionMemo(rec, "accepted");
+
   return (
     <button
+      type="button"
       onClick={onClick}
       className="border border-slate-200 glass rounded-xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all text-left cursor-pointer w-full"
     >
@@ -245,6 +259,19 @@ function IdeaCard({ rec, trendTitle, onClick }: { rec: RecObj; trendTitle: strin
         <StatusBadge value={rec.priority} />
       </div>
       <p className="text-xs text-slate-500 line-clamp-2">{rec.description}</p>
+      <div className="mt-3">
+        {evidenceCount > 0 ? (
+          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+            <ShieldCheck className="h-3 w-3" />
+            Source Evidence: {evidenceCount}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
+            <AlertTriangle className="h-3 w-3" />
+            Evidence missing
+          </span>
+        )}
+      </div>
       <div className="flex items-center gap-3 mt-3 text-xs">
         <span className="font-semibold text-blue-600">
           {rec.confidenceScore != null ? `${(rec.confidenceScore * 100).toFixed(0)}% confidence` : ""}
@@ -252,6 +279,27 @@ function IdeaCard({ rec, trendTitle, onClick }: { rec: RecObj; trendTitle: strin
         {rec.estimatedRevenuePotential && (
           <span className="font-semibold text-emerald-500">{rec.estimatedRevenuePotential}</span>
         )}
+      </div>
+      <div className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-800">
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            <ClipboardCheck className="h-3.5 w-3.5" />
+            Decision memo
+          </span>
+          <span className="rounded-md bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+            {memo.posture}
+          </span>
+        </div>
+        <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">{memo.rationale}</p>
+        <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-medium">
+          <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+            <CalendarClock className="h-3 w-3" />
+            Review cadence: {memo.reviewCadence}
+          </span>
+          <span className="rounded-md bg-blue-50 px-2 py-1 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+            {memo.evidenceLabel}
+          </span>
+        </div>
       </div>
     </button>
   );

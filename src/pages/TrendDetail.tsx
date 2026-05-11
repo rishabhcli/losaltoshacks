@@ -19,8 +19,13 @@ import {
   Youtube,
   Loader2,
   BrainCircuit,
+  History,
+  Radar,
+  ShieldCheck,
+  AlertCircle,
 } from "lucide-react";
 import { getTrendForecast, forecastColors } from "@/lib/trendForecast";
+import { buildTrendMemory, type TrendMemorySnapshot, type TrendMemorySource } from "@/lib/trend-memory";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { StatusBadge } from "@/components/market/StatusBadge";
@@ -89,7 +94,7 @@ export function TrendDetail() {
   const { object: trend, isLoading: trendLoading } = useOsdkObject(marketTrend, trendId ?? "");
 
   // Load linked data
-  const { links: sources, isLoading: sourcesLoading } = useLinks(trend, "trendToSourcesSources", {
+  const { isLoading: sourcesLoading } = useLinks(trend, "trendToSourcesSources", {
     pageSize: 20,
   });
 
@@ -105,6 +110,33 @@ export function TrendDetail() {
     await bookmarkAction({ trend: trend, status: newStatus });
     toast.success(`Trend marked as ${newStatus}`);
   };
+
+  const trendMemorySeries = useMemo(() => {
+    if (!trend) return [];
+    return generateTrendTimeSeries(
+      trend.trendId ?? "",
+      trend.trendScore ?? 0,
+      trend.growthRate ?? 0,
+      trend.mentionCount ?? 0,
+      timeFrame,
+    );
+  }, [trend, timeFrame]);
+
+  const trendMemory = useMemo(() => {
+    if (!trend) return null;
+    return buildTrendMemory({
+      trendId: trend.trendId ?? "",
+      title: trend.title,
+      status: trend.status,
+      detectedAt: trend.detectedAt,
+      trendScore: trend.trendScore,
+      growthRate: trend.growthRate,
+      sentimentScore: trend.sentimentScore,
+      mentionCount: trend.mentionCount,
+      sources: ((trend as { sources?: TrendMemorySource[] }).sources ?? []),
+      timeSeries: trendMemorySeries,
+    });
+  }, [trend, trendMemorySeries]);
 
   if (trendLoading && !trend) {
     return <LoadingState label="Loading trend" />;
@@ -256,6 +288,8 @@ export function TrendDetail() {
           trendScore={trend.trendScore}
           sentimentScore={trend.sentimentScore}
         />
+
+        {trendMemory && <TrendMemoryPanel memory={trendMemory} />}
 
         {/* Claude AI Deep Dive */}
         {(claudeLoading || claudeAnalysis) && (
@@ -528,6 +562,81 @@ function ForecastCard({
           <p className="text-sm text-slate-600 mt-1 leading-relaxed">{forecast.message}</p>
         </div>
       </div>
+    </div>
+  );
+}
+
+function TrendMemoryPanel({ memory }: { memory: TrendMemorySnapshot }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white/75 p-5 shadow-[0_1px_3px_rgba(15,23,42,0.04)] dark:border-slate-800 dark:bg-slate-950/40" aria-label="Trend Memory">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <History className="h-4 w-4 text-blue-600" />
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Trend Memory</h2>
+          </div>
+          <p className="mt-1 max-w-3xl text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+            Evolution, source coverage, and next checks for deciding whether this signal is new, resurfacing, or ready for action.
+          </p>
+        </div>
+        <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
+          <Radar className="h-3.5 w-3.5" />
+          {memory.lifecycleLabel}
+        </span>
+      </div>
+
+      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MemoryMetric label="Detected" value={memory.detectedLabel} />
+        <MemoryMetric label="Momentum Change" value={memory.momentumLabel} />
+        <MemoryMetric label="Forecast Confidence" value={`${memory.forecastConfidence}%`} detail={memory.forecastConfidenceLabel} />
+        <MemoryMetric label="Source Mix" value={memory.sourceMixLabel} detail={memory.platformCount > 0 ? `${memory.platformCount} platforms` : undefined} />
+      </div>
+
+      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/50">
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+            What changed
+          </div>
+          <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{memory.changeSummary}</p>
+          <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">{memory.lifecycleReason}</p>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/50">
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <Radar className="h-3.5 w-3.5 text-blue-600" />
+            Next checks
+          </div>
+          <ul className="space-y-2">
+            {memory.watchItems.map((item) => (
+              <li key={item} className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">
+                {item}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      {memory.warnings.length > 0 && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {memory.warnings.map((warning) => (
+            <span key={warning} className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+              <AlertCircle className="h-3.5 w-3.5" />
+              {warning}
+            </span>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function MemoryMetric({ label, value, detail }: { label: string; value: string; detail?: string }) {
+  return (
+    <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">{label}</p>
+      <p className="mt-1 break-words text-sm font-semibold text-slate-900 dark:text-slate-100">{value}</p>
+      {detail && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{detail}</p>}
     </div>
   );
 }

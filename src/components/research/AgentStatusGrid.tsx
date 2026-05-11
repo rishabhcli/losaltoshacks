@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { AGENTS, PLATFORM_COLORS, type AgentData, type DiscoveredContent } from "@/hooks/useAgentData";
+import { AGENTS, PLATFORM_COLORS, isAgentActiveStatus, isAgentIssueStatus, type AgentData, type DiscoveredContent } from "@/hooks/useAgentData";
 
 interface Props {
   agents: AgentData[];
@@ -9,22 +9,11 @@ interface Props {
 }
 
 function statusMeta(status: AgentData["status"]) {
-  switch (status) {
-    case "searching":
-    case "found_trend":
-    case "exploiting":
-    case "reassigning":
-      return { color: "bg-green-500", label: "Active", ring: "ring-green-500/30" };
-    case "weak":
-      return { color: "bg-yellow-500", label: "Weak", ring: "ring-yellow-500/30" };
-    case "error":
-      return { color: "bg-red-500", label: "Error", ring: "ring-red-500/30" };
-    case "stopped":
-      return { color: "bg-slate-400", label: "Stopped", ring: "" };
-    case "idle":
-    default:
-      return { color: "bg-slate-300", label: "Idle", ring: "" };
-  }
+  if (isAgentActiveStatus(status)) return { color: "bg-green-500", label: labelFromStatus(status), ring: "ring-green-500/30" };
+  if (isAgentIssueStatus(status)) return { color: status === "failed" || status === "error" ? "bg-red-500" : "bg-yellow-500", label: labelFromStatus(status), ring: status === "failed" || status === "error" ? "ring-red-500/30" : "ring-yellow-500/30" };
+  if (status === "done") return { color: "bg-blue-500", label: "Done", ring: "ring-blue-500/30" };
+  if (status === "stopped") return { color: "bg-slate-400", label: "Stopped", ring: "" };
+  return { color: "bg-slate-300", label: "Idle", ring: "" };
 }
 
 export function AgentStatusGrid({ agents, discoveries }: Props) {
@@ -80,10 +69,19 @@ export function AgentStatusGrid({ agents, discoveries }: Props) {
                   {count} found
                 </div>
               )}
+              {data?.statusDetail && (
+                <div className="line-clamp-2 text-center text-[10px] leading-snug text-slate-500 dark:text-slate-400">
+                  {data.statusDetail}
+                </div>
+              )}
             </CardContent>
           </Card>
         );
       })}
     </div>
   );
+}
+
+function labelFromStatus(status: AgentData["status"]) {
+  return status.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }

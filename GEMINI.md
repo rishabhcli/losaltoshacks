@@ -8,7 +8,7 @@ Currently, it utilizes a drop-in shim (`src/lib/osdk-shims.ts`) that replaces li
 - **Framework:** React 19, Vite
 - **Language:** TypeScript
 - **Routing:** React Router DOM (v6)
-- **Styling:** Tailwind CSS v4, `clsx`, `tailwind-merge`
+- **Styling:** Tailwind CSS 3.4 with PostCSS, `clsx`, `tailwind-merge`
 - **UI Components:** Radix UI primitives (shadcn-like structure in `src/components/ui/`), Lucide React (icons)
 - **State/Data Fetching:** `@tanstack/react-query`, local state context (`src/contexts/PreferencesContext.tsx`)
 - **Backend/Data:** Palantir OSDK (shimmed locally)

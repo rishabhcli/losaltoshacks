@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ExternalLink, Eye, Heart, MessageCircle } from "lucide-react";
+import { Clock, ExternalLink, Eye, Heart, MessageCircle, ShieldCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,10 +17,24 @@ function platformFromAgentId(agentId: number): string {
   return agent.platform;
 }
 
+function discoveryPlatform(discovery: DiscoveredContent): string {
+  return discovery.platform || platformFromAgentId(discovery.found_by_agent_id);
+}
+
 function formatNumber(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
+}
+
+function formatFreshness(epochSeconds?: number): string {
+  if (!epochSeconds) return "Freshness unknown";
+  const ageMs = Date.now() - epochSeconds * 1000;
+  const hours = Math.max(0, Math.round(ageMs / 3_600_000));
+  if (hours < 1) return "Fetched just now";
+  if (hours < 24) return `Fetched ${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `Fetched ${days}d ago`;
 }
 
 export function DiscoveryGrid({ discoveries }: Props) {
@@ -28,7 +42,7 @@ export function DiscoveryGrid({ discoveries }: Props) {
 
   const filtered = useMemo(() => {
     if (filter === "all") return discoveries;
-    return discoveries.filter((d) => platformFromAgentId(d.found_by_agent_id) === filter);
+    return discoveries.filter((d) => discoveryPlatform(d) === filter);
   }, [discoveries, filter]);
 
   if (discoveries.length === 0) {
@@ -68,8 +82,10 @@ export function DiscoveryGrid({ discoveries }: Props) {
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 pr-2 pb-3">
           {filtered.map((d) => {
             const agent = getAgentById(d.found_by_agent_id);
-            const platform = platformFromAgentId(d.found_by_agent_id);
+            const platform = discoveryPlatform(d);
             const color = PLATFORM_COLORS[platform] ?? "#64748b";
+            const title = d.title?.trim() || d.keywords?.trim() || "Untitled source";
+            const summary = d.summary?.trim();
 
             return (
               <Card key={d._id} className="border-slate-200 dark:border-slate-800/80 bg-white dark:bg-slate-950/90 shadow-sm dark:shadow-[0_18px_42px_rgba(2,6,23,0.35)] overflow-hidden">
@@ -86,7 +102,7 @@ export function DiscoveryGrid({ discoveries }: Props) {
                 )}
                 <CardContent className="p-3">
                   {/* Platform + Agent */}
-                  <div className="flex items-center gap-2 mb-1.5">
+                  <div className="flex items-center gap-2 mb-2">
                     <Badge
                       variant="outline"
                       className="text-[10px] border-current capitalize"
@@ -95,17 +111,32 @@ export function DiscoveryGrid({ discoveries }: Props) {
                       {platform === "market_research" ? "Research" : platform}
                     </Badge>
                       <span className="text-[10px] text-slate-400 dark:text-slate-500">{agent.name}</span>
+                    <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-300">
+                      <ShieldCheck className="h-3 w-3" />
+                      Evidence
+                    </span>
                   </div>
 
-                  {/* Keywords */}
+                  <div className="text-xs text-slate-800 dark:text-slate-100 font-semibold line-clamp-2 leading-snug">
+                    {title}
+                  </div>
+                  {summary && (
+                    <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-300 leading-relaxed line-clamp-3">
+                      {summary}
+                    </p>
+                  )}
                   {d.keywords && (
-                    <div className="text-xs text-slate-700 dark:text-slate-100 font-medium line-clamp-2 mb-2 leading-snug">
+                    <p className="mt-2 text-[10px] text-slate-400 dark:text-slate-500 line-clamp-1">
                       {d.keywords}
-                    </div>
+                    </p>
                   )}
 
                   {/* Stats */}
-                  <div className="flex items-center gap-3 text-[11px] text-slate-400 dark:text-slate-500">
+                  <div className="flex items-center gap-3 text-[11px] text-slate-400 dark:text-slate-500 mt-3">
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {formatFreshness(d._creationTime)}
+                    </span>
                     {(d.likes ?? 0) > 0 && (
                       <span className="flex items-center gap-1">
                         <Heart className="w-3 h-3" />
@@ -129,6 +160,7 @@ export function DiscoveryGrid({ discoveries }: Props) {
                         href={d.video_url}
                         target="_blank"
                         rel="noopener noreferrer"
+                        aria-label={`Open source: ${title}`}
                         className="ml-auto text-blue-500 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
                       >
                         <ExternalLink className="w-3 h-3" />

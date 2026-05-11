@@ -1,6 +1,6 @@
 import { type Page } from "@playwright/test";
 
-const INSFORGE_URL = "https://mdd528ty.us-west.insforge.app";
+export const AI_SERVER_URL = process.env.E2E_AI_SERVER_URL ?? "http://127.0.0.1:3211";
 
 const MOCK_USER = {
   id: "test-user-001",
@@ -19,8 +19,10 @@ const MOCK_USER = {
  *   4. getCurrentUser() returns the user
  */
 export async function mockAuthAndSetup(page: Page) {
+  await page.request.post(`${AI_SERVER_URL}/api/mission/reset`).catch(() => null);
+
   // Mock the refresh session endpoint — this is what the SDK calls in browser mode
-  await page.route(`${INSFORGE_URL}/api/auth/refresh`, (route) => {
+  await page.route("**/api/auth/refresh", (route) => {
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -34,7 +36,7 @@ export async function mockAuthAndSetup(page: Page) {
   });
 
   // Mock any other auth calls
-  await page.route(`${INSFORGE_URL}/api/auth/**`, (route) => {
+  await page.route("**/api/auth/**", (route) => {
     if (route.request().url().includes("/refresh")) {
       route.fulfill({
         status: 200,
@@ -55,31 +57,21 @@ export async function mockAuthAndSetup(page: Page) {
     }
   });
 
-  // Mock the AI server dashboard API
-  await page.route("**/api/dashboard", (route) => {
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        mission: null,
-        agents: [],
-        discoveries: [],
-        logs: [],
-        signals: [],
-        thoughts: [],
-        memory: [],
-        businessPlans: [],
-      }),
-    });
-  });
-
   // Block WebSocket/realtime connections to prevent hanging
-  await page.route(`${INSFORGE_URL}/socket.io/**`, (route) => {
+  await page.route("**/socket.io/**", (route) => {
     route.abort();
   });
 
+  await page.route("**/api/ai/tts", (route) => {
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "TTS disabled in e2e demo mode" }),
+    });
+  });
+
   // Mock InsForge database queries (for existing pages that use osdk-shims)
-  await page.route(`${INSFORGE_URL}/api/database/**`, (route) => {
+  await page.route("**/api/database/**", (route) => {
     route.fulfill({
       status: 200,
       contentType: "application/json",

@@ -2,11 +2,16 @@ import http from "node:http";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { execFile } from "node:child_process";
 import { inferWithOpenAI } from "./lib/openai.mjs";
 import { generateSpeechWithElevenLabs } from "./lib/elevenlabs.mjs";
 import { generateSpeechWithMiniMax } from "./lib/minimax.mjs";
 import { loadProjectEnv } from "./lib/env.mjs";
 import { createServerInsforgeClient } from "./lib/insforge-server.mjs";
+import {
+  getLinkedInsforgeAdminKey,
+  getLinkedInsforgeBaseUrl,
+} from "./lib/linked-insforge.mjs";
 import { vectorSearch, storeDiscoveriesWithEmbeddings } from "./lib/mongodb-vector.mjs";
 
 loadProjectEnv();
@@ -63,6 +68,336 @@ async function readJsonBody(request) {
   return raw ? JSON.parse(raw) : {};
 }
 
+function hasAnyEnv(names) {
+  return names.some((name) => String(process.env[name] ?? "").trim().length > 0);
+}
+
+function getFirstEnv(names) {
+  for (const name of names) {
+    const value = String(process.env[name] ?? "").trim();
+    if (value) return value;
+  }
+  return "";
+}
+
+function compactHealthMessage(value) {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 220);
+}
+
+function getPythonCommand() {
+  return getFirstEnv(["PYTHON", "PYTHON_BIN", "PYTHON_EXECUTABLE"]) || "python";
+}
+
+function parseWorkerPreflightOutput(text) {
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) return null;
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const jsonStart = trimmed.indexOf("{");
+    const jsonEnd = trimmed.lastIndexOf("}");
+    if (jsonStart >= 0 && jsonEnd > jsonStart) {
+      try {
+        return JSON.parse(trimmed.slice(jsonStart, jsonEnd + 1));
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
+let workerPreflightCache = null;
+let workerPreflightInFlight = null;
+
+function getWorkerPreflightCacheTtlMs() {
+  const ttlMs = Number.parseInt(process.env.MASTERBUILD_WORKER_PREFLIGHT_CACHE_MS || "30000", 10);
+  return Number.isFinite(ttlMs) && ttlMs >= 0 ? ttlMs : 30000;
+}
+
+function withWorkerPreflightStrictness(payload, strict) {
+  const workerCanStart = Boolean(payload?.workerCanStart);
+  const liveMissionReady = Boolean(payload?.liveMissionReady);
+  const ok = strict ? liveMissionReady : workerCanStart;
+
+  return {
+    ...payload,
+    strict,
+    ok,
+    exitCode: ok ? 0 : 1,
+  };
+}
+
+function runWorkerPreflight({ strict = false } = {}) {
+  const timeoutMs = Number.parseInt(process.env.MASTERBUILD_WORKER_PREFLIGHT_TIMEOUT_MS || "15000", 10);
+  const args = ["scripts/verify-live-worker-preflight.py"];
+  if (strict) args.push("--strict");
+
+  return new Promise((resolve) => {
+    execFile(
+      getPythonCommand(),
+      args,
+      {
+        cwd: process.cwd(),
+        timeout: Number.isFinite(timeoutMs) ? timeoutMs : 15000,
+        maxBuffer: 1024 * 1024,
+      },
+      (error, stdout, stderr) => {
+        const payload = parseWorkerPreflightOutput(stdout);
+        const exitCode = typeof error?.code === "number" ? error.code : 0;
+
+        if (payload && typeof payload === "object") {
+          resolve({
+            ...payload,
+            exitCode,
+          });
+          return;
+        }
+
+        resolve({
+          ok: false,
+          strict,
+          workerCanStart: false,
+          liveMissionReady: false,
+          exitCode,
+          error: error?.killed ? "worker_preflight_timeout" : "worker_preflight_parse_failed",
+          message: compactHealthMessage(stderr || error?.message || stdout || "Worker preflight failed before returning JSON."),
+        });
+      }
+    );
+  });
+}
+
+async function getWorkerPreflight({ strict = false } = {}) {
+  const ttlMs = getWorkerPreflightCacheTtlMs();
+  const now = Date.now();
+  if (workerPreflightCache && now - workerPreflightCache.createdAt <= ttlMs) {
+    return withWorkerPreflightStrictness(workerPreflightCache.payload, strict);
+  }
+
+  if (!workerPreflightInFlight) {
+    workerPreflightInFlight = runWorkerPreflight({ strict: false })
+      .then((payload) => {
+        workerPreflightCache = {
+          createdAt: Date.now(),
+          payload,
+        };
+        return payload;
+      })
+      .finally(() => {
+        workerPreflightInFlight = null;
+      });
+  }
+
+  const payload = await workerPreflightInFlight;
+  return withWorkerPreflightStrictness(payload, strict);
+}
+
+async function probeInsForgeDatabase() {
+  const baseUrl = (
+    getFirstEnv(["MASTERBUILD_INSFORGE_URL", "VITE_INSFORGE_URL"]) ||
+    getLinkedInsforgeBaseUrl()
+  ).replace(/\/+$/, "");
+  const token =
+    getFirstEnv(["INSFORGE_SERVICE_ROLE_KEY"]) ||
+    getLinkedInsforgeAdminKey(baseUrl) ||
+    getFirstEnv(["VITE_INSFORGE_ANON_KEY"]);
+
+  if (!baseUrl || !token) {
+    return {
+      ok: false,
+      status: DEMO_MODE ? "demo-fallback" : "missing",
+      message: "InsForge live database credentials are missing.",
+      action: "Set MASTERBUILD_INSFORGE_URL or VITE_INSFORGE_URL, plus INSFORGE_SERVICE_ROLE_KEY or VITE_INSFORGE_ANON_KEY.",
+    };
+  }
+
+  try {
+    const response = await fetch(`${baseUrl}/api/database/records/missions?limit=1`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(2500),
+    });
+    if (response.ok) {
+      return {
+        ok: true,
+        status: "ready",
+        message: "InsForge database is reachable and the masterbuild mission table is queryable.",
+        action: "",
+      };
+    }
+
+    const body = compactHealthMessage(await response.text());
+    return {
+      ok: false,
+      status: "unreachable",
+      message: `InsForge database probe failed with HTTP ${response.status}${body ? `: ${body}` : ""}`,
+      action: "Verify the configured InsForge app is running and that insforge/masterbuild_schema.sql has been applied to that same backend.",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: "unreachable",
+      message: `InsForge database probe failed: ${compactHealthMessage(error?.message ?? error)}`,
+      action: "Verify the configured InsForge app is running and reachable from this machine.",
+    };
+  }
+}
+
+function getRuntimeDirHealth() {
+  const runtimeDir = resolveMasterbuildRuntimeDir();
+  try {
+    fs.accessSync(runtimeDir, fs.constants.W_OK);
+    return {
+      name: "runtime-dir",
+      ok: true,
+      required: false,
+      status: "ready",
+      message: `Runtime directory is writable: ${runtimeDir}`,
+      action: "",
+    };
+  } catch {
+    return {
+      name: "runtime-dir",
+      ok: false,
+      required: false,
+      status: "degraded",
+      message: `Runtime directory is not currently writable or does not exist: ${runtimeDir}`,
+      action: "Create the runtime directory or set MASTERBUILD_RUNTIME_DIR to a writable path for browser preview frames.",
+    };
+  }
+}
+
+function getPythonWorkerHealth({ insforgeReady, openAiConfigured, minimaxConfigured }) {
+  const openAiBaseUrl = getFirstEnv(["OPENAI_BROWSER_BASE_URL", "OPENAI_BASE_URL"]) || "https://api.openai.com/v1";
+  const openAiModel = getFirstEnv(["OPENAI_BROWSER_MODEL", "OPENAI_MODEL"]) || "gpt-4o";
+  const minimaxBaseUrl = getFirstEnv(["MINIMAX_BASE_URL"]) || "https://api.minimax.io/v1";
+  const minimaxModel = getFirstEnv(["MASTERBUILD_AI_MODEL"]) || "MiniMax-M2.7";
+  const liveLlmConfigured = openAiConfigured || minimaxConfigured;
+  const ready = insforgeReady && liveLlmConfigured;
+
+  if (!insforgeReady) {
+    return {
+      name: "python-worker",
+      ok: false,
+      required: !DEMO_MODE,
+      status: "blocked",
+      message: "Python worker cannot claim live missions until InsForge is reachable.",
+      action: "Fix the InsForge health check first, then rerun pnpm worker:preflight.",
+      openAiBaseUrl,
+      openAiModel,
+      minimaxBaseUrl,
+      minimaxModel,
+    };
+  }
+
+  return {
+    name: "python-worker",
+    ok: ready,
+    required: !DEMO_MODE,
+    status: ready ? "ready" : "missing-llm",
+    message: ready
+      ? "Python worker can reach InsForge and has a live LLM provider configured."
+      : "Python worker can reach InsForge, but live mission execution is blocked by missing LLM credentials.",
+    action: ready
+      ? ""
+      : "Set OPENAI_API_KEY for OpenAI inference, or MINIMAX_API_KEY for the worker fallback. Use OPENAI_BASE_URL or OPENAI_BROWSER_BASE_URL for compatible gateways.",
+    openAiBaseUrl,
+    openAiModel,
+    minimaxBaseUrl,
+    minimaxModel,
+  };
+}
+
+async function buildHealthReport() {
+  const openAiConfigured = hasAnyEnv(["OPENAI_API_KEY"]);
+  const minimaxConfigured = hasAnyEnv(["MINIMAX_API_KEY"]);
+  const mongoConfigured = hasAnyEnv(["MONGODB_URI", "MONGODB_ATLAS_URI"]);
+  const ttsConfigured = hasAnyEnv(["ELEVENLABS_API_KEY", "MINIMAX_API_KEY"]);
+  const braveConfigured = hasAnyEnv(["BRAVE_SEARCH_API_KEY"]);
+  const insforgeProbe = await probeInsForgeDatabase();
+
+  const checks = [
+    {
+      name: "ai-server",
+      ok: true,
+      required: true,
+      status: "ready",
+      message: "AI server process is accepting requests.",
+      action: "",
+    },
+    {
+      name: "insforge",
+      ok: insforgeProbe.ok,
+      required: !DEMO_MODE,
+      status: insforgeProbe.status,
+      message: insforgeProbe.message,
+      action: insforgeProbe.action,
+    },
+    {
+      name: "openai",
+      ok: openAiConfigured || DEMO_MODE,
+      required: !DEMO_MODE,
+      status: openAiConfigured ? "ready" : "demo-fallback",
+      message: openAiConfigured
+        ? "OpenAI inference is configured for live synthesis."
+        : "OpenAI inference is unavailable; demo mode uses deterministic seeded payloads.",
+      action: openAiConfigured ? "" : "Set OPENAI_API_KEY for live recommendation and report synthesis.",
+    },
+    getPythonWorkerHealth({
+      insforgeReady: insforgeProbe.ok,
+      openAiConfigured,
+      minimaxConfigured,
+    }),
+    {
+      name: "mongodb-vector",
+      ok: mongoConfigured,
+      required: false,
+      status: mongoConfigured ? "ready" : "optional-missing",
+      message: mongoConfigured
+        ? "MongoDB vector storage/search is configured."
+        : "MongoDB vector search is disabled; keyword/demo data remains usable.",
+      action: mongoConfigured ? "" : "Set MONGODB_URI or MONGODB_ATLAS_URI to enable semantic evidence search.",
+    },
+    {
+      name: "tts",
+      ok: ttsConfigured,
+      required: false,
+      status: ttsConfigured ? "ready" : "optional-missing",
+      message: ttsConfigured
+        ? "At least one TTS provider is configured."
+        : "Audio generation is disabled; text briefings remain usable.",
+      action: ttsConfigured ? "" : "Set ELEVENLABS_API_KEY or MINIMAX_API_KEY to enable briefing audio.",
+    },
+    {
+      name: "brave-search",
+      ok: braveConfigured,
+      required: false,
+      status: braveConfigured ? "ready" : "optional-missing",
+      message: braveConfigured
+        ? "Brave Search is configured for background refresh."
+        : "Background refresh will skip Brave Search and rely on live agents or demo data.",
+      action: braveConfigured ? "" : "Set BRAVE_SEARCH_API_KEY to enable background web search.",
+    },
+    getRuntimeDirHealth(),
+  ];
+  const missingRequired = checks.filter((check) => check.required && !check.ok).map((check) => check.name);
+
+  return {
+    ok: missingRequired.length === 0,
+    service: "ai-server",
+    demoMode: DEMO_MODE,
+    status: missingRequired.length === 0 ? "ready" : "degraded",
+    timestamp: new Date().toISOString(),
+    missingRequired,
+    checks,
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Mission CRUD helpers                                               */
 /* ------------------------------------------------------------------ */
@@ -80,8 +415,9 @@ const RESETTABLE_TABLES = [
 ];
 
 const MISSION_COLUMNS = "id,prompt,status,live_url_1,live_url_2,live_url_3,live_url_4,live_url_5,final_options,created_at,stopped_at";
-const AGENT_COLUMNS = "id,agent_id,status,current_url,profile_path,energy";
-const DISCOVERY_COLUMNS = "id,source_url,thumbnail_url,agent_id,title,summary,keywords,industry,likes,views,comments,created_at";
+const AGENT_COLUMNS = "id,agent_id,name,platform,role,status,current_url,profile_path,assignment,energy,status_detail,failure_reason,retry_count,confidence,last_heartbeat";
+const LEGACY_AGENT_COLUMNS = "id,agent_id,status,current_url,profile_path,energy";
+const DISCOVERY_COLUMNS = "id,source_url,thumbnail_url,agent_id,platform,title,summary,keywords,industry,likes,views,comments,created_at";
 const LOG_COLUMNS = "id,agent_id,message,type,metadata,created_at";
 const SIGNAL_COLUMNS = "id,from_agent,to_agent,message,signal_type,created_at";
 const THOUGHT_COLUMNS = "id,agent_id,thought_type,prompt_summary,response_summary,action_taken,model,tokens_used,duration_ms,created_at";
@@ -90,11 +426,670 @@ const BUSINESS_PLAN_COLUMNS = "id,version,market_opportunity,competitive_landsca
 const DASHBOARD_CACHE_TTL_MS = 10000;
 const USER_MISSION_LOOKBACK_LIMIT = 100;
 
+const AGENT_LIFECYCLE_FIELDS = ["status_detail", "failure_reason", "retry_count", "confidence"];
+const LEGACY_AGENT_STATUS = {
+  queued: "idle",
+  extracting: "searching",
+  validating: "searching",
+  synthesizing: "searching",
+  blocked: "weak",
+  done: "found_trend",
+  failed: "error",
+  stale: "weak",
+};
+
+function stringifyError(error) {
+  if (!error) return "";
+  const pieces = [
+    typeof error === "string" ? error : "",
+    typeof error?.message === "string" ? error.message : "",
+    typeof error?.details === "string" ? error.details : "",
+    typeof error?.hint === "string" ? error.hint : "",
+    typeof error?.code === "string" ? error.code : "",
+  ];
+  try {
+    pieces.push(JSON.stringify(error));
+  } catch {
+    pieces.push(String(error));
+  }
+  return pieces.join(" ").toLowerCase();
+}
+
+function isAgentLifecycleSchemaError(error) {
+  const text = stringifyError(error);
+  return (
+    AGENT_LIFECYCLE_FIELDS.some((field) => text.includes(field)) ||
+    text.includes("agents_status_check") ||
+    text.includes("violates check constraint") ||
+    text.includes("schema cache")
+  );
+}
+
+function toLegacyAgentPayload(payload) {
+  const legacy = { ...payload };
+  const detail = String(legacy.status_detail ?? legacy.failure_reason ?? "").trim();
+  for (const field of AGENT_LIFECYCLE_FIELDS) {
+    delete legacy[field];
+  }
+  if (typeof legacy.status === "string" && LEGACY_AGENT_STATUS[legacy.status]) {
+    legacy.status = LEGACY_AGENT_STATUS[legacy.status];
+  }
+  if (detail && !String(legacy.assignment ?? "").trim()) {
+    legacy.assignment = detail.slice(0, 120);
+  }
+  return legacy;
+}
+
+async function insertAgentRows(insforge, rows, context = "agent insert") {
+  const result = await insforge.database.from("agents").insert(rows);
+  if (!result.error || !isAgentLifecycleSchemaError(result.error)) return result;
+
+  console.warn(`[ai-server] ${context} retried without lifecycle columns: ${result.error.message ?? result.error}`);
+  return insforge.database.from("agents").insert(rows.map(toLegacyAgentPayload));
+}
+
+async function updateAgentsByMission(insforge, missionId, values, context = "agent update") {
+  const result = await insforge.database.from("agents").update(values).eq("mission_id", missionId);
+  if (!result.error || !isAgentLifecycleSchemaError(result.error)) return result;
+
+  console.warn(`[ai-server] ${context} retried without lifecycle columns: ${result.error.message ?? result.error}`);
+  return insforge.database.from("agents").update(toLegacyAgentPayload(values)).eq("mission_id", missionId);
+}
+
+async function updateAgentByMissionAndId(insforge, missionId, agentId, values, context = "agent update") {
+  const result = await insforge.database
+    .from("agents")
+    .update(values)
+    .eq("mission_id", missionId)
+    .eq("agent_id", agentId);
+  if (!result.error || !isAgentLifecycleSchemaError(result.error)) return result;
+
+  console.warn(`[ai-server] ${context} retried without lifecycle columns: ${result.error.message ?? result.error}`);
+  return insforge.database
+    .from("agents")
+    .update(toLegacyAgentPayload(values))
+    .eq("mission_id", missionId)
+    .eq("agent_id", agentId);
+}
+
+async function fetchAgentsForDashboard(insforge, missionId) {
+  const result = await insforge.database
+    .from("agents")
+    .select(AGENT_COLUMNS)
+    .eq("mission_id", missionId)
+    .order("agent_id", { ascending: true });
+  if (!result.error || !isAgentLifecycleSchemaError(result.error)) return result;
+
+  console.warn(`[ai-server] dashboard agent select retried with legacy columns: ${result.error.message ?? result.error}`);
+  return insforge.database
+    .from("agents")
+    .select(LEGACY_AGENT_COLUMNS)
+    .eq("mission_id", missionId)
+    .order("agent_id", { ascending: true });
+}
+
 let dashboardSnapshotCache = null;
 let dashboardSnapshotFetchedAt = 0;
 let dashboardSnapshotInFlight = null;
 
 const BACKGROUND_MISSION_PROMPT_PREFIX = "Background market research:";
+const DEMO_MODE = ["1", "true", "yes"].includes(String(process.env.MARKETPULSE_DEMO_MODE ?? "").toLowerCase());
+
+let demoDashboardState = null;
+
+function demoTimestamp(minutesAgo = 0) {
+  return new Date(Date.now() - minutesAgo * 60_000).toISOString();
+}
+
+function emptyDashboardSnapshot() {
+  return {
+    mission: null,
+    recentMissions: [],
+    agents: [],
+    discoveries: [],
+    logs: [],
+    signals: [],
+    thoughts: [],
+    memory: [],
+    businessPlans: [],
+  };
+}
+
+function buildDemoEvidence(prompt) {
+  return [
+    {
+      id: "demo-evidence-1",
+      platform: "youtube",
+      title: "Gen Z creators are packaging burnout recovery as weekly routines",
+      keywords: "recovery routines, burnout reset, wellness planner",
+      summary: `Short-form creators are turning ${prompt || "AI wellness"} into repeatable recovery rituals with high save intent.`,
+      url: "https://www.youtube.com/results?search_query=gen+z+burnout+recovery+routine",
+      likes: 18400,
+      views: 248000,
+      comments: 920,
+    },
+    {
+      id: "demo-evidence-2",
+      platform: "reddit",
+      title: "Students want lightweight accountability without therapy-like friction",
+      keywords: "accountability, low pressure coaching, student wellness",
+      summary: "Community discussion points to demand for practical nudges, calendar prompts, and private check-ins instead of heavy clinical positioning.",
+      url: "https://www.reddit.com/search/?q=student%20burnout%20accountability%20app",
+      likes: 6100,
+      views: 82000,
+      comments: 340,
+    },
+    {
+      id: "demo-evidence-3",
+      platform: "substack",
+      title: "Wellness newsletters are moving from inspiration to operating plans",
+      keywords: "weekly planning, wellness systems, behavior design",
+      summary: "Operator-focused wellness writers are bundling prompts, habit loops, and weekly templates into paid playbooks.",
+      url: "https://substack.com/search/wellness%20planning%20burnout",
+      likes: 1200,
+      views: 31000,
+      comments: 84,
+    },
+  ];
+}
+
+function buildDemoFinalOptions(prompt, evidence) {
+  return {
+    generatedAt: demoTimestamp(),
+    isFinal: true,
+    marketResearch: {
+      summary: `MarketPulse found early but credible demand for ${prompt || "AI wellness apps"} when the offer is framed as a practical recovery operating system rather than a generic chatbot.`,
+      signals: ["High save intent", "Low-pressure coaching", "Weekly routine packaging"],
+    },
+    options: [
+      {
+        id: "demo-option-1",
+        title: "Gen Z Recovery Planner",
+        concept: "A lightweight AI planner that turns burnout signals into a weekly recovery plan, calendar nudges, and private accountability loops.",
+        audience: "Students and first-job Gen Z professionals who want help without a clinical onboarding flow.",
+        whyPromising: "The strongest evidence clusters around routines, accountability, and save-worthy planning content.",
+        marketAngle: "Position as an operating ritual for recovery, not another wellness chatbot.",
+        recommendedFormat: "Mobile-first planner",
+        evidence,
+      },
+      {
+        id: "demo-option-2",
+        title: "Creator Recovery Kits",
+        concept: "Downloadable recovery templates sold through wellness creators and student communities.",
+        audience: "Wellness creators and newsletter operators with Gen Z audiences.",
+        whyPromising: "Evidence shows creator-led rituals can become repeatable products.",
+        marketAngle: "Start as a template bundle before expanding into software.",
+        recommendedFormat: "Digital product",
+        evidence: evidence.slice(0, 2),
+      },
+    ],
+    primaryOptionId: "demo-option-1",
+    coverage: {
+      requiredPlatforms: ["youtube", "x", "reddit", "substack"],
+      completedPlatforms: ["youtube", "reddit", "substack"],
+      missingPlatforms: ["x"],
+      readyForLovable: false,
+    },
+    implementationPlan: {
+      generatedBy: "MiniMax-M2.7",
+      title: "Gen Z Recovery Planner",
+      oneLiner: "A weekly recovery operating system for students and early-career workers.",
+      problem: "Burned-out users want low-friction recovery help, but most apps feel clinical, generic, or too heavy.",
+      targetUsers: "Gen Z students and first-job professionals",
+      valueProp: "Turn messy stress signals into a simple weekly plan with evidence-backed nudges.",
+      whyNow: "Social evidence is shifting from wellness inspiration toward repeatable recovery systems.",
+      coreUserFlows: ["Run a weekly burnout check", "Generate a recovery plan", "Track private accountability"],
+      screens: [
+        { name: "Weekly Reset", purpose: "Collect stress signals and constraints", modules: ["check-in", "calendar import", "energy score"] },
+        { name: "Recovery Plan", purpose: "Show the recommended weekly plan", modules: ["tasks", "nudge schedule", "evidence notes"] },
+      ],
+      dataModel: [
+        { entity: "RecoveryPlan", purpose: "Stores weekly plans and user rationale", fields: ["energyScore", "planItems", "evidenceIds"] },
+      ],
+      workflows: [
+        { name: "Sunday reset", trigger: "User starts weekly check-in", outcome: "Personalized recovery plan" },
+      ],
+      integrations: ["Calendar", "Push notifications"],
+      monetization: "$9/month individual plan; creator bundles for acquisition.",
+      launchPlan: ["Ship a template MVP", "Partner with three wellness creators", "Measure weekly plan completion"],
+      successMetrics: ["40% week-two retention", "25% plan completion lift", "Creator CAC below $18"],
+      sourceEvidence: evidence,
+    },
+    lovableHandoff: {
+      title: "Build Gen Z Recovery Planner",
+      prompt: "Build a mobile-first recovery planner with weekly check-ins, evidence-backed recommendations, and private accountability loops.",
+      launchUrl: "",
+      evidence,
+    },
+  };
+}
+
+function buildDemoDashboardState(prompt, status = "completed") {
+  const missionId = `demo-${crypto.randomUUID()}`;
+  const createdAt = demoTimestamp(18);
+  const evidence = buildDemoEvidence(prompt);
+  const finalOptions = buildDemoFinalOptions(prompt, evidence);
+  const discoveries = evidence.map((item, index) => ({
+    id: item.id,
+    mission_id: missionId,
+    agent_id: index === 0 ? 1 : index === 1 ? 3 : 4,
+    platform: item.platform,
+    title: item.title,
+    source_url: item.url,
+    thumbnail_url: "",
+    keywords: item.keywords,
+    likes: item.likes,
+    views: item.views,
+    comments: item.comments,
+    summary: item.summary,
+    industry: "wellness-fitness",
+    created_at: demoTimestamp(14 - index * 4),
+  }));
+
+  return {
+    mission: normalizeMissionPreviewUrls({
+      id: missionId,
+      prompt,
+      status,
+      live_url_1: "/agent-stream/1",
+      live_url_2: "/agent-stream/2",
+      live_url_3: "/agent-stream/3",
+      live_url_4: "/agent-stream/4",
+      live_url_5: "/agent-stream/5",
+      final_options: finalOptions,
+      created_at: createdAt,
+      stopped_at: status === "stopped" ? demoTimestamp() : null,
+    }),
+    recentMissions: [],
+    agents: AGENT_ROWS.map((agent, index) => {
+      const demoAgentState = [
+        {
+          status: "done",
+          current_url: discoveries[0]?.source_url ?? "",
+          energy: 92,
+          objective: "Scan short-form wellness routines and extract save-worthy demand.",
+          status_detail: "Found creator-led burnout recovery routines with high engagement.",
+          confidence: 0.86,
+          retry_count: 0,
+          last_heartbeat: demoTimestamp(2),
+        },
+        {
+          status: "failed",
+          current_url: "",
+          energy: 0,
+          objective: "Validate X conversation velocity for student burnout accountability.",
+          status_detail: "X coverage is unavailable in demo mode, so this channel remains a trust gap.",
+          confidence: 0.18,
+          retry_count: 2,
+          failure_reason: "Missing X/Twitter source coverage",
+          last_heartbeat: demoTimestamp(26),
+        },
+        {
+          status: "done",
+          current_url: discoveries[1]?.source_url ?? "",
+          energy: 88,
+          objective: "Validate community pain points in student and early-career threads.",
+          status_detail: "Validated low-pressure accountability demand in community discussion.",
+          confidence: 0.78,
+          retry_count: 0,
+          last_heartbeat: demoTimestamp(4),
+        },
+        {
+          status: "stale",
+          current_url: discoveries[2]?.source_url ?? "",
+          energy: 38,
+          objective: "Track newsletter narratives for repeatable recovery playbooks.",
+          status_detail: "Last heartbeat is stale; use the Substack signal, but refresh before launch decisions.",
+          confidence: 0.61,
+          retry_count: 1,
+          last_heartbeat: demoTimestamp(47),
+        },
+        {
+          status: "synthesizing",
+          current_url: "/agent-stream/5",
+          energy: 82,
+          objective: "Synthesize evidence into final options, business plan, and recommendation payloads.",
+          status_detail: "Published final options with explicit missing-channel warnings.",
+          confidence: 0.82,
+          retry_count: 0,
+          last_heartbeat: demoTimestamp(1),
+        },
+      ][index] ?? {};
+
+      return {
+        id: `demo-agent-${agent.agentId}`,
+        agent_id: agent.agentId,
+        name: agent.name,
+        platform: agent.platform,
+        role: agent.role,
+        profile_path: `demo/${agent.name.toLowerCase()}`,
+        ...demoAgentState,
+      };
+    }),
+    discoveries,
+    logs: [
+      {
+        id: "demo-log-1",
+        agent_id: 1,
+        type: "discovery",
+        message: "Echo found repeat saves around burnout recovery routines.",
+        metadata: { evidenceId: "demo-evidence-1" },
+        created_at: demoTimestamp(12),
+      },
+      {
+        id: "demo-log-2",
+        agent_id: 3,
+        type: "analysis",
+        message: "Thread validated that low-pressure accountability is a recurring user need.",
+        metadata: { evidenceId: "demo-evidence-2" },
+        created_at: demoTimestamp(8),
+      },
+      {
+        id: "demo-log-3",
+        agent_id: 5,
+        type: "final_options",
+        message: "Atlas synthesized two evidence-backed opportunity paths and recommended the planner wedge.",
+        metadata: { optionId: "demo-option-1" },
+        created_at: demoTimestamp(3),
+      },
+      {
+        id: "demo-log-4",
+        agent_id: 2,
+        type: "error",
+        message: "Pulse could not validate X coverage; final output is marked partial until that channel is refreshed.",
+        metadata: { platform: "x", recovery: "retry_source" },
+        created_at: demoTimestamp(2),
+      },
+    ],
+    signals: [
+      {
+        id: "demo-signal-1",
+        from_agent: 3,
+        to_agent: 5,
+        message: "Reddit discussions support low-friction accountability.",
+        signal_type: "validation",
+        created_at: demoTimestamp(7),
+      },
+    ],
+    thoughts: [
+      {
+        id: "demo-thought-1",
+        agent_id: 5,
+        thought_type: "strategy",
+        prompt_summary: "Rank the strongest opportunity from evidence.",
+        response_summary: "Planner wedge beats template bundle because it compounds weekly retention data.",
+        action_taken: "Recommended Gen Z Recovery Planner",
+        model: "demo-synthesis",
+        tokens_used: 0,
+        duration_ms: 0,
+        created_at: demoTimestamp(2),
+      },
+    ],
+    memory: [
+      {
+        id: "demo-memory-1",
+        filename: "mission-summary.md",
+        content: "Evidence supports a weekly recovery planning wedge with creator-led acquisition.",
+        version: 1,
+        updated_by: "Atlas",
+        updated_at: demoTimestamp(1),
+      },
+    ],
+    businessPlans: [
+      {
+        id: "demo-plan-1",
+        version: 1,
+        market_opportunity: "A mobile-first weekly recovery planner can own the space between wellness content and clinical mental-health apps.",
+        competitive_landscape: "Generic habit trackers and therapy apps leave room for a lighter operating ritual.",
+        revenue_models: "$9/month subscription, creator affiliate bundles, and campus ambassador cohorts.",
+        user_acquisition: "Start with wellness creators whose audiences already save recovery routine content.",
+        risk_analysis: "Avoid medical claims, keep recommendations practical, and label uncertainty clearly.",
+        confidence_score: 82,
+        discovery_count: discoveries.length,
+        is_final: true,
+        raw_plan: "Recommended: launch the Gen Z Recovery Planner MVP with weekly reset, plan generation, and creator-led acquisition.",
+        created_at: demoTimestamp(),
+      },
+    ],
+  };
+}
+
+async function handleDemoMissionCreate(request, response) {
+  const body = await readJsonBody(request);
+  const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
+
+  if (!prompt) {
+    return writeJson(response, 400, { error: "mission_prompt_required" });
+  }
+
+  demoDashboardState = buildDemoDashboardState(prompt);
+  writeJson(response, 200, {
+    ok: true,
+    demoMode: true,
+    mission: {
+      mission_id: demoDashboardState.mission.id,
+      prompt,
+      status: demoDashboardState.mission.status,
+      supersededMissionIds: [],
+    },
+  });
+}
+
+async function handleDemoMissionStop(_request, response) {
+  if (demoDashboardState?.mission) {
+    demoDashboardState = {
+      ...demoDashboardState,
+      mission: { ...demoDashboardState.mission, status: "stopped", stopped_at: demoTimestamp() },
+      agents: demoDashboardState.agents.map((agent) => ({ ...agent, status: "stopped", energy: 0 })),
+    };
+  }
+  writeJson(response, 200, { ok: true, demoMode: true, missionId: demoDashboardState?.mission?.id ?? null });
+}
+
+async function handleDemoMissionReset(_request, response) {
+  const missionId = demoDashboardState?.mission?.id ?? null;
+  demoDashboardState = null;
+  writeJson(response, 200, { ok: true, demoMode: true, missionId });
+}
+
+async function handleDemoAgentRetry(request, response) {
+  const body = await readJsonBody(request);
+  const agentId = Number(body?.agentId);
+
+  if (!Number.isInteger(agentId) || agentId < 1 || agentId > 5) {
+    return writeJson(response, 400, { error: "agent_id_invalid" });
+  }
+  if (!demoDashboardState?.mission) {
+    return writeJson(response, 404, { error: "mission_not_found" });
+  }
+
+  const agentDef = AGENT_ROWS.find((agent) => agent.agentId === agentId);
+  const timestamp = demoTimestamp();
+  const missionId = demoDashboardState.mission.id;
+  let updatedAgent = null;
+
+  demoDashboardState = {
+    ...demoDashboardState,
+    mission: {
+      ...demoDashboardState.mission,
+      status: "queued",
+      stopped_at: null,
+    },
+    agents: demoDashboardState.agents.map((agent) => {
+      if (Number(agent.agent_id) !== agentId) return agent;
+      updatedAgent = {
+        ...agent,
+        status: "queued",
+        current_url: "",
+        energy: 100,
+        status_detail: "Retry requested from command UI. Waiting for worker pickup.",
+        failure_reason: "",
+        retry_count: Number(agent.retry_count ?? 0) + 1,
+        confidence: null,
+        last_heartbeat: timestamp,
+      };
+      return updatedAgent;
+    }),
+    logs: [
+      {
+        id: `demo-log-retry-${agentId}-${Date.now()}`,
+        agent_id: agentId,
+        type: "status",
+        message: `Retry requested for ${agentDef?.name ?? `agent ${agentId}`}.`,
+        metadata: { agentId, source: "ui", command: "retry_agent" },
+        created_at: timestamp,
+      },
+      ...demoDashboardState.logs,
+    ],
+  };
+
+  writeJson(response, 200, {
+    ok: true,
+    demoMode: true,
+    missionId,
+    agentId,
+    agent: updatedAgent,
+  });
+}
+
+function demoTrendsPayload() {
+  if (!demoDashboardState?.mission) return { trends: [], insights: [] };
+  const missionId = String(demoDashboardState.mission.id);
+  const missionPrompt = String(demoDashboardState.mission.prompt ?? "");
+  const sources = demoDashboardState.discoveries.map((discovery) => ({
+    id: discovery.id,
+    url: discovery.source_url,
+    thumbnail: discovery.thumbnail_url || null,
+    platform: discovery.platform,
+    title: discovery.title,
+    summary: discovery.summary,
+    keywords: discovery.keywords,
+    likes: discovery.likes,
+    views: discovery.views,
+    comments: discovery.comments,
+  }));
+
+  return {
+    missionId,
+    missionPrompt,
+    trends: [
+      {
+        $primaryKey: `demo-trend-${missionId}-1`,
+        trendId: `demo-trend-${missionId}-1`,
+        title: "Recovery Routine Planners",
+        description: "Evidence clusters around weekly burnout resets, lightweight accountability, and creator-packaged recovery systems.",
+        industry: "wellness-fitness",
+        category: "Live Research",
+        status: "growing",
+        trendScore: 88,
+        mentionCount: 361000,
+        growthRate: 34.8,
+        sentimentScore: 0.68,
+        topKeywords: "recovery routines, burnout reset, accountability",
+        detectedAt: demoTimestamp(),
+        sources,
+      },
+      {
+        $primaryKey: `demo-trend-${missionId}-2`,
+        trendId: `demo-trend-${missionId}-2`,
+        title: "Low-pressure Coaching",
+        description: "Users want practical nudges and private check-ins without a clinical or therapy-like onboarding flow.",
+        industry: "wellness-fitness",
+        category: "Live Research",
+        status: "emerging",
+        trendScore: 77,
+        mentionCount: 119000,
+        growthRate: 21.4,
+        sentimentScore: 0.54,
+        topKeywords: "low pressure coaching, private check-ins, student wellness",
+        detectedAt: demoTimestamp(),
+        sources: sources.slice(1),
+      },
+    ],
+    insights: [
+      {
+        $primaryKey: `demo-insight-${missionId}-1`,
+        insightId: `demo-insight-${missionId}-1`,
+        title: "Market Opportunity",
+        summary: "The strongest wedge is a weekly recovery planner that turns social wellness intent into a repeatable operating ritual.",
+        insightType: "opportunity",
+        industry: "wellness-fitness",
+        generatedAt: demoTimestamp(),
+        relatedTrendIds: `demo-trend-${missionId}-1`,
+      },
+      {
+        $primaryKey: `demo-insight-${missionId}-2`,
+        insightId: `demo-insight-${missionId}-2`,
+        title: "Evidence Risk",
+        summary: "The X/Twitter channel is still missing, so channel diversity is not yet complete.",
+        insightType: "alert",
+        industry: "wellness-fitness",
+        generatedAt: demoTimestamp(),
+        relatedTrendIds: `demo-trend-${missionId}-1`,
+      },
+    ],
+  };
+}
+
+function demoRecommendationsPayload() {
+  if (!demoDashboardState?.mission) return { recommendations: [] };
+  const missionId = String(demoDashboardState.mission.id);
+  const trendId = `demo-trend-${missionId}-1`;
+  const sourceEvidence = demoDashboardState.discoveries.map((discovery) => ({
+    id: discovery.id,
+    url: discovery.source_url,
+    thumbnail: discovery.thumbnail_url || null,
+    platform: discovery.platform,
+    title: discovery.title,
+    summary: discovery.summary,
+    keywords: discovery.keywords,
+    likes: discovery.likes,
+    views: discovery.views,
+    comments: discovery.comments,
+  }));
+
+  return {
+    missionId,
+    recommendations: [
+      {
+        $primaryKey: `demo-rec-${missionId}-1`,
+        recommendationId: `demo-rec-${missionId}-1`,
+        trendId,
+        title: "Launch Gen Z Recovery Planner",
+        description: "Ship a lightweight weekly reset planner that converts burnout signals into recovery tasks, calendar nudges, and private accountability.",
+        industry: "wellness-fitness",
+        productCategory: "Platform",
+        targetDemographic: "Gen Z students and early-career professionals",
+        confidenceScore: 0.84,
+        estimatedRevenuePotential: "$42K/month",
+        priority: "high",
+        status: "new",
+        actionPlan: "Prototype the weekly reset flow, recruit three wellness creators, and measure plan completion for two cohorts.",
+        sourceTrendTitle: "Recovery Routine Planners",
+        sourceEvidence,
+        createdAt: demoTimestamp(),
+      },
+      {
+        $primaryKey: `demo-rec-${missionId}-2`,
+        recommendationId: `demo-rec-${missionId}-2`,
+        trendId,
+        title: "Sell Creator Recovery Kits",
+        description: "Package weekly reset templates and accountability scripts for creators who already publish wellness routines.",
+        industry: "wellness-fitness",
+        productCategory: "Content",
+        targetDemographic: "Wellness creators with student audiences",
+        confidenceScore: 0.73,
+        estimatedRevenuePotential: "$18K first quarter",
+        priority: "medium",
+        status: "new",
+        actionPlan: "Create the first template pack, test creator affiliate economics, and promote through newsletters.",
+        sourceTrendTitle: "Recovery Routine Planners",
+        sourceEvidence: sourceEvidence.slice(0, 2),
+        createdAt: demoTimestamp(),
+      },
+    ],
+  };
+}
 
 function invalidateDashboardSnapshot() {
   dashboardSnapshotCache = null;
@@ -188,10 +1183,13 @@ async function handleMissionCreate(request, response) {
         .eq("id", priorMissionId);
       if (missionStopping.error) throw missionStopping.error;
 
-      const agentStopping = await insforge.database
-        .from("agents")
-        .update({ status: "stopped", energy: 0 })
-        .eq("mission_id", priorMissionId);
+      const agentStopping = await updateAgentsByMission(insforge, priorMissionId, {
+        status: "stopped",
+        energy: 0,
+        status_detail: "Superseded by a newer research request.",
+        failure_reason: "",
+        last_heartbeat: new Date().toISOString(),
+      }, "superseded mission agent update");
       if (agentStopping.error) throw agentStopping.error;
 
       const latestPlan = await insforge.database
@@ -233,21 +1231,27 @@ async function handleMissionCreate(request, response) {
   if (missionInsert.error) throw missionInsert.error;
 
   try {
-    const agentInsert = await insforge.database.from("agents").insert(
+    const agentInsert = await insertAgentRows(
+      insforge,
       AGENT_ROWS.map((agent) => ({
         mission_id: missionId,
         agent_id: agent.agentId,
         name: agent.name,
         platform: agent.platform,
         role: agent.role,
-        status: "idle",
+        status: "queued",
         preview_url: agent.previewUrl,
         assignment: prompt,
         energy: 100,
+        status_detail: "Queued for worker pickup.",
+        failure_reason: "",
+        retry_count: 0,
+        confidence: null,
         created_at: timestamp,
         updated_at: timestamp,
         last_heartbeat: timestamp,
-      }))
+      })),
+      "mission create agent insert"
     );
 
     if (agentInsert.error) throw agentInsert.error;
@@ -310,10 +1314,13 @@ async function handleMissionStop(request, response) {
     .eq("id", targetId);
   if (missionUpdate.error) throw missionUpdate.error;
 
-  const agentUpdate = await insforge.database
-    .from("agents")
-    .update({ status: "stopped", energy: 0 })
-    .eq("mission_id", targetId);
+  const agentUpdate = await updateAgentsByMission(insforge, targetId, {
+    status: "stopped",
+    energy: 0,
+    status_detail: "Stopped from the command UI.",
+    failure_reason: "",
+    last_heartbeat: new Date().toISOString(),
+  }, "mission stop agent update");
   if (agentUpdate.error) throw agentUpdate.error;
 
   // Immediate UX: blank the four browser preview tiles; Python runtime will also wind down.
@@ -394,19 +1401,26 @@ async function handleMissionReset(request, response) {
     }
 
     // Reset agents to idle - non-blocking if it fails
-    const agentReset = await insforge.database
-      .from("agents")
-      .update({
+    const agentReset = await updateAgentsByMission(
+      insforge,
+      targetId,
+      {
         status: "idle",
         current_url: "",
         assignment: "",
         energy: 100,
+        status_detail: "Reset and ready for a new mission.",
+        failure_reason: "",
+        retry_count: 0,
+        confidence: null,
         session_id: null,
         preview_bucket: null,
         preview_key: null,
         preview_updated_at: null,
-      })
-      .eq("mission_id", targetId);
+        last_heartbeat: new Date().toISOString(),
+      },
+      "mission reset agent update"
+    );
     if (agentReset.error) {
       console.warn(`[ai-server] Agent reset warning: ${agentReset.error.message}`);
     }
@@ -449,6 +1463,113 @@ async function handleMissionReset(request, response) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Route: POST /api/agent/retry                                      */
+/* ------------------------------------------------------------------ */
+
+async function handleAgentRetry(request, response) {
+  const body = await readJsonBody(request);
+  const agentId = Number(body?.agentId);
+  const missionId = typeof body?.missionId === "string" && body.missionId.trim()
+    ? body.missionId.trim()
+    : null;
+
+  if (!Number.isInteger(agentId) || agentId < 1 || agentId > 5) {
+    return writeJson(response, 400, { error: "agent_id_invalid" });
+  }
+
+  const insforge = createServerInsforgeClient();
+  const targetId = await resolveMissionId(insforge, missionId);
+
+  if (!targetId) {
+    return writeJson(response, 404, { error: "mission_not_found" });
+  }
+
+  const missionResult = await insforge.database
+    .from("missions")
+    .select("id,status")
+    .eq("id", targetId)
+    .maybeSingle();
+  if (missionResult.error) throw missionResult.error;
+  if (!missionResult.data) {
+    return writeJson(response, 404, { error: "mission_not_found" });
+  }
+  if (String(missionResult.data.status ?? "") === "stopping") {
+    return writeJson(response, 409, { error: "mission_stopping" });
+  }
+
+  const agentResult = await insforge.database
+    .from("agents")
+    .select("id,agent_id,name,platform,role,retry_count,assignment,status")
+    .eq("mission_id", targetId)
+    .eq("agent_id", agentId)
+    .maybeSingle();
+  if (agentResult.error) throw agentResult.error;
+  if (!agentResult.data) {
+    return writeJson(response, 404, { error: "agent_not_found", missionId: targetId, agentId });
+  }
+
+  const timestamp = new Date().toISOString();
+  const retryCount = Number.isFinite(Number(agentResult.data.retry_count))
+    ? Number(agentResult.data.retry_count) + 1
+    : 1;
+  const agentName = String(agentResult.data.name ?? `Agent ${agentId}`);
+  const platform = String(agentResult.data.platform ?? "");
+
+  const commandResult = await insforge.database.from("control_commands").insert([{
+    mission_id: targetId,
+    command: "retry_agent",
+    payload: {
+      source: "ui",
+      agentId,
+      agentName,
+      platform,
+      priorStatus: String(agentResult.data.status ?? ""),
+    },
+    status: "pending",
+  }]);
+  if (commandResult.error) throw commandResult.error;
+
+  const agentUpdate = await updateAgentByMissionAndId(insforge, targetId, agentId, {
+    status: "queued",
+    current_url: "",
+    energy: 100,
+    status_detail: "Retry requested from command UI. Waiting for worker pickup.",
+    failure_reason: "",
+    retry_count: retryCount,
+    confidence: null,
+    last_heartbeat: timestamp,
+  }, "agent retry update");
+  if (agentUpdate.error) throw agentUpdate.error;
+
+  if (["completed", "error", "stopped"].includes(String(missionResult.data.status ?? ""))) {
+    const missionUpdate = await insforge.database
+      .from("missions")
+      .update({ status: "queued", stopped_at: null })
+      .eq("id", targetId);
+    if (missionUpdate.error) throw missionUpdate.error;
+  }
+
+  const logResult = await insforge.database.from("logs").insert([{
+    mission_id: targetId,
+    agent_id: agentId,
+    type: "status",
+    message: `Retry requested for ${agentName}.`,
+    metadata: { source: "ui", command: "retry_agent", agentId, platform },
+    created_at: timestamp,
+  }]);
+  if (logResult.error) throw logResult.error;
+
+  invalidateDashboardSnapshot();
+
+  writeJson(response, 200, {
+    ok: true,
+    missionId: targetId,
+    agentId,
+    retryCount,
+  });
+}
+
+/* ------------------------------------------------------------------ */
 /*  Route: GET /api/dashboard                                          */
 /* ------------------------------------------------------------------ */
 
@@ -487,7 +1608,7 @@ async function fetchDashboardSnapshot() {
 
   const [agentResult, discoveryResult, logResult, signalResult, thoughtsResult, memoryResult, businessPlanResult] =
     await Promise.all([
-      insforge.database.from("agents").select(AGENT_COLUMNS).eq("mission_id", missionId).order("agent_id", { ascending: true }),
+      fetchAgentsForDashboard(insforge, missionId),
       insforge.database.from("discoveries").select(DISCOVERY_COLUMNS).eq("mission_id", missionId).order("created_at", { ascending: false }).limit(100),
       insforge.database.from("logs").select(LOG_COLUMNS).eq("mission_id", missionId).order("created_at", { ascending: false }).limit(60),
       insforge.database.from("signals").select(SIGNAL_COLUMNS).eq("mission_id", missionId).order("created_at", { ascending: false }).limit(60),
@@ -844,10 +1965,12 @@ function synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId) 
       // Collect up to 8 clickable sources per keyword group
       if (disc.source_url && g.sources.length < 8) {
         g.sources.push({
+          id: disc.id,
           url: disc.source_url,
           thumbnail: disc.thumbnail_url || null,
           platform,
           title: stripSourceSuffix(disc.title ?? ""),
+          summary: String(disc.summary ?? "").trim(),
           keywords: rawKeywords.split(",").map((k) => k.trim()).filter(Boolean).slice(0, 3).join(", "),
           likes: disc.likes ?? 0,
           views: disc.views ?? 0,
@@ -1001,9 +2124,12 @@ function synthesizeTrendsFromOptions(finalOptions, missionPrompt, missionId) {
       .filter((e) => e.source_url || e.url)
       .slice(0, 8)
       .map((e) => ({
+        id: e.id,
         url: e.source_url || e.url,
         thumbnail: e.thumbnail_url || e.thumbnail || null,
         platform: e.platform || "market_research",
+        title: e.title || "",
+        summary: e.summary || "",
         keywords: e.keywords || option.title,
         likes: e.likes ?? 0,
         views: e.views ?? 0,
@@ -1421,6 +2547,7 @@ Rules:
       status: "new",
       actionPlan: rec.actionPlan ?? "",
       sourceTrendTitle: matchedTrend?.title ?? matchedTitle,
+      sourceEvidence: Array.isArray(matchedTrend?.sources) ? matchedTrend.sources.slice(0, 6) : [],
       createdAt: new Date().toISOString(),
     };
   });
@@ -1671,14 +2798,23 @@ async function runBackgroundDataRefresh(force = false) {
   }]);
   if (missionInsert.error) { console.error("[bg-job] Mission insert error:", missionInsert.error); return; }
 
-  await insforge.database.from("agents").insert(
+  const bgAgentInsert = await insertAgentRows(
+    insforge,
     AGENT_ROWS.map(a => ({
       mission_id: missionId, agent_id: a.agentId, name: a.name,
-      platform: a.platform, role: a.role, status: "idle",
+      platform: a.platform, role: a.role, status: a.agentId === 5 ? "queued" : "searching",
       preview_url: a.previewUrl, assignment: prompt, energy: 100,
+      status_detail: a.agentId === 5 ? "Queued to synthesize the sweep." : `Searching ${a.platform} sources.`,
+      failure_reason: "",
+      retry_count: 0,
+      confidence: null,
       created_at: timestamp, updated_at: timestamp, last_heartbeat: timestamp,
-    }))
+    })),
+    "background refresh agent insert"
   );
+  if (bgAgentInsert.error) {
+    console.warn("[bg-job] Agent insert warning:", bgAgentInsert.error.message ?? bgAgentInsert.error);
+  }
 
   invalidateDashboardSnapshot();
   invalidateRecsCache();
@@ -1725,6 +2861,30 @@ async function runBackgroundDataRefresh(force = false) {
   }
   console.log(`[bg-job] Inserted ${insertedCount}/${discoveries.length} discoveries`);
 
+  const discoveryCountsByAgent = discoveries.reduce((counts, discovery) => {
+    counts.set(discovery.agent_id, (counts.get(discovery.agent_id) ?? 0) + 1);
+    return counts;
+  }, new Map());
+  const sourceHeartbeat = new Date().toISOString();
+  for (const agent of AGENT_ROWS.filter((row) => row.agentId !== 5)) {
+    const count = discoveryCountsByAgent.get(agent.agentId) ?? 0;
+    const result = await updateAgentByMissionAndId(insforge, missionId, agent.agentId, {
+      status: count > 0 ? "done" : "failed",
+      assignment: count > 0 ? `Completed: ${count} background discoveries` : "No valid background sources found",
+      energy: count > 0 ? 55 : 0,
+      status_detail: count > 0
+        ? `Background sweep completed with ${count} usable ${agent.platform} sources.`
+        : `Background sweep found no valid ${agent.platform} sources.`,
+      failure_reason: count > 0 ? "" : "No valid sources found in background sweep",
+      retry_count: count > 0 ? 0 : 1,
+      confidence: count > 0 ? Math.min(0.92, 0.55 + count * 0.04) : 0.1,
+      last_heartbeat: sourceHeartbeat,
+    }, "background source agent update");
+    if (result.error) {
+      console.warn(`[bg-job] Agent ${agent.agentId} status warning:`, result.error.message ?? result.error);
+    }
+  }
+
   if (insertedCount > 0 && (process.env.MONGODB_URI || process.env.MONGODB_ATLAS_URI)) {
     try {
       const sync = await storeDiscoveriesWithEmbeddings(discoveries);
@@ -1743,6 +2903,17 @@ async function runBackgroundDataRefresh(force = false) {
     .slice(0, 25)
     .map(([kw]) => kw)
     .join(", ");
+
+  await updateAgentByMissionAndId(insforge, missionId, 5, {
+    status: "synthesizing",
+    assignment: "Synthesizing background discoveries",
+    energy: 80,
+    status_detail: `Synthesizing ${discoveries.length} background discoveries into a business plan.`,
+    failure_reason: "",
+    retry_count: 0,
+    confidence: insertedCount > 0 ? 0.72 : 0.2,
+    last_heartbeat: new Date().toISOString(),
+  }, "background Atlas synthesizing update");
 
   try {
     const planResult = await inferWithOpenAI({
@@ -1788,9 +2959,40 @@ Rules:
         created_at:            new Date().toISOString(),
       }]);
       console.log("[bg-job] Business plan generated");
+      await updateAgentByMissionAndId(insforge, missionId, 5, {
+        status: "done",
+        assignment: "Background plan generated",
+        energy: 60,
+        status_detail: "Background research synthesized into a saved business plan.",
+        failure_reason: "",
+        retry_count: 0,
+        confidence: typeof plan.confidence_score === "number" ? Math.max(0, Math.min(1, plan.confidence_score / 100)) : 0.75,
+        last_heartbeat: new Date().toISOString(),
+      }, "background Atlas complete update");
+    } else {
+      await updateAgentByMissionAndId(insforge, missionId, 5, {
+        status: "failed",
+        assignment: "Background synthesis produced no parseable plan",
+        energy: 0,
+        status_detail: "The AI response did not contain a parseable business-plan JSON object.",
+        failure_reason: "No parseable business-plan JSON returned",
+        retry_count: 1,
+        confidence: 0.15,
+        last_heartbeat: new Date().toISOString(),
+      }, "background Atlas unparseable update");
     }
   } catch (err) {
     console.error("[bg-job] Business plan generation failed:", err.message);
+    await updateAgentByMissionAndId(insforge, missionId, 5, {
+      status: "failed",
+      assignment: "Background synthesis failed",
+      energy: 0,
+      status_detail: "Background sweep finished, but AI synthesis failed.",
+      failure_reason: err?.message ?? "Business plan generation failed",
+      retry_count: 1,
+      confidence: 0.15,
+      last_heartbeat: new Date().toISOString(),
+    }, "background Atlas failed update");
   }
 
   // Finalize mission
@@ -1805,6 +3007,10 @@ Rules:
 }
 
 function scheduleBackgroundJob() {
+  if (DEMO_MODE) {
+    console.log("[bg-job] Demo mode enabled; background refresh is disabled.");
+    return;
+  }
   // Run 60 seconds after server starts so it's fully ready
   setTimeout(() => {
     runBackgroundDataRefresh().catch(err => console.error("[bg-job] Startup run error:", err));
@@ -1834,7 +3040,15 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && url.pathname === "/health") {
-    writeJson(response, 200, { ok: true, service: "ai-server" });
+    const health = await buildHealthReport();
+    writeJson(response, health.ok ? 200 : 503, health);
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/worker/preflight") {
+    const strict = url.searchParams.get("strict") === "1" || url.searchParams.get("strict") === "true";
+    const preflight = await getWorkerPreflight({ strict });
+    writeJson(response, preflight.ok ? 200 : 503, preflight);
     return;
   }
 
@@ -1933,6 +3147,10 @@ const server = http.createServer(async (request, response) => {
   // Mission create
   if (request.method === "POST" && url.pathname === "/api/mission/create") {
     try {
+      if (DEMO_MODE) {
+        await handleDemoMissionCreate(request, response);
+        return;
+      }
       await handleMissionCreate(request, response);
     } catch (error) {
       writeJson(response, 500, { error: error instanceof Error ? error.message : "Failed to create mission." });
@@ -1943,6 +3161,10 @@ const server = http.createServer(async (request, response) => {
   // Mission stop
   if (request.method === "POST" && url.pathname === "/api/mission/stop") {
     try {
+      if (DEMO_MODE) {
+        await handleDemoMissionStop(request, response);
+        return;
+      }
       await handleMissionStop(request, response);
     } catch (error) {
       writeJson(response, 500, { error: error instanceof Error ? error.message : "Failed to stop mission." });
@@ -1953,6 +3175,10 @@ const server = http.createServer(async (request, response) => {
   // Mission reset
   if (request.method === "POST" && url.pathname === "/api/mission/reset") {
     try {
+      if (DEMO_MODE) {
+        await handleDemoMissionReset(request, response);
+        return;
+      }
       await handleMissionReset(request, response);
     } catch (error) {
       writeJson(response, 500, { error: error instanceof Error ? error.message : "Failed to reset mission." });
@@ -1960,9 +3186,27 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
+  // Agent retry
+  if (request.method === "POST" && url.pathname === "/api/agent/retry") {
+    try {
+      if (DEMO_MODE) {
+        await handleDemoAgentRetry(request, response);
+        return;
+      }
+      await handleAgentRetry(request, response);
+    } catch (error) {
+      writeJson(response, 500, { error: error instanceof Error ? error.message : "Failed to retry agent." });
+    }
+    return;
+  }
+
   // Dashboard snapshot
   if (request.method === "GET" && url.pathname === "/api/dashboard") {
     try {
+      if (DEMO_MODE) {
+        writeJson(response, 200, demoDashboardState ?? emptyDashboardSnapshot());
+        return;
+      }
       await handleDashboard(request, response);
     } catch (error) {
       writeJson(response, 500, { error: error instanceof Error ? error.message : "Failed to load dashboard." });
@@ -2047,6 +3291,10 @@ const server = http.createServer(async (request, response) => {
   // Trends & insights derived from live scraped data
   if (request.method === "GET" && url.pathname === "/api/trends") {
     try {
+      if (DEMO_MODE) {
+        writeJson(response, 200, demoTrendsPayload());
+        return;
+      }
       await handleTrends(request, response);
     } catch (error) {
       writeJson(response, 500, { error: error instanceof Error ? error.message : "Failed to load trends." });
@@ -2068,6 +3316,10 @@ const server = http.createServer(async (request, response) => {
   // AI-generated recommendations with real revenue estimates
   if (request.method === "GET" && url.pathname === "/api/recommendations") {
     try {
+      if (DEMO_MODE) {
+        writeJson(response, 200, demoRecommendationsPayload());
+        return;
+      }
       await handleRecommendations(request, response);
     } catch (error) {
       writeJson(response, 500, { error: error instanceof Error ? error.message : "Failed to load recommendations." });

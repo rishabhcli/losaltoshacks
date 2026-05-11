@@ -131,6 +131,12 @@ export function MissionControl({
     setInput("");
   };
 
+  const handleRetryMission = () => {
+    const prompt = missionPrompt.trim();
+    if (!prompt || isCreatingMission || isRunning) return;
+    onCreateMission(prompt);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -139,6 +145,11 @@ export function MissionControl({
   };
 
   const statusCopy = getMissionStatusCopy(missionStatus);
+  const canRecoverMission =
+    Boolean(missionPrompt.trim()) &&
+    !isRunning &&
+    !isCreatingMission &&
+    (missionStatus === "error" || missionStatus === "stopped");
   const statusToneClasses = statusCopy?.tone === "green"
     ? {
         dotOuter: "bg-green-400",
@@ -164,10 +175,10 @@ export function MissionControl({
           };
 
   return (
-    <div className="border-t border-slate-200/60 dark:border-slate-800/80 glass px-5 py-3.5 dark:bg-slate-950/70">
+    <div className="border-t border-slate-200/60 dark:border-slate-800/80 glass px-3 py-3 dark:bg-slate-950/70 sm:px-5 sm:py-3.5">
       {/* Status line */}
       {(statusCopy || error) && (
-        <div className="flex items-center gap-2 mb-2.5 px-1">
+        <div className="flex flex-wrap items-center gap-2 mb-2.5 px-1">
           {statusCopy && missionPrompt && (
             <>
               <span className="relative flex h-2 w-2">
@@ -177,23 +188,46 @@ export function MissionControl({
                 <span className={`relative inline-flex rounded-full h-2 w-2 ${statusToneClasses.dotInner}`} />
               </span>
               <span className={`text-xs font-medium ${statusToneClasses.text}`}>{statusCopy.label}</span>
-              <span className="text-xs text-slate-400 dark:text-slate-500 truncate">&mdash; {missionPrompt}</span>
+              <span className="min-w-0 flex-1 text-xs text-slate-400 dark:text-slate-500 truncate">&mdash; {missionPrompt}</span>
             </>
           )}
           {error && <span className="text-xs text-red-600">{error}</span>}
+          {canRecoverMission && (
+            <div className="flex w-full flex-wrap items-center gap-1.5 sm:ml-auto sm:w-auto">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onResetAll}
+                className="h-7 rounded-lg border-slate-200 px-2.5 text-[11px] text-slate-600 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-300 dark:hover:text-slate-50"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Clear Mission
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleRetryMission}
+                className="h-7 rounded-lg bg-blue-600 px-2.5 text-[11px] text-white hover:bg-blue-700"
+              >
+                <Play className="w-3.5 h-3.5" />
+                Retry Prompt
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
       {/* Input bar */}
-      <div className="flex items-center gap-2.5">
-        <div className="flex-1 flex items-center gap-3 bg-slate-50/80 dark:bg-slate-950/85 border border-slate-200 dark:border-slate-800/80 rounded-2xl px-4 py-2.5">
+      <div className="flex flex-col items-stretch gap-2.5 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-1 items-center gap-3 bg-slate-50/80 dark:bg-slate-950/85 border border-slate-200 dark:border-slate-800/80 rounded-2xl px-4 py-2.5">
           <Search className="w-4 h-4 text-slate-400 shrink-0" />
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={isRunning ? "Ask a new research question to replace the current mission" : "Describe a market to research... e.g., AI-powered wellness apps for Gen Z"}
-            className="flex-1 bg-transparent text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 outline-none"
+            className="min-w-0 flex-1 bg-transparent text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 outline-none"
             disabled={isCreatingMission}
           />
         </div>
@@ -204,7 +238,7 @@ export function MissionControl({
           onClick={isPlaying ? handleStopDictate : handleDictate}
           disabled={isDictating || (!input.trim() && !missionPrompt)}
           title={isPlaying ? "Stop dictation" : "Dictate prompt using MiniMax TTS"}
-          className={`h-10 w-10 p-0 rounded-2xl shrink-0 transition-all ${
+          className={`h-10 w-full p-0 rounded-2xl shrink-0 transition-all sm:w-10 ${
             isPlaying
               ? "bg-purple-600 hover:bg-purple-700 text-white ring-2 ring-purple-400/50"
               : "bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 text-slate-500 dark:text-slate-300 border border-slate-200 dark:border-slate-700/80"
@@ -222,7 +256,7 @@ export function MissionControl({
         <Button
           onClick={handleLaunch}
           disabled={!input.trim() || isCreatingMission}
-          className="h-10 px-5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white gap-2 text-sm font-medium shrink-0"
+          className="h-10 w-full px-5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white gap-2 text-sm font-medium shrink-0 sm:w-auto"
         >
           {isCreatingMission ? (
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -236,7 +270,7 @@ export function MissionControl({
           <Button
             onClick={onStopAll}
             variant="destructive"
-            className="h-10 px-5 rounded-2xl gap-2 text-sm font-medium shrink-0"
+            className="h-10 w-full px-5 rounded-2xl gap-2 text-sm font-medium shrink-0 sm:w-auto"
           >
             <Square className="w-4 h-4" />
             Stop All
@@ -246,7 +280,9 @@ export function MissionControl({
           <Button
             onClick={onResetAll}
             variant="outline"
-            className="h-10 px-3 rounded-2xl text-slate-500 dark:text-slate-300 border-slate-200 dark:border-slate-800/80 shrink-0"
+            aria-label="Clear current mission"
+            title="Clear current mission"
+            className="h-10 w-full px-3 rounded-2xl text-slate-500 dark:text-slate-300 border-slate-200 dark:border-slate-800/80 shrink-0 sm:w-auto"
           >
             <RotateCcw className="w-4 h-4" />
           </Button>

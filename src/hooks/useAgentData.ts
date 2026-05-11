@@ -9,11 +9,34 @@ export const AGENTS = [
 export interface AgentData {
   _id: string;
   agent_id: number;
-  status: "idle" | "searching" | "found_trend" | "weak" | "reassigning" | "exploiting" | "stopped" | "error";
+  status: AgentStatus;
   current_url: string;
   profile_id: string;
   energy: number;
+  objective?: string;
+  statusDetail?: string;
+  retryCount?: number;
+  confidence?: number;
+  lastHeartbeat?: number | null;
 }
+
+export type AgentStatus =
+  | "idle"
+  | "queued"
+  | "searching"
+  | "extracting"
+  | "validating"
+  | "synthesizing"
+  | "found_trend"
+  | "weak"
+  | "reassigning"
+  | "exploiting"
+  | "blocked"
+  | "done"
+  | "failed"
+  | "stale"
+  | "stopped"
+  | "error";
 
 export interface AgentSignal {
   _id: string;
@@ -49,6 +72,9 @@ export interface DiscoveredContent {
   _id: string;
   video_url: string;
   thumbnail: string;
+  platform?: string;
+  title?: string;
+  summary?: string;
   found_by_agent_id: number;
   keywords?: string;
   likes?: number;
@@ -105,6 +131,18 @@ export const PLATFORM_COLORS: Record<string, string> = {
 
 export function getAgentById(agentId: number) {
   return AGENTS.find((agent) => agent.agentId === agentId) ?? AGENTS[0];
+}
+
+export function isAgentActiveStatus(status: AgentStatus) {
+  return ["queued", "searching", "extracting", "validating", "synthesizing", "found_trend", "reassigning", "exploiting"].includes(status);
+}
+
+export function isAgentIssueStatus(status: AgentStatus) {
+  return ["weak", "blocked", "failed", "stale", "error"].includes(status);
+}
+
+export function isAgentCompleteStatus(status: AgentStatus) {
+  return status === "done" || status === "stopped";
 }
 
 export function getLogIcon(type: string) {

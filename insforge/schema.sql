@@ -94,6 +94,18 @@ create table if not exists public.recommendation_feedback (
   primary key (user_id, recommendation_id)
 );
 
+create table if not exists public.recommendation_decisions (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  recommendation_id text not null,
+  status text not null check (status in ('reviewed', 'accepted', 'dismissed')),
+  trend_id text not null default '',
+  title text not null default '',
+  recommendation_snapshot jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, recommendation_id)
+);
+
 create table if not exists public.trend_bookmarks (
   user_id uuid not null references auth.users(id) on delete cascade,
   trend_id text not null references public.market_trends(trend_id) on delete cascade,
@@ -111,6 +123,7 @@ create index if not exists market_recommendations_priority_idx on public.market_
 create index if not exists market_sources_trend_idx on public.market_sources (trend_id);
 create index if not exists market_demographics_trend_idx on public.market_demographics (trend_id);
 create index if not exists recommendation_feedback_user_status_idx on public.recommendation_feedback (user_id, status);
+create index if not exists recommendation_decisions_user_status_idx on public.recommendation_decisions (user_id, status);
 create index if not exists trend_bookmarks_user_idx on public.trend_bookmarks (user_id);
 
 alter table public.market_trends enable row level security;
@@ -120,6 +133,7 @@ alter table public.market_sources enable row level security;
 alter table public.market_demographics enable row level security;
 alter table public.user_preferences enable row level security;
 alter table public.recommendation_feedback enable row level security;
+alter table public.recommendation_decisions enable row level security;
 alter table public.trend_bookmarks enable row level security;
 
 drop policy if exists "market_trends_public_read" on public.market_trends;
@@ -215,6 +229,35 @@ for delete
 to authenticated
 using (user_id = (select auth.uid()));
 
+drop policy if exists "recommendation_decisions_select_own" on public.recommendation_decisions;
+create policy "recommendation_decisions_select_own"
+on public.recommendation_decisions
+for select
+to authenticated
+using (user_id = (select auth.uid()));
+
+drop policy if exists "recommendation_decisions_insert_own" on public.recommendation_decisions;
+create policy "recommendation_decisions_insert_own"
+on public.recommendation_decisions
+for insert
+to authenticated
+with check (user_id = (select auth.uid()));
+
+drop policy if exists "recommendation_decisions_update_own" on public.recommendation_decisions;
+create policy "recommendation_decisions_update_own"
+on public.recommendation_decisions
+for update
+to authenticated
+using (user_id = (select auth.uid()))
+with check (user_id = (select auth.uid()));
+
+drop policy if exists "recommendation_decisions_delete_own" on public.recommendation_decisions;
+create policy "recommendation_decisions_delete_own"
+on public.recommendation_decisions
+for delete
+to authenticated
+using (user_id = (select auth.uid()));
+
 drop policy if exists "trend_bookmarks_select_own" on public.trend_bookmarks;
 create policy "trend_bookmarks_select_own"
 on public.trend_bookmarks
@@ -245,5 +288,11 @@ execute function public.set_updated_at();
 drop trigger if exists recommendation_feedback_set_updated_at on public.recommendation_feedback;
 create trigger recommendation_feedback_set_updated_at
 before update on public.recommendation_feedback
+for each row
+execute function public.set_updated_at();
+
+drop trigger if exists recommendation_decisions_set_updated_at on public.recommendation_decisions;
+create trigger recommendation_decisions_set_updated_at
+before update on public.recommendation_decisions
 for each row
 execute function public.set_updated_at();

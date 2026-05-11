@@ -1,5 +1,9 @@
 import { createClient } from "@insforge/sdk";
 import { loadProjectEnv } from "./env.mjs";
+import {
+  getLinkedInsforgeAdminKey,
+  getLinkedInsforgeBaseUrl,
+} from "./linked-insforge.mjs";
 
 loadProjectEnv();
 
@@ -11,10 +15,14 @@ export function createServerInsforgeClient() {
   const baseUrl =
     process.env.MASTERBUILD_INSFORGE_URL ||
     process.env.VITE_INSFORGE_URL ||
+    getLinkedInsforgeBaseUrl() ||
     "";
 
   const anonKey = process.env.VITE_INSFORGE_ANON_KEY || "";
-  const serviceRoleKey = process.env.INSFORGE_SERVICE_ROLE_KEY || "";
+  const serviceRoleKey =
+    process.env.INSFORGE_SERVICE_ROLE_KEY ||
+    getLinkedInsforgeAdminKey(baseUrl) ||
+    "";
 
   if (!baseUrl) {
     throw new Error(

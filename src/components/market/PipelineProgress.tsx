@@ -11,6 +11,8 @@ const PIPELINE_STAGES = [
   { id: "audio", label: "Briefing Generation", icon: Volume2, description: "Producing executive intelligence briefing" },
 ] as const;
 
+const STAGE_DELAYS_MS = [900, 1100, 1000, 1200, 950, 1050, 900] as const;
+
 interface PipelineProgressProps {
   /** If true, auto-plays the animation once */
   autoPlay?: boolean;
@@ -37,7 +39,7 @@ export function PipelineProgress({ autoPlay = true, onComplete, compact = false 
     const advanceStage = () => {
       if (idx < PIPELINE_STAGES.length) {
         setActiveStage(PIPELINE_STAGES[idx].id);
-        const delay = 800 + Math.random() * 1200; // 0.8s – 2s per stage
+        const delay = STAGE_DELAYS_MS[idx] ?? 1000;
         setTimeout(() => {
           setCompletedStages(prev => [...prev, PIPELINE_STAGES[idx].id]);
           idx++;
@@ -127,7 +129,6 @@ export function PipelineProgress({ autoPlay = true, onComplete, compact = false 
         {PIPELINE_STAGES.map((stage, idx) => {
           const isCompleted = completedStages.includes(stage.id);
           const isActive = activeStage === stage.id;
-          const isPending = !isCompleted && !isActive;
           const Icon = stage.icon;
 
           return (

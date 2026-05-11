@@ -1,15 +1,26 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { useOsdkObjects, marketInsight, marketRecommendation, marketTrend } from "@/lib/osdk-shims";
-import { Play, Pause, Volume2, SkipBack, SkipForward, Clock, Sparkles, FileText, AlertTriangle } from "lucide-react";
+import { Play, Pause, Volume2, SkipBack, SkipForward, Clock, Sparkles, FileText, AlertTriangle, ExternalLink, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { LoadingState } from "@/components/market/LoadingState";
 import { usePreferences } from "@/hooks/usePreferences";
 import { getIndustryLabel } from "@/lib/industry";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { BriefingTrustLedger } from "@/components/market/BriefingTrustLedger";
+import { AiOutputAuditTrail } from "@/components/market/AiOutputAuditTrail";
 import { inferWithOpenAI } from "@/lib/openai";
 import { generateAudio } from "@/lib/elevenlabs";
 import { useMasterBuildDashboard } from "@/hooks/useMasterBuildDashboard";
+import { buildBriefingTrustLedger, evidenceBackedOnly } from "@/lib/briefing-trust";
+import { buildAiOutputAuditTrail } from "@/lib/ai-output-audit";
+import {
+  formatEvidenceMetric,
+  formatEvidencePlatform,
+  getEvidenceTitle,
+  normalizeEvidenceSources,
+  type EvidenceSource,
+} from "@/lib/evidence";
 
 function takeSentences(text: string | undefined, maxSentences = 2): string {
   if (!text) return "";
@@ -156,6 +167,7 @@ export function Briefing() {
   const [liveModel, setLiveModel] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [strictEvidenceMode, setStrictEvidenceMode] = useState(false);
 
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
@@ -197,19 +209,75 @@ export function Briefing() {
     return recommendations.filter((recommendation) => recommendation.industry === preferences.industry || recommendation.industry === "All");
   }, [recommendations, preferences.industry]);
 
+  const briefingTrends = useMemo(() => {
+    if (!strictEvidenceMode) return filteredTrends;
+    return evidenceBackedOnly(filteredTrends as Array<typeof filteredTrends[number] & { sources?: EvidenceSource[] }>);
+  }, [filteredTrends, strictEvidenceMode]);
+
+  const briefingRecommendations = useMemo(() => {
+    if (!strictEvidenceMode) return filteredRecommendations;
+    return evidenceBackedOnly(filteredRecommendations as Array<typeof filteredRecommendations[number] & { sourceEvidence?: EvidenceSource[] }>);
+  }, [filteredRecommendations, strictEvidenceMode]);
+
+  const briefingEvidenceSources = useMemo(() => {
+    const byUrl = new Map<string, EvidenceSource>();
+    const addSources = (sources: unknown) => {
+      for (const source of normalizeEvidenceSources(sources)) {
+        if (!byUrl.has(source.url)) byUrl.set(source.url, source);
+      }
+    };
+
+    briefingTrends.forEach((trend) => addSources((trend as { sources?: unknown[] }).sources));
+    briefingRecommendations.forEach((recommendation) => addSources((recommendation as { sourceEvidence?: unknown[] }).sourceEvidence));
+    return Array.from(byUrl.values()).slice(0, 8);
+  }, [briefingRecommendations, briefingTrends]);
+
+  const briefingTrustLedger = useMemo(() => buildBriefingTrustLedger({
+    trends: briefingTrends.map((trend) => ({
+      title: trend.title,
+      sources: normalizeEvidenceSources((trend as { sources?: unknown[] }).sources),
+    })),
+    recommendations: briefingRecommendations.map((recommendation) => ({
+      title: recommendation.title,
+      sourceEvidence: normalizeEvidenceSources((recommendation as { sourceEvidence?: unknown[] }).sourceEvidence),
+    })),
+    evidenceSources: briefingEvidenceSources,
+    isStrictMode: strictEvidenceMode,
+    liveModel,
+  }), [briefingEvidenceSources, briefingRecommendations, briefingTrends, liveModel, strictEvidenceMode]);
+
   const draftScript = useMemo(() => {
-    if (!filteredTrends.length && !filteredInsights.length && !filteredRecommendations.length && !latestPlan) return "";
+    if (!briefingTrends.length && !filteredInsights.length && !briefingRecommendations.length && !latestPlan) return "";
     return generateBriefingScript(
-      filteredTrends,
+      briefingTrends,
       filteredInsights,
-      filteredRecommendations,
+      briefingRecommendations,
       latestPlan,
       preferences.industry,
       latestMission?.prompt ?? "",
     );
-  }, [filteredInsights, filteredRecommendations, filteredTrends, latestMission?.prompt, latestPlan, preferences.industry]);
+  }, [briefingRecommendations, briefingTrends, filteredInsights, latestMission?.prompt, latestPlan, preferences.industry]);
 
   const displayedScript = liveScript ?? draftScript;
+
+  const briefingAuditTrail = useMemo(() => buildAiOutputAuditTrail({
+    artifact: "briefing",
+    mode: liveScript ? "live-model" : strictEvidenceMode ? "strict-local-draft" : "local-draft",
+    model: liveModel,
+    missionPrompt: latestMission?.prompt,
+    outputText: displayedScript,
+    sources: briefingEvidenceSources,
+    inputCounts: {
+      trends: briefingTrends.length,
+      recommendations: briefingRecommendations.length,
+      insights: filteredInsights.length,
+      sections: latestPlan ? 5 : 3,
+    },
+    warnings: [
+      !latestPlan ? "No report synthesis attached" : "",
+      strictEvidenceMode ? "Strict mode filters unsupported briefing inputs" : "",
+    ].filter(Boolean),
+  }), [briefingEvidenceSources, briefingRecommendations.length, briefingTrends.length, displayedScript, filteredInsights.length, latestMission?.prompt, latestPlan, liveModel, liveScript, strictEvidenceMode]);
 
   const paragraphs = useMemo(() => displayedScript.split("\n\n").filter(Boolean), [displayedScript]);
 
@@ -226,6 +294,14 @@ export function Briefing() {
     }
   }, []);
 
+  const toggleStrictEvidenceMode = useCallback(() => {
+    setStrictEvidenceMode((current) => !current);
+    setLiveScript(null);
+    setLiveModel(null);
+    setGenerationError(null);
+    resetPlayback();
+  }, [resetPlayback]);
+
   const generateLiveBriefing = useCallback(async () => {
     setIsGenerating(true);
     setGenerationError(null);
@@ -236,9 +312,9 @@ export function Briefing() {
         systemPrompt:
           "You are MarketPulse, an executive market intelligence analyst. Produce concise, high-signal briefings for business operators.",
         userPrompt: buildOpenAIPrompt(
-          filteredTrends,
+          briefingTrends,
           filteredInsights,
-          filteredRecommendations,
+          briefingRecommendations,
           latestPlan,
           preferences.industry,
           latestMission?.prompt ?? "",
@@ -253,7 +329,7 @@ export function Briefing() {
     } finally {
       setIsGenerating(false);
     }
-  }, [filteredInsights, filteredRecommendations, filteredTrends, latestMission?.prompt, latestPlan, preferences.industry, resetPlayback]);
+  }, [briefingRecommendations, briefingTrends, filteredInsights, latestMission?.prompt, latestPlan, preferences.industry, resetPlayback]);
 
   const useDraftBriefing = useCallback(() => {
     setLiveScript(null);
@@ -261,30 +337,6 @@ export function Briefing() {
     setGenerationError(null);
     resetPlayback();
   }, [resetPlayback]);
-
-  // Pre-fetch audio as soon as script is ready
-  useEffect(() => {
-    if (displayedScript.trim() && !audioUrl && !isGeneratingAudio) {
-      // Debounce pre-fetch slightly to avoid hitting API during rapid filter changes
-      const timer = setTimeout(() => {
-        void (async () => {
-          setIsGeneratingAudio(true);
-          setGenerationError(null);
-          try {
-            const url = await generateAudio(displayedScript);
-            setAudioUrl(url);
-          } catch (error) {
-            console.error("Audio pre-fetch failed", error);
-            // Don't show blocking error for background pre-fetch,
-            // only if user actually requested play (handled in togglePlay)
-          } finally {
-            setIsGeneratingAudio(false);
-          }
-        })();
-      }, 800);
-      return () => clearTimeout(timer);
-    }
-  }, [displayedScript, audioUrl, isGeneratingAudio]);
 
   // Handle Play/Pause
   const togglePlay = useCallback(async () => {
@@ -391,6 +443,14 @@ export function Briefing() {
             </div>
 
             <div className="flex flex-wrap gap-2">
+              <Button
+                variant={strictEvidenceMode ? "default" : "outline"}
+                onClick={toggleStrictEvidenceMode}
+                disabled={draftScript.length === 0}
+              >
+                <SlidersHorizontal className="w-4 h-4 mr-1" />
+                {strictEvidenceMode ? "Using stricter evidence" : "Regenerate using stricter evidence"}
+              </Button>
               <Button onClick={generateLiveBriefing} disabled={isGenerating || displayedScript.length === 0}>
                 {isGenerating ? "Generating with OpenAI..." : "Generate with OpenAI"}
               </Button>
@@ -412,8 +472,16 @@ export function Briefing() {
         ) : null}
 
         <div className="text-xs text-slate-500">
-          Source: {liveScript ? `Live OpenAI response${liveModel ? ` (${liveModel})` : ""}` : "Local draft from trends, report synthesis, and recommendations"}
+          Source: {liveScript
+            ? `Live OpenAI response${liveModel ? ` (${liveModel})` : ""}`
+            : strictEvidenceMode
+              ? "Strict evidence local draft from cited trends and recommendations"
+              : "Local draft from trends, report synthesis, and recommendations"}
         </div>
+
+        <BriefingTrustLedger ledger={briefingTrustLedger} />
+
+        <AiOutputAuditTrail audit={briefingAuditTrail} />
 
         {/* Audio Player Card */}
         <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
@@ -574,7 +642,7 @@ export function Briefing() {
             Trends Covered in This Briefing
           </h2>
           <div className="flex flex-wrap gap-2">
-            {filteredTrends
+            {briefingTrends
               .filter(t => t.status === "growing" || t.status === "emerging")
               .sort((a, b) => (b.trendScore ?? 0) - (a.trendScore ?? 0))
               .slice(0, 5)
@@ -585,10 +653,74 @@ export function Briefing() {
                 >
                   {t.title} — Score {t.trendScore?.toFixed(0)}
                 </span>
-              ))}
+            ))}
           </div>
+        </div>
+
+        <div className="border border-slate-200 glass rounded-xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+          <h2 className="text-[10px] font-medium uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2">
+            <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+            Evidence Covered in This Briefing
+          </h2>
+          {briefingEvidenceSources.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {briefingEvidenceSources.map((source, index) => (
+                <a
+                  key={`${source.url}-${index}`}
+                  href={source.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="group rounded-lg border border-slate-100 bg-white/60 p-4 transition-colors hover:border-blue-200 hover:bg-blue-50/50"
+                >
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                      {formatEvidencePlatform(source.platform)}
+                    </span>
+                    <ExternalLink className="h-3.5 w-3.5 text-slate-300 group-hover:text-blue-500" />
+                  </div>
+                  <h3 className="line-clamp-2 text-xs font-semibold text-slate-800">
+                    {getEvidenceTitle(source, `Evidence source ${index + 1}`)}
+                  </h3>
+                  {source.summary ? (
+                    <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500">{source.summary}</p>
+                  ) : null}
+                  <BriefingEvidenceMetrics source={source} />
+                </a>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <div className="flex items-center gap-2 font-semibold">
+                <AlertTriangle className="h-4 w-4" />
+                No source evidence is attached to this briefing yet.
+              </div>
+              <p className="mt-1 text-xs leading-relaxed">
+                Launch a research mission with discoveries before using the audio briefing as a cited artifact.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </ScrollArea>
+  );
+}
+
+function BriefingEvidenceMetrics({ source }: { source: EvidenceSource }) {
+  const metrics = [
+    ["Views", formatEvidenceMetric(source.views)],
+    ["Likes", formatEvidenceMetric(source.likes)],
+    ["Comments", formatEvidenceMetric(source.comments)],
+  ].filter((entry): entry is [string, string] => Boolean(entry[1]));
+
+  if (metrics.length === 0) return null;
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-slate-400">
+      {metrics.map(([label, value]) => (
+        <span key={label}>
+          {label}: <span className="font-semibold text-slate-500">{value}</span>
+        </span>
+      ))}
+    </div>
   );
 }

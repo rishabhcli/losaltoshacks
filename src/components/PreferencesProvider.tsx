@@ -64,7 +64,7 @@ function savePreferences(email: string | null, prefs: UserPreferences) {
 }
 
 export function PreferencesProvider({ children }: { children: ReactNode }) {
-  const cachedUser = loadCachedUser();
+  const [cachedUser] = useState<CurrentUser | null>(() => loadCachedUser());
   const [isAuthReady, setIsAuthReady] = useState(cachedUser !== null);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(cachedUser);
   const [preferences, setPreferences] = useState<UserPreferences>(
@@ -109,7 +109,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [cachedUser]);
 
   useEffect(() => {
     if (!isAuthReady) return;

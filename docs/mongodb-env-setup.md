@@ -71,7 +71,7 @@ Keep this only if InsForge is still handling auth or other services.
 Current project value:
 
 ```env
-VITE_INSFORGE_URL=https://mdd528ty.us-west.insforge.app
+VITE_INSFORGE_URL=https://r5em4tn7.us-west.insforge.app
 ```
 
 ### `VITE_INSFORGE_ANON_KEY`

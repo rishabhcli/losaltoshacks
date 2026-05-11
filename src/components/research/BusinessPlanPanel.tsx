@@ -6,7 +6,15 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { AGENTS, PLATFORM_COLORS, type AgentData, type BusinessPlan, type DiscoveredContent } from "@/hooks/useAgentData";
+import {
+  AGENTS,
+  PLATFORM_COLORS,
+  isAgentActiveStatus,
+  isAgentIssueStatus,
+  type AgentData,
+  type BusinessPlan,
+  type DiscoveredContent,
+} from "@/hooks/useAgentData";
 import type { FinalOptionsPayload } from "@/hooks/useMasterBuildDashboard";
 import { buildDetailedLovablePromptFromReport, buildLovableLaunchUrl } from "@/lib/lovableHandoff";
 
@@ -98,14 +106,11 @@ function renderInline(text: string): React.ReactNode {
 }
 
 function agentStatusMeta(status: AgentData["status"]) {
-  switch (status) {
-    case "searching": case "found_trend": case "exploiting": case "reassigning":
-      return { dotClass: "bg-green-500", glow: true };
-    case "weak": return { dotClass: "bg-yellow-500", glow: false };
-    case "error": return { dotClass: "bg-red-500", glow: false };
-    case "stopped": return { dotClass: "bg-slate-400", glow: false };
-    default: return { dotClass: "bg-slate-300", glow: false };
-  }
+  if (isAgentActiveStatus(status)) return { dotClass: "bg-green-500", glow: true };
+  if (isAgentIssueStatus(status)) return { dotClass: status === "failed" || status === "error" ? "bg-red-500" : "bg-yellow-500", glow: false };
+  if (status === "done") return { dotClass: "bg-blue-500", glow: false };
+  if (status === "stopped") return { dotClass: "bg-slate-400", glow: false };
+  return { dotClass: "bg-slate-300", glow: false };
 }
 
 export function BusinessPlanPanel({ plans, agents, discoveries, missionPrompt, isRunning, finalOptions, onStopAll }: Props) {

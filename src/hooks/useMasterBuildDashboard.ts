@@ -1,5 +1,9 @@
 import { startTransition, useCallback, useEffect, useRef, useState } from "react";
 import { insforge } from "@/lib/insforge";
+import {
+  hasMasterBuildDashboardShape,
+  type MasterBuildDashboardSnapshot,
+} from "@/lib/masterbuild-contract";
 import { invalidateLiveResearchCache } from "@/lib/osdk-shims";
 import type {
   AgentData,
@@ -22,6 +26,11 @@ export interface FinalOptionEvidence {
   keywords: string;
   summary: string;
   url: string;
+  likes?: number;
+  views?: number;
+  comments?: number;
+  fetchedAt?: string | null;
+  createdAt?: string | null;
 }
 
 export interface FinalOption {
@@ -149,19 +158,7 @@ async function callMissionControlRoute<T>(path: string, body: Record<string, unk
   return payload as T;
 }
 
-interface DashboardSnapshotPayload {
-  mission: Record<string, unknown> | null;
-  recentMissions?: unknown;
-  agents: unknown;
-  discoveries: unknown;
-  logs: unknown;
-  signals: unknown;
-  thoughts: unknown;
-  memory: unknown;
-  businessPlans: unknown;
-}
-
-async function fetchDashboardSnapshot() {
+async function fetchDashboardSnapshot(): Promise<MasterBuildDashboardSnapshot> {
   const response = await fetch(`${API_BASE}/api/dashboard`, {
     method: "GET",
     cache: "no-store",
@@ -178,7 +175,11 @@ async function fetchDashboardSnapshot() {
     throw new Error(error || `Request failed with status ${response.status}.`);
   }
 
-  return payload as DashboardSnapshotPayload;
+  if (!hasMasterBuildDashboardShape(payload)) {
+    throw new Error("Dashboard payload did not match the MarketPulse mission contract.");
+  }
+
+  return payload;
 }
 
 async function ensureRealtimeReady() {
@@ -214,11 +215,28 @@ function toEpochMilliseconds(value: string | null | undefined) {
   return new Date(value).getTime();
 }
 
+function toOptionalNumber(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+}
+
 function normalizeEvidenceList(value: unknown): FinalOptionEvidence[] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => {
     const r = item as Record<string, unknown>;
-    return { id: String(r.id ?? ""), platform: String(r.platform ?? ""), title: String(r.title ?? ""), keywords: String(r.keywords ?? ""), summary: String(r.summary ?? ""), url: String(r.url ?? "") };
+    return {
+      id: String(r.id ?? ""),
+      platform: String(r.platform ?? ""),
+      title: String(r.title ?? ""),
+      keywords: String(r.keywords ?? ""),
+      summary: String(r.summary ?? ""),
+      url: String(r.url ?? r.source_url ?? ""),
+      likes: toOptionalNumber(r.likes),
+      views: toOptionalNumber(r.views),
+      comments: toOptionalNumber(r.comments),
+      fetchedAt: r.fetchedAt != null ? String(r.fetchedAt) : r.fetched_at != null ? String(r.fetched_at) : null,
+      createdAt: r.createdAt != null ? String(r.createdAt) : r.created_at != null ? String(r.created_at) : null,
+    };
   }).filter((i) => i.url);
 }
 
@@ -290,12 +308,87 @@ function normalizeMission(row: Record<string, unknown> | null | undefined): Miss
 
 function normalizeAgents(rows: unknown): AgentData[] {
   if (!Array.isArray(rows)) return [];
-  return rows.map((row) => { const r = row as Record<string, unknown>; return { _id: String(r.id), agent_id: Number(r.agent_id ?? 0), status: String(r.status ?? "idle") as AgentData["status"], current_url: String(r.current_url ?? ""), profile_id: String(r.profile_path ?? ""), energy: Number(r.energy ?? 100) }; });
+  return rows.map((row) => {
+    const r = row as Record<string, unknown>;
+    return {
+      _id: String(r.id),
+      agent_id: Number(r.agent_id ?? 0),
+      status: normalizeAgentStatus(r.status),
+      current_url: String(r.current_url ?? ""),
+      profile_id: String(r.profile_path ?? ""),
+      energy: Number(r.energy ?? 100),
+      objective: String(r.objective ?? r.assignment ?? r.role ?? "").trim() || undefined,
+      statusDetail: String(r.status_detail ?? r.failure_reason ?? r.detail ?? "").trim() || undefined,
+      retryCount: Number.isFinite(Number(r.retry_count)) ? Number(r.retry_count) : undefined,
+      confidence: Number.isFinite(Number(r.confidence)) ? Number(r.confidence) : undefined,
+      lastHeartbeat: r.last_heartbeat != null ? toEpochSeconds(r.last_heartbeat as string | null) : null,
+    };
+  });
+}
+
+function normalizeAgentStatus(value: unknown): AgentData["status"] {
+  const status = String(value ?? "idle").trim().toLowerCase();
+  if (status === "complete" || status === "completed") return "done";
+  if (status === "failure") return "failed";
+  if (status === "stalled") return "stale";
+  const allowed: AgentData["status"][] = [
+    "idle",
+    "queued",
+    "searching",
+    "extracting",
+    "validating",
+    "synthesizing",
+    "found_trend",
+    "weak",
+    "reassigning",
+    "exploiting",
+    "blocked",
+    "done",
+    "failed",
+    "stale",
+    "stopped",
+    "error",
+  ];
+  return allowed.includes(status as AgentData["status"]) ? status as AgentData["status"] : "idle";
+}
+
+function inferPlatformFromAgentId(agentId: number) {
+  switch (agentId) {
+    case 1:
+      return "youtube";
+    case 2:
+      return "x";
+    case 3:
+      return "reddit";
+    case 4:
+      return "substack";
+    case 5:
+      return "market_research";
+    default:
+      return "unknown";
+  }
 }
 
 function normalizeDiscoveries(rows: unknown): DiscoveredContent[] {
   if (!Array.isArray(rows)) return [];
-  return rows.map((row) => { const r = row as Record<string, unknown>; return { _id: String(r.id), video_url: String(r.source_url ?? ""), thumbnail: String(r.thumbnail_url ?? ""), found_by_agent_id: Number(r.agent_id ?? 0), keywords: String(r.keywords ?? ""), likes: Number(r.likes ?? 0), views: Number(r.views ?? 0), comments: Number(r.comments ?? 0), _creationTime: toEpochSeconds(r.created_at as string | null) }; });
+  return rows.map((row) => {
+    const r = row as Record<string, unknown>;
+    const agentId = Number(r.agent_id ?? 0);
+    return {
+      _id: String(r.id),
+      video_url: String(r.source_url ?? ""),
+      thumbnail: String(r.thumbnail_url ?? ""),
+      platform: String(r.platform ?? inferPlatformFromAgentId(agentId)),
+      title: String(r.title ?? ""),
+      summary: String(r.summary ?? ""),
+      found_by_agent_id: agentId,
+      keywords: String(r.keywords ?? ""),
+      likes: Number(r.likes ?? 0),
+      views: Number(r.views ?? 0),
+      comments: Number(r.comments ?? 0),
+      _creationTime: toEpochSeconds(r.created_at as string | null),
+    };
+  });
 }
 
 function normalizeLogs(rows: unknown): LogEntry[] {
@@ -339,6 +432,7 @@ export function useMasterBuildDashboard() {
   const [businessPlans, setBusinessPlans] = useState<BusinessPlan[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreatingMission, setIsCreatingMission] = useState(false);
+  const [retryingAgentId, setRetryingAgentId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const reloadTokenRef = useRef(0);
   const loadInFlightRef = useRef(false);
@@ -552,9 +646,49 @@ export function useMasterBuildDashboard() {
     }
   }, [latestMission?.id]);
 
+  const retryAgent = useCallback(async (agentId: number) => {
+    if (!Number.isInteger(agentId) || agentId < 1 || agentId > 5) return;
+    setRetryingAgentId(agentId);
+    try {
+      await callMissionControlRoute<{ ok: boolean; agentId?: number; retryCount?: number }>(
+        "/api/agent/retry",
+        { missionId: latestMission?.id ?? null, agentId }
+      );
+      startTransition(() => {
+        setAgents((current) => current.map((agent) => {
+          if (agent.agent_id !== agentId) return agent;
+          return {
+            ...agent,
+            status: "queued",
+            current_url: "",
+            energy: 100,
+            statusDetail: "Retry requested from command UI. Waiting for worker pickup.",
+            retryCount: (agent.retryCount ?? 0) + 1,
+            confidence: undefined,
+            lastHeartbeat: Math.floor(Date.now() / 1000),
+          };
+        }));
+        setLatestMission((current) => current
+          ? {
+              ...current,
+              status: ["completed", "error", "stopped"].includes(current.status) ? "queued" : current.status,
+              stoppedAt: ["completed", "error", "stopped"].includes(current.status) ? null : current.stoppedAt,
+            }
+          : current);
+        setError(null);
+      });
+      invalidateLiveResearchCache();
+      await loadDashboard();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to retry agent.");
+    } finally {
+      setRetryingAgentId(null);
+    }
+  }, [latestMission?.id, loadDashboard]);
+
   return {
     latestMission, missionHistory, agents, discoveries, logs, signals, thoughts, memory, businessPlans,
-    isLoading, isCreatingMission, error,
-    createMission, stopAll, resetAll,
+    isLoading, isCreatingMission, retryingAgentId, error,
+    createMission, stopAll, resetAll, retryAgent,
   };
 }

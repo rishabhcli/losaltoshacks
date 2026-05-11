@@ -24,8 +24,67 @@ from openai import AsyncOpenAI
 import agent_context
 from livestream_tiktok import build_local_browser_session
 
-load_dotenv()
-load_dotenv(".env.local", override=True)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def load_project_env() -> None:
+    """Load the same local env surfaces used by the Node runtime.
+
+    Explicit shell env still wins; the checked-in development env and ignored
+    local env fill in defaults for the Python worker.
+    """
+    for env_file in (".env", ".env.development", ".env.local", ".env.development.local"):
+        path = PROJECT_ROOT / env_file
+        if path.exists():
+            load_dotenv(path, override=False)
+
+
+def normalize_url(value: Any) -> str:
+    return str(value or "").strip().rstrip("/")
+
+
+def read_linked_insforge_project() -> dict[str, Any] | None:
+    config_path = PROJECT_ROOT / ".insforge" / "project.json"
+    if not config_path.exists():
+        return None
+    try:
+        payload = json.loads(config_path.read_text())
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def resolve_insforge_base_url(linked_project: dict[str, Any] | None = None) -> str:
+    return (
+        normalize_url(os.getenv("MASTERBUILD_INSFORGE_URL"))
+        or normalize_url(os.getenv("VITE_INSFORGE_URL"))
+        or normalize_url(os.getenv("NEXT_PUBLIC_INSFORGE_URL"))
+        or normalize_url((linked_project or {}).get("oss_host"))
+    )
+
+
+def resolve_insforge_token(base_url: str, linked_project: dict[str, Any] | None = None) -> str:
+    explicit_token = (
+        os.getenv("MASTERBUILD_INSFORGE_TOKEN")
+        or os.getenv("INSFORGE_SERVICE_ROLE_KEY")
+        or ""
+    ).strip()
+    if explicit_token:
+        return explicit_token
+
+    linked_base_url = normalize_url((linked_project or {}).get("oss_host"))
+    linked_api_key = str((linked_project or {}).get("api_key") or "").strip()
+    if linked_api_key and linked_base_url and normalize_url(base_url) == linked_base_url:
+        return linked_api_key
+
+    return (
+        os.getenv("VITE_INSFORGE_ANON_KEY")
+        or os.getenv("NEXT_PUBLIC_INSFORGE_ANON_KEY")
+        or ""
+    ).strip()
+
+
+load_project_env()
 
 
 @dataclass(frozen=True)
@@ -64,6 +123,32 @@ GENERIC_DISCOVERY_SUMMARIES = {
 }
 BROWSER_USE_CLOUD_TERMINAL_STATUSES: set[str] = {"idle", "stopped", "timed_out", "error"}
 URL_PATTERN = re.compile(r"https?://[^\s<>()\"']+")
+AGENT_LIFECYCLE_FIELDS: set[str] = {"status_detail", "failure_reason", "retry_count", "confidence"}
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+LEGACY_AGENT_STATUS_FALLBACKS: dict[str, str] = {
+    "queued": "idle",
+    "extracting": "searching",
+    "validating": "searching",
+    "synthesizing": "searching",
+    "blocked": "weak",
+    "done": "found_trend",
+    "failed": "error",
+    "stale": "weak",
+}
+
+
+def legacy_agent_update_values(values: dict[str, Any]) -> dict[str, Any]:
+    """Drop lifecycle columns and map newer statuses for older InsForge schemas."""
+    legacy = dict(values)
+    detail = str(legacy.get("status_detail") or legacy.get("failure_reason") or "").strip()
+    for field in AGENT_LIFECYCLE_FIELDS:
+        legacy.pop(field, None)
+    status = legacy.get("status")
+    if isinstance(status, str) and status in LEGACY_AGENT_STATUS_FALLBACKS:
+        legacy["status"] = LEGACY_AGENT_STATUS_FALLBACKS[status]
+    if detail and not str(legacy.get("assignment") or "").strip():
+        legacy["assignment"] = detail[:120]
+    return legacy
 
 
 def is_valid_platform_content_url(platform: str, url: str) -> bool:
@@ -925,12 +1010,19 @@ class BrowserUseCloudClient:
 
 class InsForgeRuntimeClient:
     def __init__(self) -> None:
-        self.base_url = os.getenv("MASTERBUILD_INSFORGE_URL", "").rstrip("/")
+        self.linked_project = read_linked_insforge_project()
+        self.base_url = resolve_insforge_base_url(self.linked_project)
         if not self.base_url:
-            raise RuntimeError("Missing MASTERBUILD_INSFORGE_URL — set it in .env.local")
-        token = os.getenv("MASTERBUILD_INSFORGE_TOKEN") or os.getenv("NEXT_PUBLIC_INSFORGE_ANON_KEY", "")
+            raise RuntimeError(
+                "Missing InsForge URL. Set MASTERBUILD_INSFORGE_URL, VITE_INSFORGE_URL, "
+                "NEXT_PUBLIC_INSFORGE_URL, or link the project with the InsForge CLI."
+            )
+        token = resolve_insforge_token(self.base_url, self.linked_project)
         if not token:
-            raise RuntimeError("Missing MASTERBUILD_INSFORGE_TOKEN or NEXT_PUBLIC_INSFORGE_ANON_KEY")
+            raise RuntimeError(
+                "Missing InsForge token. Set MASTERBUILD_INSFORGE_TOKEN, INSFORGE_SERVICE_ROLE_KEY, "
+                "VITE_INSFORGE_ANON_KEY, NEXT_PUBLIC_INSFORGE_ANON_KEY, or link the project with the InsForge CLI."
+            )
         self.preview_bucket = os.getenv("MASTERBUILD_PREVIEW_BUCKET", "agent-previews")
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
@@ -941,6 +1033,7 @@ class InsForgeRuntimeClient:
             },
         )
         self._rate_limited_until = 0.0
+        self._agent_lifecycle_schema_supported = True
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -948,6 +1041,18 @@ class InsForgeRuntimeClient:
     @staticmethod
     def _is_rate_limited_error(error: Exception) -> bool:
         return isinstance(error, httpx.HTTPStatusError) and error.response is not None and error.response.status_code == 429
+
+    @staticmethod
+    def _is_agent_lifecycle_schema_error(error: Exception) -> bool:
+        if not isinstance(error, httpx.HTTPStatusError) or error.response is None:
+            return False
+        text = error.response.text.lower()
+        return (
+            any(field in text for field in AGENT_LIFECYCLE_FIELDS)
+            or "agents_status_check" in text
+            or "violates check constraint" in text
+            or "schema cache" in text
+        )
 
     def _rate_limit_error(self, method: str, path: str) -> httpx.HTTPStatusError:
         request = self._client.build_request(method, path)
@@ -1148,21 +1253,42 @@ class InsForgeRuntimeClient:
         await self.update_records("missions", filters={"id": f"eq.{mission_id}"}, values=values)
 
     async def update_agent(self, agent_id: int, *, mission_id: str | None = None, **values: Any) -> None:
-        values.setdefault("updated_at", utc_now())
+        now = utc_now()
+        values.setdefault("updated_at", now)
+        values.setdefault("last_heartbeat", now)
         filters = {"agent_id": f"eq.{agent_id}"}
         if mission_id:
             filters["mission_id"] = f"eq.{mission_id}"
+        payload = values if self._agent_lifecycle_schema_supported else legacy_agent_update_values(values)
         try:
             await self.update_records(
                 "agents",
                 filters=filters,
-                values=values,
+                values=payload,
                 retry_on_429=False,
             )
         except Exception as error:
             if self._is_rate_limited_error(error):
                 print(f"[insforge] skipped agent {agent_id} update due to rate limit")
                 return
+            if self._is_agent_lifecycle_schema_error(error):
+                self._agent_lifecycle_schema_supported = False
+                legacy_values = legacy_agent_update_values(values)
+                if legacy_values != payload:
+                    try:
+                        await self.update_records(
+                            "agents",
+                            filters=filters,
+                            values=legacy_values,
+                            retry_on_429=False,
+                        )
+                        print("[insforge] agent lifecycle columns unavailable; using legacy agent updates")
+                        return
+                    except Exception as retry_error:
+                        if self._is_rate_limited_error(retry_error):
+                            print(f"[insforge] skipped agent {agent_id} update due to rate limit")
+                            return
+                        raise retry_error
             raise
 
     async def append_log(self, mission_id: str, *, agent_id: int | None, log_type: str, message: str, metadata: dict[str, Any] | None = None) -> None:
@@ -1465,8 +1591,9 @@ class MasterBuildAI:
         )
         # OpenAI fallback for when MiniMax is unavailable
         self._openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        self._openai_base_url = os.getenv("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL).rstrip("/")
         self._openai_fallback = (
-            AsyncOpenAI(api_key=self._openai_api_key)
+            AsyncOpenAI(api_key=self._openai_api_key, base_url=self._openai_base_url)
             if self._openai_api_key
             else None
         )
@@ -2098,6 +2225,11 @@ class MasterBuildOrchestrator:
         self.stop_context: dict[str, Any] | None = None
         # OpenAI config for browser-use navigation on action-heavy platforms
         self._openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        self._openai_base_url = (
+            os.getenv("OPENAI_BROWSER_BASE_URL")
+            or os.getenv("OPENAI_BASE_URL")
+            or DEFAULT_OPENAI_BASE_URL
+        ).rstrip("/")
         self._openai_browser_model = os.getenv("OPENAI_BROWSER_MODEL", "gpt-4o")
         self._openai_mini_model = "gpt-4o-mini"
         self._openai_available = bool(self._openai_api_key)
@@ -2159,7 +2291,7 @@ class MasterBuildOrchestrator:
         return _ChatOpenAI(
             model=self._openai_browser_model,
             api_key=self._openai_api_key,
-            base_url="https://api.openai.com/v1",
+            base_url=self._openai_base_url,
             temperature=0.2,
             max_completion_tokens=4096,
         )
@@ -2170,7 +2302,7 @@ class MasterBuildOrchestrator:
         return _ChatOpenAI(
             model=model,
             api_key=self._openai_api_key,
-            base_url="https://api.openai.com/v1",
+            base_url=self._openai_base_url,
             temperature=0.2,
             max_completion_tokens=4096,
         )
@@ -2224,7 +2356,7 @@ class MasterBuildOrchestrator:
 
         if self._openai_available:
             try:
-                test_client = AsyncOpenAI(api_key=self._openai_api_key)
+                test_client = AsyncOpenAI(api_key=self._openai_api_key, base_url=self._openai_base_url)
                 test_resp = await test_client.chat.completions.create(
                     model=self._openai_browser_model,
                     messages=[{"role": "user", "content": "Reply OK."}],
@@ -2290,7 +2422,31 @@ class MasterBuildOrchestrator:
         llm_ok = await self.verify_llm()
         if not llm_ok:
             await self.client.update_mission(mission_id, status="error", stopped_at=utc_now())
-            await self.client.append_log(mission_id, agent_id=None, log_type="error", message="❌ MiniMax key is invalid or expired. Set a valid MINIMAX_API_KEY in .env.local and restart.", metadata={})
+            failure_message = (
+                "Live LLM credentials are missing or invalid. Set OPENAI_API_KEY for live OpenAI "
+                "inference, or MINIMAX_API_KEY to let the worker use the MiniMax fallback."
+            )
+            for spec in AGENT_SPECS:
+                await self.client.update_agent(
+                    spec.agent_id,
+                    mission_id=mission_id,
+                    status="blocked",
+                    status_detail=failure_message,
+                    failure_reason="Missing OPENAI_API_KEY or MINIMAX_API_KEY.",
+                    confidence=0,
+                    retry_count=0,
+                    energy=0,
+                )
+            await self.client.append_log(
+                mission_id,
+                agent_id=None,
+                log_type="error",
+                message=f"❌ {failure_message}",
+                metadata={
+                    "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
+                    "minimax_configured": bool(os.getenv("MINIMAX_API_KEY", "").strip()),
+                },
+            )
             return
 
         await self.client.update_mission(
@@ -2602,6 +2758,34 @@ class MasterBuildOrchestrator:
                             log_type="status",
                             message="Stop command received.",
                             metadata={},
+                        )
+                elif command_name == "retry_agent":
+                    payload = command.get("payload") if isinstance(command.get("payload"), dict) else {}
+                    try:
+                        agent_id = int(payload.get("agentId", 0))
+                    except (TypeError, ValueError):
+                        agent_id = 0
+                    spec = next((item for item in AGENT_SPECS if item.agent_id == agent_id), None)
+                    if spec is not None:
+                        await self.client.update_agent(
+                            spec.agent_id,
+                            mission_id=mission_id,
+                            status="queued",
+                            current_url="",
+                            assignment=f"Retry requested for {spec.platform}.",
+                            energy=100,
+                            status_detail="Retry command received. The worker will pick this channel up on the next mission cycle.",
+                            failure_reason="",
+                            retry_count=1,
+                            confidence=None,
+                            last_heartbeat=utc_now(),
+                        )
+                        await self.client.append_log(
+                            mission_id,
+                            agent_id=spec.agent_id,
+                            log_type="status",
+                            message=f"Retry command received for {spec.name}.",
+                            metadata={"source": payload.get("source", "ui"), "command": "retry_agent"},
                         )
                 await self.client.mark_command_handled(str(command["id"]))
             await asyncio.sleep(self.control_poll_seconds)
@@ -3103,10 +3287,18 @@ class MasterBuildOrchestrator:
         await self.client.update_agent(
             spec.agent_id,
             mission_id=mission_id,
-            status="found_trend" if is_final else "searching",
+            status="done" if is_final else "synthesizing",
             current_url="",
             assignment=summary[:120],
             energy=90 if is_final else 75,
+            status_detail=(
+                f"Synthesized {len(payload['options'])} final implementation options."
+                if is_final
+                else f"Synthesizing {len(discoveries)} discoveries into market-backed options."
+            ),
+            failure_reason="",
+            retry_count=0,
+            confidence=0.85 if payload["coverage"]["readyForLovable"] else 0.62,
             last_heartbeat=utc_now(),
         )
         await self.client.append_log(
@@ -3141,6 +3333,7 @@ class MasterBuildOrchestrator:
         mission_prompt: str,
     ) -> None:
         last_signature = ""
+        agent_failed = False
         try:
             await self.preview_manager.publish(
                 spec.agent_id,
@@ -3153,10 +3346,14 @@ class MasterBuildOrchestrator:
             await self.client.update_agent(
                 spec.agent_id,
                 mission_id=mission_id,
-                status="searching",
+                status="queued",
                 current_url="",
                 assignment="Monitoring discoveries",
                 energy=100,
+                status_detail="Waiting for source agents to produce validated discoveries.",
+                failure_reason="",
+                retry_count=0,
+                confidence=None,
                 last_heartbeat=utc_now(),
             )
             await self.client.append_log(
@@ -3196,21 +3393,33 @@ class MasterBuildOrchestrator:
                     await self.client.update_agent(
                         spec.agent_id,
                         mission_id=mission_id,
-                        status="searching",
+                        status="synthesizing",
                         current_url="",
                         assignment="Waiting for source discoveries",
                         energy=100,
+                        status_detail=(
+                            f"Validated platforms: {len(coverage['completedPlatforms'])}/{len(LOVABLE_REQUIRED_PLATFORMS)}. "
+                            f"Missing: {', '.join(coverage['missingPlatforms']) or 'none'}."
+                        ),
+                        failure_reason="",
+                        retry_count=0,
+                        confidence=0.5 + 0.1 * len(coverage["completedPlatforms"]),
                         last_heartbeat=utc_now(),
                     )
                 await asyncio.sleep(self.market_research_poll_seconds)
         except asyncio.CancelledError:
             raise
         except Exception as error:
+            agent_failed = True
             await self.client.update_agent(
                 spec.agent_id,
                 mission_id=mission_id,
-                status="error",
+                status="failed",
                 energy=0,
+                status_detail="Market research agent failed before completing synthesis.",
+                failure_reason=str(error)[:300],
+                retry_count=1,
+                confidence=0.0,
                 last_heartbeat=utc_now(),
             )
             await self.client.append_log(
@@ -3221,16 +3430,34 @@ class MasterBuildOrchestrator:
                 metadata={},
             )
         finally:
-            await self.client.update_agent(
-                spec.agent_id,
-                mission_id=mission_id,
-                status="stopped",
-                session_id=None,
-                preview_bucket=None,
-                preview_key=None,
-                preview_updated_at=None,
-                last_heartbeat=utc_now(),
-            )
+            if self.stop_context:
+                await self.client.update_agent(
+                    spec.agent_id,
+                    mission_id=mission_id,
+                    status="stopped",
+                    session_id=None,
+                    preview_bucket=None,
+                    preview_key=None,
+                    preview_updated_at=None,
+                    status_detail="Market research stopped before final synthesis.",
+                    failure_reason="",
+                    last_heartbeat=utc_now(),
+                )
+            elif not agent_failed:
+                await self.client.update_agent(
+                    spec.agent_id,
+                    mission_id=mission_id,
+                    status="done",
+                    session_id=None,
+                    preview_bucket=None,
+                    preview_key=None,
+                    preview_updated_at=None,
+                    status_detail="Market research finished with the latest available evidence.",
+                    failure_reason="",
+                    retry_count=0,
+                    confidence=0.78,
+                    last_heartbeat=utc_now(),
+                )
 
     # ── Browser-Use Agent-driven browsing ────────────────────────────
 
@@ -3939,6 +4166,7 @@ class MasterBuildOrchestrator:
         last_agent_url = ""
         loop = asyncio.get_running_loop()
         last_agent_sync = 0.0
+        agent_failed = False
 
         try:
             await self.preview_manager.publish(
@@ -3956,6 +4184,10 @@ class MasterBuildOrchestrator:
                 current_url="",
                 assignment=f"Launching cloud {spec.platform} browser",
                 energy=100,
+                status_detail="Preparing Browser Use Cloud session.",
+                failure_reason="",
+                retry_count=0,
+                confidence=None,
                 last_heartbeat=utc_now(),
             )
             await self.client.append_log(
@@ -4019,13 +4251,19 @@ class MasterBuildOrchestrator:
                     or last_agent_url != ""
                     or (now - last_agent_sync) >= 4.0
                 ):
+                    terminal_success = bool(snapshot.get("is_task_successful"))
+                    terminal_status = "done" if terminal_success else "failed"
                     await self.client.update_agent(
                         spec.agent_id,
                         mission_id=mission_id,
-                        status="searching" if not is_terminal else ("found_trend" if snapshot.get("is_task_successful") else "weak"),
+                        status="searching" if not is_terminal else terminal_status,
                         current_url=last_agent_url,
                         assignment=snapshot.get("last_step_summary", f"Cloud run: {spec.platform}")[:100],
                         energy=65 if not is_terminal else 45,
+                        status_detail=str(snapshot.get("last_step_summary") or "Cloud browser session is running.")[:300],
+                        failure_reason="" if (not is_terminal or terminal_success) else "Browser Use Cloud task ended without success.",
+                        retry_count=0 if (not is_terminal or terminal_success) else 1,
+                        confidence=0.74 if terminal_success else (0.45 if not is_terminal else 0.18),
                         last_heartbeat=utc_now(),
                     )
                     last_agent_sync = now
@@ -4106,10 +4344,18 @@ class MasterBuildOrchestrator:
             await self.client.update_agent(
                 spec.agent_id,
                 mission_id=mission_id,
-                status="found_trend",
+                status="done" if discoveries_written > 0 else "failed",
                 assignment=f"Cloud complete: {discoveries_written} discoveries",
                 current_url=last_agent_url,
                 energy=50,
+                status_detail=(
+                    f"Cloud run completed with {discoveries_written} validated discoveries."
+                    if discoveries_written > 0
+                    else "Cloud run completed without validated discoveries."
+                ),
+                failure_reason="" if discoveries_written > 0 else "No validated discoveries were extracted from the cloud session.",
+                retry_count=0 if discoveries_written > 0 else 1,
+                confidence=0.82 if discoveries_written > 0 else 0.18,
                 last_heartbeat=utc_now(),
             )
             await self.client.append_log(
@@ -4124,11 +4370,16 @@ class MasterBuildOrchestrator:
         except asyncio.CancelledError:
             raise
         except Exception as error:
+            agent_failed = True
             await self.client.update_agent(
                 spec.agent_id,
                 mission_id=mission_id,
-                status="error",
+                status="failed",
                 energy=0,
+                status_detail="Cloud browser agent failed before completion.",
+                failure_reason=str(error)[:300],
+                retry_count=1,
+                confidence=0.0,
                 last_heartbeat=utc_now(),
             )
             await self.client.append_log(
@@ -4146,16 +4397,19 @@ class MasterBuildOrchestrator:
                     await self.browser_cloud.stop_session(session_id, strategy="session")
                 except Exception:
                     pass
-            await self.client.update_agent(
-                spec.agent_id,
-                mission_id=mission_id,
-                status="stopped",
-                session_id=None,
-                preview_bucket=None,
-                preview_key=None,
-                preview_updated_at=None,
-                last_heartbeat=utc_now(),
-            )
+            if self.stop_context or (self.stop_event.is_set() and not agent_failed):
+                await self.client.update_agent(
+                    spec.agent_id,
+                    mission_id=mission_id,
+                    status="stopped",
+                    session_id=None,
+                    preview_bucket=None,
+                    preview_key=None,
+                    preview_updated_at=None,
+                    status_detail="Cloud browser session stopped before normal completion.",
+                    failure_reason="",
+                    last_heartbeat=utc_now(),
+                )
 
     # ── API Sweep Agent (fast, no browser) ────────────────────────────
 
@@ -4177,7 +4431,12 @@ class MasterBuildOrchestrator:
                 spec.agent_id, mission_id=mission_id,
                 status="searching", current_url="",
                 assignment=f"API sweep: {spec.platform}",
-                energy=100, last_heartbeat=utc_now(),
+                energy=100,
+                status_detail=f"Searching curated {spec.platform} sources.",
+                failure_reason="",
+                retry_count=0,
+                confidence=None,
+                last_heartbeat=utc_now(),
             )
             await self.client.append_log(
                 mission_id, agent_id=spec.agent_id, log_type="status",
@@ -4224,9 +4483,14 @@ class MasterBuildOrchestrator:
 
             await self.client.update_agent(
                 spec.agent_id, mission_id=mission_id,
-                status="searching",
+                status="extracting",
                 assignment=f"Summarizing {len(valid_items)} {spec.platform} sources",
-                energy=70, last_heartbeat=utc_now(),
+                energy=70,
+                status_detail=f"Fetched {len(valid_items)} sources; extracting useful demand signals.",
+                failure_reason="" if valid_items else "No fetched source content available.",
+                retry_count=0 if valid_items else 1,
+                confidence=min(0.75, 0.35 + len(valid_items) * 0.05),
+                last_heartbeat=utc_now(),
             )
             await self.client.append_log(
                 mission_id, agent_id=spec.agent_id, log_type="search",
@@ -4273,9 +4537,18 @@ class MasterBuildOrchestrator:
 
             await self.client.update_agent(
                 spec.agent_id, mission_id=mission_id,
-                status="found_trend",
+                status="done" if discoveries_written > 0 else "failed",
                 assignment=f"Completed: {discoveries_written} discoveries",
-                energy=50, last_heartbeat=utc_now(),
+                energy=50 if discoveries_written > 0 else 0,
+                status_detail=(
+                    f"API sweep completed with {discoveries_written} validated discoveries."
+                    if discoveries_written > 0
+                    else "API sweep completed without validated discoveries."
+                ),
+                failure_reason="" if discoveries_written > 0 else "No validated discoveries were extracted from curated sources.",
+                retry_count=0 if discoveries_written > 0 else 1,
+                confidence=0.8 if discoveries_written > 0 else 0.15,
+                last_heartbeat=utc_now(),
             )
             await self.client.append_log(
                 mission_id, agent_id=spec.agent_id, log_type="status",
@@ -4289,7 +4562,13 @@ class MasterBuildOrchestrator:
         except Exception as error:
             await self.client.update_agent(
                 spec.agent_id, mission_id=mission_id,
-                status="error", energy=0, last_heartbeat=utc_now(),
+                status="failed",
+                energy=0,
+                status_detail="API sweep agent failed before completion.",
+                failure_reason=str(error)[:300],
+                retry_count=1,
+                confidence=0.0,
+                last_heartbeat=utc_now(),
             )
             await self.client.append_log(
                 mission_id, agent_id=spec.agent_id, log_type="error",
@@ -4408,10 +4687,14 @@ class MasterBuildOrchestrator:
                         # Update agent status to show browsing activity
                         await self.client.update_agent(
                             agent_id, mission_id=mission_id,
-                            status="exploiting",
+                            status="validating",
                             current_url=source_url,
                             assignment=f"Deep dive: {title}",
                             energy=max(20, 95 - items_processed * 2),
+                            status_detail=f"Visual showcase is validating {platform} evidence.",
+                            failure_reason="",
+                            retry_count=0,
+                            confidence=0.68,
                             last_heartbeat=utc_now(),
                         )
 
@@ -4478,6 +4761,19 @@ class MasterBuildOrchestrator:
                             message=f"Visited: {title} | {source_url[:60]}",
                             metadata={"showcase_index": items_processed},
                         )
+                        await self.client.update_agent(
+                            agent_id,
+                            mission_id=mission_id,
+                            status="done",
+                            current_url=source_url,
+                            assignment=f"Validated: {title}",
+                            energy=max(20, 90 - items_processed * 2),
+                            status_detail=f"Visual showcase validated evidence from {source_url[:120]}.",
+                            failure_reason="",
+                            retry_count=0,
+                            confidence=0.78,
+                            last_heartbeat=utc_now(),
+                        )
 
                         items_processed += 1
                         
@@ -4486,6 +4782,19 @@ class MasterBuildOrchestrator:
 
                     except Exception as e:
                         print(f"[showcase] Error visiting {source_url[:60]}: {e}")
+                        await self.client.update_agent(
+                            agent_id,
+                            mission_id=mission_id,
+                            status="stale",
+                            current_url=source_url,
+                            assignment=f"Preview refresh failed: {title}",
+                            energy=35,
+                            status_detail="The source discovery exists, but the visual showcase could not refresh its preview.",
+                            failure_reason=str(e)[:300],
+                            retry_count=1,
+                            confidence=0.45,
+                            last_heartbeat=utc_now(),
+                        )
                         await self.client.append_log(
                             mission_id, agent_id=agent_id, log_type="error",
                             message=f"Showcase visit failed: {str(e)[:100]}",
@@ -4550,6 +4859,7 @@ class MasterBuildOrchestrator:
         primary_query = seed_queries[0] if seed_queries else mission_prompt
         x_seed_url = self._build_x_search_url(seed_queries, mission_prompt) if spec.platform == "x" else None
         x_reauth_lock = asyncio.Lock()
+        agent_failed = False
 
         async def recover_x_session(reason: str) -> tuple[bool, str, str]:
             if browser is None or x_seed_url is None:
@@ -4657,7 +4967,12 @@ class MasterBuildOrchestrator:
                 await self.client.update_agent(
                     spec.agent_id, mission_id=mission_id, status="searching",
                     current_url=page_url, assignment=page_title[:100],
-                    energy=max(10, 100 - step_count * 2), last_heartbeat=utc_now(),
+                    energy=max(10, 100 - step_count * 2),
+                    status_detail=f"Browsing step {step_count}: {page_title[:120] or page_url[:120]}",
+                    failure_reason="",
+                    retry_count=0,
+                    confidence=min(0.72, 0.35 + step_count * 0.02),
+                    last_heartbeat=utc_now(),
                 )
 
                 # Log to InsForge
@@ -4732,6 +5047,10 @@ class MasterBuildOrchestrator:
                 current_url="",
                 assignment=f"Launching {spec.platform} browser",
                 energy=100,
+                status_detail=f"Launching local {spec.platform} browser session.",
+                failure_reason="",
+                retry_count=0,
+                confidence=None,
                 last_heartbeat=utc_now(),
             )
 
@@ -4784,6 +5103,10 @@ class MasterBuildOrchestrator:
                     current_url="https://x.com/i/flow/login",
                     assignment="Authenticating with X",
                     energy=100,
+                    status_detail="Authenticating local X session.",
+                    failure_reason="",
+                    retry_count=0,
+                    confidence=None,
                     last_heartbeat=utc_now(),
                 )
                 logged_in = await self._recover_x_session(browser, spec, x_seed_url)
@@ -4821,8 +5144,13 @@ class MasterBuildOrchestrator:
             await self.client.update_agent(
                 spec.agent_id,
                 mission_id=mission_id,
-                status="found_trend",
-                energy=50, last_heartbeat=utc_now(),
+                status="done",
+                energy=50,
+                status_detail=f"Local browser completed {step_count} steps.",
+                failure_reason="",
+                retry_count=0,
+                confidence=0.82,
+                last_heartbeat=utc_now(),
             )
             await self.client.append_log(
                 mission_id, agent_id=spec.agent_id, log_type="status",
@@ -4832,11 +5160,16 @@ class MasterBuildOrchestrator:
         except asyncio.CancelledError:
             raise
         except Exception as error:
+            agent_failed = True
             await self.client.update_agent(
                 spec.agent_id,
                 mission_id=mission_id,
-                status="error",
+                status="failed",
                 energy=0,
+                status_detail="Local browser agent failed before completion.",
+                failure_reason=str(error)[:300],
+                retry_count=1,
+                confidence=0.0,
                 last_heartbeat=utc_now(),
             )
             await self.client.append_log(
@@ -4858,16 +5191,19 @@ class MasterBuildOrchestrator:
                     pass
             if last_preview_key:
                 await self.client.delete_storage_object(self.client.preview_bucket, last_preview_key)
-            await self.client.update_agent(
-                spec.agent_id,
-                mission_id=mission_id,
-                status="stopped",
-                session_id=None,
-                preview_bucket=None,
-                preview_key=None,
-                preview_updated_at=None,
-                last_heartbeat=utc_now(),
-            )
+            if self.stop_context or (self.stop_event.is_set() and not agent_failed):
+                await self.client.update_agent(
+                    spec.agent_id,
+                    mission_id=mission_id,
+                    status="stopped",
+                    session_id=None,
+                    preview_bucket=None,
+                    preview_key=None,
+                    preview_updated_at=None,
+                    status_detail="Local browser session stopped before normal completion.",
+                    failure_reason="",
+                    last_heartbeat=utc_now(),
+                )
 
 
 async def run_masterbuild() -> None:

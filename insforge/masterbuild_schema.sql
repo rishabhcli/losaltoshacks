@@ -35,7 +35,24 @@ create table if not exists public.agents (
   platform text not null check (platform in ('youtube', 'x', 'reddit', 'substack', 'market_research')),
   role text not null,
   status text not null default 'idle'
-    check (status in ('idle', 'searching', 'found_trend', 'weak', 'reassigning', 'exploiting', 'stopped', 'error')),
+    check (status in (
+      'idle',
+      'queued',
+      'searching',
+      'extracting',
+      'validating',
+      'synthesizing',
+      'found_trend',
+      'weak',
+      'reassigning',
+      'exploiting',
+      'blocked',
+      'done',
+      'failed',
+      'stale',
+      'stopped',
+      'error'
+    )),
   current_url text not null default '',
   preview_url text,
   preview_bucket text,
@@ -46,6 +63,10 @@ create table if not exists public.agents (
   assignment text not null default '',
   energy integer not null default 100 check (energy between 0 and 100),
   last_discovery_keywords text[] not null default '{}',
+  status_detail text not null default '',
+  failure_reason text not null default '',
+  retry_count integer not null default 0 check (retry_count >= 0),
+  confidence numeric(5,4) check (confidence is null or (confidence >= 0 and confidence <= 1)),
   last_heartbeat timestamptz not null default timezone('utc', now()),
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
@@ -61,10 +82,33 @@ alter table public.missions drop column if exists live_url_9;
 alter table public.agents add column if not exists preview_bucket text;
 alter table public.agents add column if not exists preview_key text;
 alter table public.agents add column if not exists preview_updated_at timestamptz;
+alter table public.agents add column if not exists status_detail text not null default '';
+alter table public.agents add column if not exists failure_reason text not null default '';
+alter table public.agents add column if not exists retry_count integer not null default 0 check (retry_count >= 0);
+alter table public.agents add column if not exists confidence numeric(5,4) check (confidence is null or (confidence >= 0 and confidence <= 1));
 alter table public.agents drop constraint if exists agents_agent_id_check;
 alter table public.agents add constraint agents_agent_id_check check (agent_id between 1 and 5);
 alter table public.agents drop constraint if exists agents_platform_check;
 alter table public.agents add constraint agents_platform_check check (platform in ('youtube', 'x', 'reddit', 'substack', 'market_research'));
+alter table public.agents drop constraint if exists agents_status_check;
+alter table public.agents add constraint agents_status_check check (status in (
+  'idle',
+  'queued',
+  'searching',
+  'extracting',
+  'validating',
+  'synthesizing',
+  'found_trend',
+  'weak',
+  'reassigning',
+  'exploiting',
+  'blocked',
+  'done',
+  'failed',
+  'stale',
+  'stopped',
+  'error'
+));
 
 create table if not exists public.discoveries (
   id uuid primary key default gen_random_uuid(),
@@ -75,12 +119,14 @@ create table if not exists public.discoveries (
   source_url text not null,
   thumbnail_url text not null default '',
   keywords text not null default '',
+  industry text not null default 'All',
   likes bigint not null default 0,
   views bigint not null default 0,
   comments bigint not null default 0,
   summary text not null default '',
   created_at timestamptz not null default timezone('utc', now())
 );
+alter table public.discoveries add column if not exists industry text not null default 'All';
 alter table public.discoveries drop constraint if exists discoveries_agent_id_check;
 alter table public.discoveries add constraint discoveries_agent_id_check check (agent_id between 1 and 5);
 
@@ -278,15 +324,19 @@ begin
     preview_url,
     assignment,
     energy,
+    status_detail,
+    failure_reason,
+    retry_count,
+    confidence,
     created_at,
     updated_at,
     last_heartbeat
   ) values
-    (v_mission_id, 1, 'Echo',   'youtube',         'Shorts Scan',       'idle', '/agent-stream/1', mission_prompt, 100, v_now, v_now, v_now),
-    (v_mission_id, 2, 'Pulse',  'x',               'Conversation Scan', 'idle', '/agent-stream/2', mission_prompt, 100, v_now, v_now, v_now),
-    (v_mission_id, 3, 'Thread', 'reddit',          'Community Scan',    'idle', '/agent-stream/3', mission_prompt, 100, v_now, v_now, v_now),
-    (v_mission_id, 4, 'Ledger', 'substack',        'Narrative Scan',    'idle', '/agent-stream/4', mission_prompt, 100, v_now, v_now, v_now),
-    (v_mission_id, 5, 'Atlas',  'market_research', 'Market Research',   'idle', '/agent-stream/5', mission_prompt, 100, v_now, v_now, v_now);
+    (v_mission_id, 1, 'Echo',   'youtube',         'Shorts Scan',       'queued', '/agent-stream/1', mission_prompt, 100, 'Queued for worker pickup.', '', 0, null, v_now, v_now, v_now),
+    (v_mission_id, 2, 'Pulse',  'x',               'Conversation Scan', 'queued', '/agent-stream/2', mission_prompt, 100, 'Queued for worker pickup.', '', 0, null, v_now, v_now, v_now),
+    (v_mission_id, 3, 'Thread', 'reddit',          'Community Scan',    'queued', '/agent-stream/3', mission_prompt, 100, 'Queued for worker pickup.', '', 0, null, v_now, v_now, v_now),
+    (v_mission_id, 4, 'Ledger', 'substack',        'Narrative Scan',    'queued', '/agent-stream/4', mission_prompt, 100, 'Queued for worker pickup.', '', 0, null, v_now, v_now, v_now),
+    (v_mission_id, 5, 'Atlas',  'market_research', 'Market Research',   'queued', '/agent-stream/5', mission_prompt, 100, 'Queued for worker pickup.', '', 0, null, v_now, v_now, v_now);
 
   insert into public.logs (mission_id, agent_id, type, message, metadata, created_at)
   values (

@@ -11,6 +11,7 @@ import {
   LogOut,
   Volume2,
   FileText,
+  Search,
 } from "lucide-react";
 import { usePreferences } from "@/hooks/usePreferences";
 import { SearchBar } from "@/components/market/SearchBar";
@@ -24,6 +25,7 @@ import { getIndustryLabel } from "@/lib/industry";
 
 const navItems = [
   { path: "/", icon: LayoutDashboard, label: "Dashboard" },
+  { path: "/market-research", icon: Search, label: "Market Research" },
   { path: "/trends", icon: TrendingUp, label: "Trends" },
   { path: "/recommendations", icon: Lightbulb, label: "Recommendations" },
   { path: "/briefing", icon: Volume2, label: "Briefing" },
@@ -68,7 +70,7 @@ export function AppLayout() {
       <button
         key={item.path}
         onClick={() => navigate(item.path)}
-        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all cursor-pointer text-sm font-medium ${
+        className={`flex shrink-0 items-center gap-3 whitespace-nowrap px-3 py-2.5 rounded-lg transition-all cursor-pointer text-sm font-medium ${
           isActive
             ? "text-blue-600 dark:text-blue-400 bg-blue-50/80 dark:bg-blue-950/40 font-semibold"
             : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-white/50 dark:hover:bg-slate-800/50"
@@ -87,18 +89,18 @@ export function AppLayout() {
       {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
       <BackgroundBubbles />
       <div
-        className="flex h-screen w-screen overflow-hidden bg-transparent"
+        className="flex h-screen w-screen flex-col overflow-hidden bg-transparent md:flex-row"
         style={{ position: "relative", zIndex: 1 }}
       >
         {/* Sidebar */}
         <nav
-          className="flex flex-col w-60 min-w-60 h-full border-r border-white/30 dark:border-white/10 glass backdrop-blur-xl"
+          className="flex h-auto w-full shrink-0 flex-col border-b border-white/30 glass backdrop-blur-xl dark:border-white/10 md:h-full md:w-60 md:min-w-60 md:border-b-0 md:border-r"
           aria-label="Main navigation"
         >
           {/* Logo */}
           <button
             onClick={() => navigate("/")}
-            className="flex items-center gap-3 px-5 py-5 group cursor-pointer"
+            className="flex items-center gap-3 px-4 py-3 group cursor-pointer md:px-5 md:py-5"
             aria-label="MarketPulse home"
           >
             <svg
@@ -116,23 +118,25 @@ export function AppLayout() {
             <span className="text-base font-semibold text-slate-800 dark:text-slate-100 tracking-tight">MarketPulse</span>
           </button>
 
-          <div className="h-px bg-blue-100/50 dark:bg-slate-700/50 mx-4" />
+          <div className="hidden h-px bg-blue-100/50 dark:bg-slate-700/50 mx-4 md:block" />
 
           {/* Nav Items */}
-          <div className="flex flex-col gap-1 mt-4 px-3">{navItems.map(renderNavItem)}</div>
+          <div className="flex gap-1 overflow-x-auto px-3 pb-3 md:mt-4 md:flex-col md:overflow-visible md:pb-0">
+            {navItems.map(renderNavItem)}
+          </div>
 
           {/* Spacer */}
-          <div className="flex-1" />
+          <div className="hidden md:flex md:flex-1" />
 
           {/* Industry badge */}
-          <div className="px-4 pb-2">
+          <div className="hidden px-4 pb-2 md:block">
             <div className="text-[11px] font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 px-3 py-1.5 rounded-lg text-center truncate">
               {getIndustryLabel(preferences.industry)}
             </div>
           </div>
 
           {/* Sponsor badges */}
-          <div className="px-4 pb-2 flex flex-col gap-1.5">
+          <div className="hidden px-4 pb-2 md:flex md:flex-col md:gap-1.5">
             <div className="flex items-center justify-center gap-1.5 text-[10px] font-medium text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800/50 px-2 py-1 rounded-md">
               <svg viewBox="0 0 24 24" className="w-3 h-3 fill-current text-slate-400" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
               Voice by ElevenLabs
@@ -148,23 +152,23 @@ export function AppLayout() {
           </div>
 
           {/* Search */}
-          <div className="px-3 pb-1">
+          <div className="hidden px-3 pb-1 md:block">
             <SearchBar />
           </div>
 
           {/* Settings */}
-          <div className="px-3 pb-1">
+          <div className="hidden px-3 pb-1 md:block">
             <SettingsMenu />
           </div>
 
           {/* Theme toggle */}
-          <div className="px-3 pb-1 flex items-center justify-between">
+          <div className="hidden px-3 pb-1 md:flex md:items-center md:justify-between">
             <span className="text-xs font-medium text-slate-400 dark:text-slate-500 pl-3">Theme</span>
             <ThemeToggle />
           </div>
 
           {/* Logout */}
-          <div className="px-3 pb-4">
+          <div className="hidden px-3 pb-4 md:block">
             <button
               onClick={handleLogout}
               className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all cursor-pointer text-sm font-medium text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-white/50 dark:hover:bg-slate-800/50 w-full"
@@ -177,7 +181,7 @@ export function AppLayout() {
         </nav>
 
         {/* Main Content */}
-        <main className="flex-1 overflow-y-auto overflow-x-hidden bg-transparent">
+        <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden bg-transparent">
           <ErrorBoundary>
             <Outlet />
           </ErrorBoundary>

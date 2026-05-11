@@ -9,7 +9,9 @@ import { ResearchObservability } from "@/components/research/ResearchObservabili
 import { DiscoveryGrid } from "@/components/research/DiscoveryGrid";
 import { FinalOptionsPanel } from "@/components/research/FinalOptionsPanel";
 import { BusinessPlanPanel } from "@/components/research/BusinessPlanPanel";
+import { RuntimeHealthStrip } from "@/components/research/RuntimeHealthStrip";
 import { useTheme } from "@/lib/theme";
+import { isAgentActiveStatus, isAgentIssueStatus } from "@/hooks/useAgentData";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
 
@@ -18,8 +20,8 @@ type ViewMode = "command" | "observe";
 export function MarketResearch() {
   const {
     latestMission, agents, discoveries, logs, signals, thoughts, memory, businessPlans,
-    isLoading, isCreatingMission, error,
-    createMission, stopAll, resetAll,
+    isLoading, isCreatingMission, retryingAgentId, error,
+    createMission, stopAll, resetAll, retryAgent,
   } = useMasterBuildDashboard();
 
   const [viewMode, setViewMode] = useState<ViewMode>("command");
@@ -41,7 +43,11 @@ export function MarketResearch() {
   }, [latestMission?.status]);
 
   const activeAgentCount = useMemo(
-    () => agents.filter((a) => ["searching", "found_trend", "exploiting", "reassigning"].includes(a.status)).length,
+    () => agents.filter((a) => isAgentActiveStatus(a.status)).length,
+    [agents],
+  );
+  const issueAgentCount = useMemo(
+    () => agents.filter((a) => isAgentIssueStatus(a.status)).length,
     [agents],
   );
 
@@ -55,6 +61,12 @@ export function MarketResearch() {
     window.location.reload();
   }, [isRunning, stopAll, resetAll]);
 
+  const handleCreateFollowUpMission = useCallback(async (prompt: string) => {
+    setShowFinalOptions(false);
+    setViewMode("command");
+    await createMission(prompt);
+  }, [createMission]);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -66,8 +78,8 @@ export function MarketResearch() {
   return (
     <div className="flex flex-col h-full overflow-hidden bg-transparent dark:bg-[radial-gradient(circle_at_top,_rgba(37,99,235,0.12),transparent_28%),linear-gradient(180deg,rgba(2,6,23,0.82),rgba(2,6,23,0.96))]">
       {/* ── Top Header Bar ────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200/60 dark:border-slate-700/60 glass shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-2 px-4 py-3 border-b border-slate-200/60 dark:border-slate-700/60 glass shrink-0 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
           <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50 tracking-tight">
             Market Research
           </h1>
@@ -85,9 +97,14 @@ export function MarketResearch() {
               {discoveries.length} discoveries
             </Badge>
           )}
+          {issueAgentCount > 0 && (
+            <Badge className="bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border-0 text-[11px] font-medium">
+              {issueAgentCount} agents need review
+            </Badge>
+          )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex w-full items-center gap-2 overflow-x-auto sm:w-auto sm:justify-end">
         {/* View Results button */}
         {latestMission?.finalOptions && (
           <button
@@ -135,9 +152,10 @@ export function MarketResearch() {
         </div>
         </div>
       </div>
+      <RuntimeHealthStrip />
 
       {/* ── Main Content Area (fills viewport) ──────────────── */}
-      <div className="flex-1 flex overflow-hidden min-h-0">
+      <div className="flex-1 flex flex-col overflow-y-auto min-h-0 lg:flex-row lg:overflow-hidden">
 
         {viewMode === "command" ? (
           /* ── COMMAND VIEW ──────────────────────────────────── */
@@ -145,8 +163,8 @@ export function MarketResearch() {
           /* Right: Agent grid + Discovery grid (stacked)         */
           <>
             {/* Left Panel */}
-            <div className="w-[400px] min-w-[320px] border-r border-slate-200/60 dark:border-slate-800/80 flex flex-col overflow-hidden min-h-0 bg-slate-50/30 dark:bg-slate-950/55">
-              <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+            <div className="w-full shrink-0 border-b border-slate-200/60 dark:border-slate-800/80 flex flex-col overflow-hidden bg-slate-50/30 dark:bg-slate-950/55 lg:w-[400px] lg:min-w-[320px] lg:border-b-0 lg:border-r lg:min-h-0">
+              <div className="min-h-[520px] overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
                 <BusinessPlanPanel
                   plans={businessPlans}
                   agents={agents}
@@ -160,13 +178,15 @@ export function MarketResearch() {
             </div>
 
             {/* Right Panel */}
-            <div className="flex-1 overflow-y-auto dark:bg-slate-950/20">
+            <div className="min-w-0 flex-1 overflow-visible dark:bg-slate-950/20 lg:overflow-y-auto">
               {/* Agent browser preview cards */}
               <div className="px-4 pt-4 pb-2">
                 <AgentBrowserCards
                   agents={agents}
                   discoveries={discoveries}
                   isRunning={isRunning}
+                  retryingAgentId={retryingAgentId}
+                  onRetryAgent={retryAgent}
                   latestMission={
                     latestMission
                       ? {
@@ -181,9 +201,9 @@ export function MarketResearch() {
               </div>
 
               {/* Discovery grid + Mission logs side by side */}
-              <div className="flex h-[440px] border-t border-slate-200/40 dark:border-slate-800/70">
+              <div className="flex min-h-[440px] flex-col border-t border-slate-200/40 dark:border-slate-800/70 xl:h-[440px] xl:flex-row">
                 {/* Discoveries */}
-                <div className="flex-1 flex flex-col overflow-hidden min-h-0 px-4 pb-3 pt-3 min-w-0">
+                <div className="min-h-[360px] flex-1 flex flex-col overflow-hidden px-4 pb-3 pt-3 min-w-0 xl:min-h-0">
                   <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-300 uppercase tracking-wider mb-2 shrink-0">Discoveries</h3>
                   <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
                     <DiscoveryGrid discoveries={discoveries} />
@@ -191,7 +211,7 @@ export function MarketResearch() {
                 </div>
 
                 {/* Mission Logs (floating-style right sidebar) */}
-                <div className="w-[300px] shrink-0 border-l border-slate-200/40 dark:border-slate-800/70 bg-slate-50/50 dark:bg-slate-950/70 flex flex-col overflow-hidden">
+                <div className="min-h-[220px] w-full shrink-0 border-t border-slate-200/40 dark:border-slate-800/70 bg-slate-50/50 dark:bg-slate-950/70 flex flex-col overflow-hidden xl:min-h-0 xl:w-[300px] xl:border-l xl:border-t-0">
                   <div className="px-3 py-2.5 border-b border-slate-200/40 dark:border-slate-800/70">
                     <div className="flex items-center gap-1.5">
                       <Radio className="w-3.5 h-3.5 text-slate-400" />
@@ -247,7 +267,7 @@ export function MarketResearch() {
           /* Right: Discovery grid                                */
           <>
             {/* Left Panel — Observability */}
-            <div className="flex-1 flex flex-col overflow-hidden p-4">
+            <div className="min-w-0 flex-1 flex flex-col overflow-hidden p-4">
               <ResearchObservability
                 thoughts={thoughts}
                 signals={signals}
@@ -264,7 +284,7 @@ export function MarketResearch() {
             </div>
 
             {/* Right Panel — Discoveries */}
-            <div className="w-[420px] shrink-0 border-l border-slate-200/60 dark:border-slate-800/80 flex flex-col overflow-hidden min-h-0 p-4 dark:bg-slate-950/45">
+            <div className="min-h-[420px] w-full shrink-0 border-t border-slate-200/60 dark:border-slate-800/80 flex flex-col overflow-hidden p-4 dark:bg-slate-950/45 lg:min-h-0 lg:w-[420px] lg:border-l lg:border-t-0">
               <div className="flex items-center gap-2 mb-3 shrink-0">
                 <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-300 uppercase tracking-wider">Discoveries</h3>
                 {discoveries.length > 0 && (
@@ -302,7 +322,7 @@ export function MarketResearch() {
             onClick={() => setShowFinalOptions(false)}
           />
           {/* Modal */}
-          <div className="relative w-[min(760px,calc(100vw-400px))] max-h-[calc(100vh-160px)] bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-xl overflow-hidden flex flex-col">
+          <div className="relative w-[min(760px,calc(100vw-2rem))] max-h-[calc(100vh-160px)] bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-xl overflow-hidden flex flex-col sm:w-[min(760px,calc(100vw-4rem))]">
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 dark:border-slate-800/80 shrink-0 bg-slate-50 dark:bg-slate-950">
               <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Market Research Results</h2>
               <button onClick={() => setShowFinalOptions(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
@@ -310,7 +330,11 @@ export function MarketResearch() {
               </button>
             </div>
             <ScrollArea className="flex-1 p-5">
-              <FinalOptionsPanel finalOptions={latestMission.finalOptions} />
+              <FinalOptionsPanel
+                finalOptions={latestMission.finalOptions}
+                isCreatingFollowUp={isCreatingMission}
+                onCreateFollowUpMission={handleCreateFollowUpMission}
+              />
             </ScrollArea>
           </div>
         </div>

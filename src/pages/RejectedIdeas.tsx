@@ -1,18 +1,23 @@
 import { useState, useMemo } from "react";
 import { useOsdkObjects, marketRecommendation, marketTrend } from "@/lib/osdk-shims";
-import { XCircle } from "lucide-react";
+import { Archive, CalendarClock, XCircle, ShieldCheck, AlertTriangle } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { StatusBadge } from "@/components/market/StatusBadge";
 import { LoadingState } from "@/components/market/LoadingState";
 import { RecDetailModal, type RecObj } from "@/components/market/RecDetailModal";
+import { DecisionLibrarySummary } from "@/components/market/DecisionLibrarySummary";
 import { usePreferences } from "@/hooks/usePreferences";
+import { useRecommendationFollowUpMission } from "@/hooks/useRecommendationFollowUpMission";
+import { buildDecisionMemo } from "@/lib/decision-library";
+import { normalizeEvidenceSources, type EvidenceSource } from "@/lib/evidence";
 
 export function RejectedIdeas() {
   const { preferences } = usePreferences();
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [selectedRec, setSelectedRec] = useState<RecObj | null>(null);
+  const { createFollowUpMission, isCreatingFollowUp } = useRecommendationFollowUpMission();
 
   const { data: recommendations, isLoading } = useOsdkObjects(marketRecommendation, {
     where: { status: { $eq: "dismissed" } },
@@ -79,6 +84,8 @@ export function RejectedIdeas() {
           </p>
         </div>
 
+        <DecisionLibrarySummary items={filteredRecs} status="dismissed" />
+
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3">
           <Select value={priorityFilter} onValueChange={setPriorityFilter}>
@@ -141,15 +148,22 @@ export function RejectedIdeas() {
         rec={selectedRec}
         trendTitle={selectedRec ? (trendMap.get(selectedRec.trendId ?? "")?.title ?? null) : null}
         action={{ type: "change-mind-to-accepted" }}
+        followUpStatus="dismissed"
+        isCreatingFollowUp={isCreatingFollowUp}
+        onCreateFollowUpMission={createFollowUpMission}
         onClose={() => setSelectedRec(null)}
       />
     </ScrollArea>
   );
 }
 
-function IdeaCard({ rec, trendTitle, onClick }: { rec: { $primaryKey: string | number; title?: string; description?: string; confidenceScore?: number; estimatedRevenuePotential?: string; priority?: string }; trendTitle: string | null; onClick: () => void }) {
+function IdeaCard({ rec, trendTitle, onClick }: { rec: { $primaryKey: string | number; title?: string; description?: string; confidenceScore?: number; estimatedRevenuePotential?: string; priority?: string; sourceEvidence?: EvidenceSource[] }; trendTitle: string | null; onClick: () => void }) {
+  const evidenceCount = normalizeEvidenceSources(rec.sourceEvidence).length;
+  const memo = buildDecisionMemo(rec, "dismissed");
+
   return (
     <button
+      type="button"
       onClick={onClick}
       className="border border-slate-200 glass rounded-xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all text-left cursor-pointer w-full"
     >
@@ -165,6 +179,19 @@ function IdeaCard({ rec, trendTitle, onClick }: { rec: { $primaryKey: string | n
         <StatusBadge value={rec.priority} />
       </div>
       <p className="text-xs text-slate-500 line-clamp-2">{rec.description}</p>
+      <div className="mt-3">
+        {evidenceCount > 0 ? (
+          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+            <ShieldCheck className="h-3 w-3" />
+            Source Evidence: {evidenceCount}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
+            <AlertTriangle className="h-3 w-3" />
+            Evidence missing
+          </span>
+        )}
+      </div>
       <div className="flex items-center gap-3 mt-3 text-xs">
         <span className="font-semibold text-blue-600">
           {rec.confidenceScore != null ? `${(rec.confidenceScore * 100).toFixed(0)}% confidence` : ""}
@@ -172,6 +199,27 @@ function IdeaCard({ rec, trendTitle, onClick }: { rec: { $primaryKey: string | n
         {rec.estimatedRevenuePotential && (
           <span className="font-semibold text-emerald-500">{rec.estimatedRevenuePotential}</span>
         )}
+      </div>
+      <div className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-800">
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            <Archive className="h-3.5 w-3.5" />
+            Rejection memo
+          </span>
+          <span className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+            {memo.posture}
+          </span>
+        </div>
+        <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">{memo.rationale}</p>
+        <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-medium">
+          <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+            <CalendarClock className="h-3 w-3" />
+            Revisit trigger: {memo.reviewCadence}
+          </span>
+          <span className="rounded-md bg-amber-50 px-2 py-1 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
+            {memo.riskLabel}
+          </span>
+        </div>
       </div>
     </button>
   );

@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useOsdkObjects, marketRecommendation, marketTrend } from "@/lib/osdk-shims";
 import { usePreferences } from "@/hooks/usePreferences";
-import { Lightbulb, Filter, Search } from "lucide-react";
+import { Lightbulb, Filter, Search, ShieldCheck, AlertTriangle } from "lucide-react";
 import { VoiceButton } from "@/components/VoiceButton";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -9,7 +9,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { StatusBadge } from "@/components/market/StatusBadge";
 import { LoadingState } from "@/components/market/LoadingState";
 import { RecDetailModal, type RecObj } from "@/components/market/RecDetailModal";
+import { useRecommendationFollowUpMission } from "@/hooks/useRecommendationFollowUpMission";
 import { getIndustryLabel } from "@/lib/industry";
+import { normalizeEvidenceSources, type EvidenceSource } from "@/lib/evidence";
 
 export function Recommendations() {
   const { preferences } = usePreferences();
@@ -18,6 +20,7 @@ export function Recommendations() {
   const [industryFilter, setIndustryFilter] = useState<"all" | "matching">("matching");
   const [search, setSearch] = useState("");
   const [selectedRec, setSelectedRec] = useState<RecObj | null>(null);
+  const { createFollowUpMission, isCreatingFollowUp } = useRecommendationFollowUpMission();
 
   const { data: recommendations, isLoading } = useOsdkObjects(marketRecommendation, {
     pageSize: 100,
@@ -216,7 +219,7 @@ export function Recommendations() {
             return (
               <RecCard
                 key={rec.$primaryKey as string}
-                rec={rec as { $primaryKey: string | number; title?: string; description?: string; confidenceScore?: number; estimatedRevenuePotential?: string; priority?: string; industry?: string }}
+                rec={rec as { $primaryKey: string | number; title?: string; description?: string; confidenceScore?: number; estimatedRevenuePotential?: string; priority?: string; industry?: string; sourceEvidence?: EvidenceSource[] }}
                 trendTitle={trendMap.get(recTrendId ?? "")?.title ?? null}
                 onClick={() => setSelectedRec(rec as RecObj)}
               />
@@ -237,14 +240,18 @@ export function Recommendations() {
         rec={selectedRec}
         trendTitle={selectedRec ? (trendMap.get((selectedRec as { trendId?: string }).trendId ?? "")?.title ?? null) : null}
         action={{ type: "accept-or-dismiss" }}
+        followUpStatus="open"
+        isCreatingFollowUp={isCreatingFollowUp}
+        onCreateFollowUpMission={createFollowUpMission}
         onClose={() => setSelectedRec(null)}
       />
     </ScrollArea>
   );
 }
 
-function RecCard({ rec, trendTitle, onClick }: { rec: { $primaryKey: string | number; title?: string; description?: string; confidenceScore?: number; estimatedRevenuePotential?: string; priority?: string; industry?: string }; trendTitle: string | null; onClick: () => void }) {
+function RecCard({ rec, trendTitle, onClick }: { rec: { $primaryKey: string | number; title?: string; description?: string; confidenceScore?: number; estimatedRevenuePotential?: string; priority?: string; industry?: string; sourceEvidence?: EvidenceSource[] }; trendTitle: string | null; onClick: () => void }) {
   const industryLabel = rec.industry ? getIndustryLabel(rec.industry) : null;
+  const evidenceCount = normalizeEvidenceSources(rec.sourceEvidence).length;
   return (
     <div
       role="button"
@@ -278,6 +285,19 @@ function RecCard({ rec, trendTitle, onClick }: { rec: { $primaryKey: string | nu
         <StatusBadge value={rec.priority} />
       </div>
       <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">{rec.description}</p>
+      <div className="mt-3">
+        {evidenceCount > 0 ? (
+          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+            <ShieldCheck className="h-3 w-3" />
+            Source Evidence: {evidenceCount}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
+            <AlertTriangle className="h-3 w-3" />
+            Evidence missing
+          </span>
+        )}
+      </div>
       <div className="flex items-center justify-between mt-3">
         <div className="flex items-center gap-3 text-xs">
           <span className="font-semibold text-blue-600">

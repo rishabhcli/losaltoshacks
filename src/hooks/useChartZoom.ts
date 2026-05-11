@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import type { TrendDataPoint } from "@/lib/trendChartData";
 
 export function useChartZoom(data: TrendDataPoint[]) {
@@ -33,7 +33,7 @@ export function useChartZoom(data: TrendDataPoint[]) {
   }, []);
 
   // Reset zoom when data length changes (time frame switch)
-  useMemo(() => {
+  useEffect(() => {
     setStartIdx(0);
     setEndIdx(null);
   }, [data.length]);
@@ -76,7 +76,7 @@ export function useMergedChartZoom<T>(data: T[]) {
     setEndIdx(null);
   }, []);
 
-  useMemo(() => {
+  useEffect(() => {
     setStartIdx(0);
     setEndIdx(null);
   }, [data.length]);

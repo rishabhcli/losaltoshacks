@@ -36,7 +36,6 @@
     "@radix-ui/react-toggle": "^1.1.10",
     "@radix-ui/react-toggle-group": "^1.1.11",
     "@radix-ui/react-tooltip": "^1.2.8",
-    "@tailwindcss/vite": "^4.1.14",
     "@tanstack/react-query": "^5.81.5",
     "@types/eslint-plugin-jsx-a11y": "^6.9.0",
     "@types/node": "^22.9.0",
@@ -73,9 +72,7 @@
     "react-router-dom": "^6.23.1",
     "recharts": "^2.15.4",
     "sonner": "^2.0.7",
-    "tailwind-merge": "^3.3.1",
-    "tailwindcss": "^4.1.16",
-    "tw-animate-css": "^1.4.0",
+    "tailwind-merge": "2.6.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.32.0",
     "vaul": "^1.1.2",
@@ -86,6 +83,7 @@
     "ai:server": "node server/ai-server.mjs",
     "build": "vite build",
     "dev": "vite",
+    "dev:demo": "node scripts/run-demo.mjs",
     "dev:local": "nohup vite > logs/dev-server.log 2>&1 &",
     "dev:remote": "nohup vite --mode code-workspaces > logs/dev-server.log 2>&1 &",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0 --no-warn-ignored",
@@ -93,10 +91,19 @@
     "mongodb:check": "node scripts/mongodb-check.mjs",
     "mongodb:init": "node scripts/mongodb-init.mjs",
     "preview": "vite preview",
+    "schema:verify:decisions": "node scripts/verify-recommendation-decisions.mjs",
+    "schema:verify:masterbuild": "node scripts/verify-masterbuild-schema.mjs",
+    "smoke:decision:browser": "node scripts/smoke-browser-decision.mjs",
     "test": "vitest run",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "worker:live": "python agents/orchestrator.py",
+    "worker:preflight": "python scripts/verify-live-worker-preflight.py"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.1"
+    "@playwright/test": "^1.59.1",
+    "autoprefixer": "10.5.0",
+    "postcss": "8.5.14",
+    "tailwindcss": "3.4.17",
+    "tailwindcss-animate": "1.0.7"
   }
 }

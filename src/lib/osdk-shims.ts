@@ -6,6 +6,8 @@
  */
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { insforge } from "./insforge";
+import type { EvidenceSource } from "./evidence";
 
 // Type definitions for live data from AI server
 interface Trend {
@@ -22,7 +24,7 @@ interface Trend {
   sentimentScore: number;
   topKeywords: string;
   detectedAt: string;
-  sources?: unknown[];
+  sources?: EvidenceSource[];
   [key: string]: unknown;
 }
 
@@ -56,8 +58,16 @@ interface Recommendation {
   priority: string;
   status: string;
   actionPlan: string;
+  sourceEvidence?: EvidenceSource[];
   createdAt: string;
   [key: string]: unknown;
+}
+
+type RecommendationDecisionStatus = "reviewed" | "accepted" | "dismissed";
+
+interface RecommendationDecisionRow {
+  recommendation_id?: string;
+  status?: string;
 }
 
 // ─── Type tokens (replacing @osdk/src exports) ────────────────────────────────
@@ -70,6 +80,8 @@ export const marketRecommendation = "marketRecommendation";
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
 const LIVE_CACHE_TTL = 60_000; // 1 minute
 const RECS_CACHE_TTL = 5 * 60_000; // 5 minutes (matches server-side cache)
+const DECISIONS_CACHE_TTL = 60_000; // user decision feedback is light but not static
+const DECISION_SYNC_COOLDOWN_MS = 5 * 60_000;
 const LIVE_REFRESH_INTERVAL_MS = 8_000;
 
 interface LiveData {
@@ -88,6 +100,11 @@ const _liveRecsFetchByKey = new Map<string, Promise<void>>();
 /** Cache key for recommendations: industry slug or "__all__" */
 let _liveRecsKey = "__all__";
 
+let _remoteDecisionOverrides = new Map<string, RecommendationDecisionStatus>();
+let _remoteDecisionFetchedAt = 0;
+let _remoteDecisionFetchPromise: Promise<void> | null = null;
+let _remoteDecisionUnavailableUntil = 0;
+
 export function invalidateLiveResearchCache(refetch = true) {
   _liveData = null;
   _liveFetchedAt = 0;
@@ -101,6 +118,7 @@ export function invalidateLiveResearchCache(refetch = true) {
   if (refetch) {
     void fetchLiveData();
     void fetchLiveRecommendations();
+    void fetchRemoteRecommendationDecisions({ force: true });
   }
 }
 
@@ -204,7 +222,156 @@ export const $Actions = {
 type ObjectType = typeof marketTrend | typeof marketInsight | typeof marketRecommendation;
 
 // User status overrides (accept/dismiss) applied on top of source data
-const _statusOverrides = new Map<string, string>();
+const _statusOverrides = new Map<string, RecommendationDecisionStatus>();
+const STATUS_OVERRIDES_STORAGE_KEY = "marketpulse-recommendation-status-overrides";
+let _statusOverridesLoaded = false;
+
+function ensureStatusOverridesLoaded() {
+  if (_statusOverridesLoaded || typeof window === "undefined") return;
+  _statusOverridesLoaded = true;
+
+  try {
+    const raw = window.localStorage.getItem(STATUS_OVERRIDES_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Record<string, string>;
+    for (const [key, status] of Object.entries(parsed)) {
+      if (key && isRecommendationDecisionStatus(status)) _statusOverrides.set(key, status);
+    }
+  } catch {
+    // Local demo decisions are best-effort; malformed storage should not break the app.
+  }
+}
+
+function saveStatusOverrides() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      STATUS_OVERRIDES_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(_statusOverrides.entries())),
+    );
+  } catch {
+    // Ignore storage failures; the in-memory override still updates the current session.
+  }
+}
+
+function isRecommendationDecisionStatus(status: unknown): status is RecommendationDecisionStatus {
+  return status === "reviewed" || status === "accepted" || status === "dismissed";
+}
+
+function decisionKeyForRecommendation(rec: Pick<Recommendation, "$primaryKey" | "recommendationId">) {
+  return String(rec.recommendationId || rec.$primaryKey);
+}
+
+async function getCurrentInsforgeUserId() {
+  const { data, error } = await insforge.auth.getCurrentUser();
+  if (error) throw error;
+  const userId = data?.user?.id;
+  if (!userId) throw new Error("No authenticated InsForge user for recommendation decision sync.");
+  return String(userId);
+}
+
+function logDecisionSyncUnavailable(error: unknown) {
+  _remoteDecisionUnavailableUntil = Date.now() + DECISION_SYNC_COOLDOWN_MS;
+  if (import.meta.env.DEV) {
+    console.info("[marketpulse] Recommendation decisions are stored locally; InsForge sync is unavailable.", error);
+  }
+}
+
+function normalizeRemoteDecisionRows(rows: unknown): Map<string, RecommendationDecisionStatus> {
+  const next = new Map<string, RecommendationDecisionStatus>();
+  if (!Array.isArray(rows)) return next;
+
+  for (const row of rows as RecommendationDecisionRow[]) {
+    const recommendationId = String(row.recommendation_id ?? "").trim();
+    if (!recommendationId || !isRecommendationDecisionStatus(row.status)) continue;
+    next.set(recommendationId, row.status);
+  }
+
+  return next;
+}
+
+function fetchRemoteRecommendationDecisions(opts?: { force?: boolean }) {
+  if (typeof window === "undefined") return Promise.resolve();
+  const now = Date.now();
+  if (now < _remoteDecisionUnavailableUntil) return Promise.resolve();
+  if (!opts?.force && now - _remoteDecisionFetchedAt < DECISIONS_CACHE_TTL) return Promise.resolve();
+  if (_remoteDecisionFetchPromise) return _remoteDecisionFetchPromise;
+
+  _remoteDecisionFetchPromise = (async () => {
+    try {
+      const userId = await getCurrentInsforgeUserId();
+      const { data, error } = await insforge.database
+        .from("recommendation_decisions")
+        .select("recommendation_id,status")
+        .eq("user_id", userId);
+
+      if (error) throw error;
+
+      _remoteDecisionOverrides = normalizeRemoteDecisionRows(data);
+      _remoteDecisionFetchedAt = Date.now();
+      _notify();
+    } catch (error) {
+      logDecisionSyncUnavailable(error);
+    } finally {
+      _remoteDecisionFetchPromise = null;
+    }
+  })();
+
+  return _remoteDecisionFetchPromise;
+}
+
+async function persistRemoteRecommendationDecision(rec: Recommendation, status: RecommendationDecisionStatus) {
+  if (typeof window === "undefined") return;
+  if (Date.now() < _remoteDecisionUnavailableUntil) return;
+
+  const userId = await getCurrentInsforgeUserId();
+  const recommendationId = decisionKeyForRecommendation(rec);
+  const payload = {
+    user_id: userId,
+    recommendation_id: recommendationId,
+    status,
+    trend_id: rec.trendId ?? "",
+    title: rec.title ?? "",
+    recommendation_snapshot: {
+      title: rec.title,
+      description: rec.description,
+      industry: rec.industry,
+      productCategory: rec.productCategory,
+      targetDemographic: rec.targetDemographic,
+      confidenceScore: rec.confidenceScore,
+      estimatedRevenuePotential: rec.estimatedRevenuePotential,
+      priority: rec.priority,
+      actionPlan: rec.actionPlan,
+      sourceEvidence: rec.sourceEvidence ?? [],
+    },
+  };
+
+  const existing = await insforge.database
+    .from("recommendation_decisions")
+    .select("recommendation_id")
+    .eq("user_id", userId)
+    .eq("recommendation_id", recommendationId)
+    .maybeSingle();
+
+  if (existing.error) throw existing.error;
+
+  const result = existing.data
+    ? await insforge.database
+      .from("recommendation_decisions")
+      .update(payload)
+      .eq("user_id", userId)
+      .eq("recommendation_id", recommendationId)
+      .select()
+    : await insforge.database
+      .from("recommendation_decisions")
+      .insert([payload])
+      .select();
+
+  if (result.error) throw result.error;
+
+  _remoteDecisionOverrides.set(recommendationId, status);
+  _remoteDecisionFetchedAt = Date.now();
+}
 
 // Reactive version counter — subscribers re-render when data changes
 let _version = 0;
@@ -222,9 +389,14 @@ function _getVersion() {
 }
 
 function getRecs(): Recommendation[] {
+  ensureStatusOverridesLoaded();
   const base = _liveRecs ?? [];
   return base.map(r => {
-    const override = _statusOverrides.get(r.$primaryKey);
+    const decisionKey = decisionKeyForRecommendation(r);
+    const override =
+      _statusOverrides.get(decisionKey) ??
+      _statusOverrides.get(r.$primaryKey) ??
+      _remoteDecisionOverrides.get(decisionKey);
     return override ? { ...r, status: override } : { ...r };
   }) as Recommendation[];
 }
@@ -308,6 +480,9 @@ export function useOsdkObjects(objectType: ObjectType, opts?: Record<string, unk
     const refresh = (force = false) => {
       void fetchLiveData({ force });
       void fetchLiveRecommendations({ industry, force });
+      if (objectType === marketRecommendation) {
+        void fetchRemoteRecommendationDecisions({ force });
+      }
     };
 
     refresh();
@@ -398,9 +573,15 @@ export function useOsdkAction(actionType: string) {
 
     if (actionType === "updateRecommendationStatus") {
       const rec = params.recommendation as Recommendation;
-      const status = params.status as string;
-      _statusOverrides.set(rec.$primaryKey, status);
-      _notify();
+      const status = params.status;
+      if (isRecommendationDecisionStatus(status)) {
+        _statusOverrides.set(decisionKeyForRecommendation(rec), status);
+        saveStatusOverrides();
+        _notify();
+        void persistRemoteRecommendationDecision(rec, status)
+          .then(() => _notify())
+          .catch(logDecisionSyncUnavailable);
+      }
     }
 
     if (actionType === "bookmarkTrend") {
