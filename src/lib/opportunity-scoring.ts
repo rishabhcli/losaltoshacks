@@ -6,14 +6,19 @@ export interface OpportunityScoreBreakdown {
   label: "Strong" | "Promising" | "Speculative" | "Weak";
   opportunityScore: number;
   confidenceScore: number;
+  demandScore: number;
+  painUrgencyScore: number;
+  demandEvidenceScore: number;
   marketTimingScore: number;
   evidenceDiversityScore: number;
   executionDifficultyScore: number;
   riskScore: number;
   contradictionScore: number;
+  buyer: string;
   evidenceCount: number;
   coveredPlatforms: string[];
   missingPlatforms: string[];
+  demandSignals: string[];
   drivers: string[];
   warnings: string[];
 }
@@ -93,6 +98,44 @@ function hasContradictionLanguage(option: FinalOption) {
   return /contradict|mixed signal|pushback|backlash|declin|skeptic|concern/.test(text);
 }
 
+function demandTextFor(option: FinalOption, finalOptions: FinalOptionsPayload) {
+  return [
+    option.title,
+    option.concept,
+    option.audience,
+    option.whyPromising,
+    option.marketAngle,
+    finalOptions.implementationPlan.problem,
+    finalOptions.implementationPlan.valueProp,
+    finalOptions.implementationPlan.targetUsers,
+    finalOptions.marketResearch.summary,
+    ...finalOptions.marketResearch.signals,
+    ...option.evidence.flatMap((evidence) => [evidence.title, evidence.keywords, evidence.summary]),
+  ].join(" ");
+}
+
+function countMatches(text: string, patterns: RegExp[]) {
+  return patterns.reduce((count, pattern) => count + (pattern.test(text) ? 1 : 0), 0);
+}
+
+function scorePainUrgency(option: FinalOption, finalOptions: FinalOptionsPayload) {
+  const text = demandTextFor(option, finalOptions).toLowerCase();
+  const urgencyHits = countMatches(text, [
+    /\b(urgent|urgency|need|needs|needed|want|wants|demand|looking for|searching for)\b/,
+    /\b(pain|problem|struggle|friction|miss|missed|burnout|burned-out|stress|deadline)\b/,
+    /\b(without|before|can't|cannot|hard to|low-friction|lightweight|accountability)\b/,
+    /\b(repeat|weekly|recurring|retention|habit|routine|operating plan|system)\b/,
+  ]);
+  return roundScore(34 + urgencyHits * 13 + finalOptions.marketResearch.signals.length * 4 + Math.min(12, option.evidence.length * 4));
+}
+
+function demandSignalLabel(score: number) {
+  if (score >= 80) return "strong";
+  if (score >= 62) return "promising";
+  if (score >= 45) return "thin";
+  return "weak";
+}
+
 function difficultyLabel(score: number) {
   if (score >= 70) return "High";
   if (score >= 45) return "Moderate";
@@ -115,6 +158,10 @@ function scoreOption(option: FinalOption, finalOptions: FinalOptionsPayload): Op
   const evidenceDiversityScore = evidenceCount === 0
     ? 0
     : roundScore((coveredPlatforms.length / requiredPlatforms.length) * 100);
+  const painUrgencyScore = scorePainUrgency(option, finalOptions);
+  const demandEvidenceScore = roundScore(evidenceVolumeScore * 0.6 + evidenceDiversityScore * 0.4);
+  const demandScore = roundScore(painUrgencyScore * 0.58 + demandEvidenceScore * 0.42);
+  const buyer = option.audience || finalOptions.implementationPlan.targetUsers || "Buyer not specified";
   const confidenceScore = roundScore(
     evidenceDiversityScore * 0.55 +
     evidenceVolumeScore * 0.25 +
@@ -151,12 +198,19 @@ function scoreOption(option: FinalOption, finalOptions: FinalOptionsPayload): Op
   );
 
   const drivers = [
+    `Demand score: ${demandScore} (${demandSignalLabel(demandScore)})`,
     `Evidence diversity: ${coveredPlatforms.length}/${requiredPlatforms.length} platforms`,
     `Market timing: ${finalOptions.marketResearch.signals.length} signal${finalOptions.marketResearch.signals.length === 1 ? "" : "s"}`,
     `Execution difficulty: ${difficultyLabel(executionDifficultyScore)}`,
   ];
+  const demandSignals = [
+    `Buyer: ${buyer}`,
+    `Pain urgency: ${painUrgencyScore}/100`,
+    `Demand evidence: ${evidenceCount} source${evidenceCount === 1 ? "" : "s"} across ${coveredPlatforms.length} platform${coveredPlatforms.length === 1 ? "" : "s"}`,
+  ];
   const warnings = [
     missingPlatforms.length > 0 ? `Missing platform coverage: ${missingPlatforms.join(", ")}` : "",
+    demandScore < 50 ? "Demand evidence is weak; verify buyer urgency before venture handoff." : "",
     riskScore >= 50 ? "Risk pressure is elevated; review assumptions before handoff." : "",
     contradictionScore >= 25 ? "Contradiction risk is elevated by incomplete or mixed evidence." : "",
     confidenceScore < 55 ? "Confidence is weak; collect more source evidence." : "",
@@ -168,14 +222,19 @@ function scoreOption(option: FinalOption, finalOptions: FinalOptionsPayload): Op
     label: scoreLabel(opportunityScore),
     opportunityScore,
     confidenceScore,
+    demandScore,
+    painUrgencyScore,
+    demandEvidenceScore,
     marketTimingScore,
     evidenceDiversityScore,
     executionDifficultyScore,
     riskScore,
     contradictionScore,
+    buyer,
     evidenceCount,
     coveredPlatforms,
     missingPlatforms,
+    demandSignals,
     drivers,
     warnings,
   };

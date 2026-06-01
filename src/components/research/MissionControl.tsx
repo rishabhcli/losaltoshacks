@@ -223,6 +223,7 @@ export function MissionControl({
         <div className="flex min-w-0 flex-1 items-center gap-3 bg-slate-50/80 dark:bg-slate-950/85 border border-slate-200 dark:border-slate-800/80 rounded-2xl px-4 py-2.5">
           <Search className="w-4 h-4 text-slate-400 shrink-0" />
           <input
+            aria-label="Research mission prompt"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -235,6 +236,7 @@ export function MissionControl({
         {/* Dictate button — MiniMax TTS */}
         <Button
           type="button"
+          aria-label={isPlaying ? "Stop prompt dictation" : "Dictate research mission prompt"}
           onClick={isPlaying ? handleStopDictate : handleDictate}
           disabled={isDictating || (!input.trim() && !missionPrompt)}
           title={isPlaying ? "Stop dictation" : "Dictate prompt using MiniMax TTS"}

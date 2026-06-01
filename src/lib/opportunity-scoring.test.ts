@@ -111,10 +111,15 @@ describe("scoreFinalOptions", () => {
       evidenceDiversityScore: 75,
       missingPlatforms: ["x"],
     }));
+    expect(scorecard.primary.demandScore).toBeGreaterThanOrEqual(80);
+    expect(scorecard.primary.painUrgencyScore).toBeGreaterThan(scorecard.primary.demandEvidenceScore);
+    expect(scorecard.primary.buyer).toBe("Students and first-job Gen Z professionals.");
+    expect(scorecard.primary.demandSignals).toContain("Buyer: Students and first-job Gen Z professionals.");
     expect(scorecard.rankedOptions.map((option) => option.optionId)).toEqual([
       "demo-option-1",
       "demo-option-2",
     ]);
+    expect(scorecard.primary.drivers).toContain(`Demand score: ${scorecard.primary.demandScore} (strong)`);
     expect(scorecard.primary.drivers).toContain("Evidence diversity: 3/4 platforms");
     expect(scorecard.primary.warnings).toContain("Missing platform coverage: x");
   });
@@ -126,6 +131,7 @@ describe("scoreFinalOptions", () => {
     const scorecard = scoreFinalOptions(payload);
 
     expect(scorecard.primary.evidenceDiversityScore).toBe(0);
+    expect(scorecard.primary.demandEvidenceScore).toBe(0);
     expect(scorecard.primary.confidenceScore).toBeLessThan(10);
     expect(scorecard.primary.warnings).toContain("Confidence is weak; collect more source evidence.");
   });

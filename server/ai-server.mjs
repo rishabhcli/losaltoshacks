@@ -26,12 +26,34 @@ process.on("uncaughtException", (err) => {
 });
 
 const port = Number.parseInt(process.env.AI_SERVER_PORT || "3001", 10);
+const STRUCTURED_LOGS_ENABLED = ["1", "true", "yes"].includes(
+  String(process.env.MASTERBUILD_LOG_STRUCTURED ?? "").toLowerCase()
+);
+
+function structuredLog(event, details = {}) {
+  if (!STRUCTURED_LOGS_ENABLED) return;
+
+  console.log(JSON.stringify({
+    ts: new Date().toISOString(),
+    scope: "ai-server",
+    event,
+    ...details,
+  }));
+}
+
+function requestLogContext(response) {
+  return response.__marketPulseRequestLog ?? null;
+}
 
 function resolveMasterbuildRuntimeDir() {
   const envRuntime = process.env.MASTERBUILD_RUNTIME_DIR;
   return envRuntime
     ? (path.isAbsolute(envRuntime) ? envRuntime : path.join(process.cwd(), envRuntime))
     : path.join(process.cwd(), "runtime");
+}
+
+function resolveOperationEvidenceDir() {
+  return path.join(resolveMasterbuildRuntimeDir(), "operation-evidence");
 }
 
 /** Clear local JPEG previews for browser-use agents (default 1–4). */
@@ -48,6 +70,7 @@ function clearBrowserAgentPreviewFrames(agentIds = [1, 2, 3, 4]) {
 }
 
 function writeJson(response, statusCode, body) {
+  const requestContext = requestLogContext(response);
   response.writeHead(statusCode, {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type",
@@ -55,6 +78,16 @@ function writeJson(response, statusCode, body) {
     "Content-Type": "application/json; charset=utf-8",
   });
   response.end(JSON.stringify(body));
+
+  if (requestContext) {
+    structuredLog("http.response", {
+      requestId: requestContext.requestId,
+      method: requestContext.method,
+      path: requestContext.path,
+      statusCode,
+      durationMs: Date.now() - requestContext.startedAt,
+    });
+  }
 }
 
 async function readJsonBody(request) {
@@ -78,6 +111,11 @@ function getFirstEnv(names) {
     if (value) return value;
   }
   return "";
+}
+
+function getPositiveIntegerEnv(name, fallback) {
+  const value = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function compactHealthMessage(value) {
@@ -859,10 +897,18 @@ async function handleDemoMissionCreate(request, response) {
   const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
 
   if (!prompt) {
+    structuredLog("mission.create.rejected", { mode: "demo", reason: "mission_prompt_required" });
     return writeJson(response, 400, { error: "mission_prompt_required" });
   }
 
   demoDashboardState = buildDemoDashboardState(prompt);
+  structuredLog("mission.create.accepted", {
+    mode: "demo",
+    missionId: demoDashboardState.mission.id,
+    status: demoDashboardState.mission.status,
+    promptLength: prompt.length,
+    supersededMissionCount: 0,
+  });
   writeJson(response, 200, {
     ok: true,
     demoMode: true,
@@ -876,6 +922,7 @@ async function handleDemoMissionCreate(request, response) {
 }
 
 async function handleDemoMissionStop(_request, response) {
+  const missionId = demoDashboardState?.mission?.id ?? null;
   if (demoDashboardState?.mission) {
     demoDashboardState = {
       ...demoDashboardState,
@@ -883,12 +930,14 @@ async function handleDemoMissionStop(_request, response) {
       agents: demoDashboardState.agents.map((agent) => ({ ...agent, status: "stopped", energy: 0 })),
     };
   }
+  structuredLog("mission.stop", { mode: "demo", missionId, changed: Boolean(missionId) });
   writeJson(response, 200, { ok: true, demoMode: true, missionId: demoDashboardState?.mission?.id ?? null });
 }
 
 async function handleDemoMissionReset(_request, response) {
   const missionId = demoDashboardState?.mission?.id ?? null;
   demoDashboardState = null;
+  structuredLog("mission.reset", { mode: "demo", missionId, changed: Boolean(missionId) });
   writeJson(response, 200, { ok: true, demoMode: true, missionId });
 }
 
@@ -897,9 +946,11 @@ async function handleDemoAgentRetry(request, response) {
   const agentId = Number(body?.agentId);
 
   if (!Number.isInteger(agentId) || agentId < 1 || agentId > 5) {
+    structuredLog("agent.retry.rejected", { mode: "demo", agentId: Number.isFinite(agentId) ? agentId : null, reason: "agent_id_invalid" });
     return writeJson(response, 400, { error: "agent_id_invalid" });
   }
   if (!demoDashboardState?.mission) {
+    structuredLog("agent.retry.rejected", { mode: "demo", agentId, reason: "mission_not_found" });
     return writeJson(response, 404, { error: "mission_not_found" });
   }
 
@@ -943,6 +994,13 @@ async function handleDemoAgentRetry(request, response) {
     ],
   };
 
+  structuredLog("agent.retry.accepted", {
+    mode: "demo",
+    missionId,
+    agentId,
+    retryCount: updatedAgent?.retry_count ?? null,
+    status: updatedAgent?.status ?? "unknown",
+  });
   writeJson(response, 200, {
     ok: true,
     demoMode: true,
@@ -1150,6 +1208,7 @@ async function handleMissionCreate(request, response) {
   const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
 
   if (!prompt) {
+    structuredLog("mission.create.rejected", { mode: "live", reason: "mission_prompt_required" });
     return writeJson(response, 400, { error: "mission_prompt_required" });
   }
 
@@ -1277,6 +1336,13 @@ async function handleMissionCreate(request, response) {
   invalidateDashboardSnapshot();
   invalidateRecsCache();
 
+  structuredLog("mission.create.accepted", {
+    mode: "live",
+    missionId,
+    status: "queued",
+    promptLength: prompt.length,
+    supersededMissionCount: supersededMissionIds.length,
+  });
   writeJson(response, 200, {
     ok: true,
     mission: { mission_id: missionId, prompt, status: "queued", supersededMissionIds },
@@ -1297,6 +1363,7 @@ async function handleMissionStop(request, response) {
   const targetId = await resolveMissionId(insforge, missionId);
 
   if (!targetId) {
+    structuredLog("mission.stop", { mode: "live", missionId: null, changed: false });
     return writeJson(response, 200, { ok: true, missionId: null });
   }
 
@@ -1343,6 +1410,7 @@ async function handleMissionStop(request, response) {
 
   invalidateDashboardSnapshot();
 
+  structuredLog("mission.stop", { mode: "live", missionId: targetId, changed: true });
   writeJson(response, 200, { ok: true, missionId: targetId });
 }
 
@@ -1360,10 +1428,12 @@ async function handleMissionReset(request, response) {
   const targetId = await resolveMissionId(insforge, missionId);
 
   if (!targetId) {
+    structuredLog("mission.reset", { mode: "live", missionId: null, changed: false });
     return writeJson(response, 200, { ok: true, missionId: null, message: "No active mission to reset" });
   }
 
   console.log(`[ai-server] Starting reset for mission: ${targetId}`);
+  structuredLog("mission.reset.started", { mode: "live", missionId: targetId });
 
   try {
     // Send stop command first
@@ -1446,6 +1516,11 @@ async function handleMissionReset(request, response) {
     invalidateRecsCache();
 
     console.log(`[ai-server] Reset complete for mission: ${targetId}`);
+    structuredLog("mission.reset.completed", {
+      mode: "live",
+      missionId: targetId,
+      deleteErrorCount: deleteErrors.length,
+    });
 
     writeJson(response, 200, {
       ok: true,
@@ -1454,6 +1529,11 @@ async function handleMissionReset(request, response) {
     });
   } catch (error) {
     console.error(`[ai-server] Reset failed for mission ${targetId}:`, error);
+    structuredLog("mission.reset.failed", {
+      mode: "live",
+      missionId: targetId,
+      error: compactHealthMessage(error?.message ?? error),
+    });
     writeJson(response, 500, {
       ok: false,
       error: error?.message ?? "Reset failed",
@@ -1474,6 +1554,7 @@ async function handleAgentRetry(request, response) {
     : null;
 
   if (!Number.isInteger(agentId) || agentId < 1 || agentId > 5) {
+    structuredLog("agent.retry.rejected", { mode: "live", agentId: Number.isFinite(agentId) ? agentId : null, reason: "agent_id_invalid" });
     return writeJson(response, 400, { error: "agent_id_invalid" });
   }
 
@@ -1481,6 +1562,7 @@ async function handleAgentRetry(request, response) {
   const targetId = await resolveMissionId(insforge, missionId);
 
   if (!targetId) {
+    structuredLog("agent.retry.rejected", { mode: "live", agentId, reason: "mission_not_found" });
     return writeJson(response, 404, { error: "mission_not_found" });
   }
 
@@ -1491,9 +1573,11 @@ async function handleAgentRetry(request, response) {
     .maybeSingle();
   if (missionResult.error) throw missionResult.error;
   if (!missionResult.data) {
+    structuredLog("agent.retry.rejected", { mode: "live", missionId: targetId, agentId, reason: "mission_not_found" });
     return writeJson(response, 404, { error: "mission_not_found" });
   }
   if (String(missionResult.data.status ?? "") === "stopping") {
+    structuredLog("agent.retry.rejected", { mode: "live", missionId: targetId, agentId, reason: "mission_stopping" });
     return writeJson(response, 409, { error: "mission_stopping" });
   }
 
@@ -1505,6 +1589,7 @@ async function handleAgentRetry(request, response) {
     .maybeSingle();
   if (agentResult.error) throw agentResult.error;
   if (!agentResult.data) {
+    structuredLog("agent.retry.rejected", { mode: "live", missionId: targetId, agentId, reason: "agent_not_found" });
     return writeJson(response, 404, { error: "agent_not_found", missionId: targetId, agentId });
   }
 
@@ -1561,6 +1646,13 @@ async function handleAgentRetry(request, response) {
 
   invalidateDashboardSnapshot();
 
+  structuredLog("agent.retry.accepted", {
+    mode: "live",
+    missionId: targetId,
+    agentId,
+    retryCount,
+    priorStatus: String(agentResult.data.status ?? ""),
+  });
   writeJson(response, 200, {
     ok: true,
     missionId: targetId,
@@ -2628,6 +2720,11 @@ async function handleRecommendations(request, response) {
 
 const BG_JOB_INTERVAL_MS = 12 * 60 * 60 * 1000;  // re-run every 12 hours
 const BG_JOB_MIN_AGE_MS  = 4 * 60 * 60 * 1000;  // skip if latest mission < 4h old
+const BG_JOB_RECENT_RUN_LIMIT = 8;
+const BG_SEARCH_DELAY_MS = getPositiveIntegerEnv("MASTERBUILD_BG_SEARCH_DELAY_MS", 1100);
+const BG_SEARCH_MIN_DELAY_MS = getPositiveIntegerEnv("MASTERBUILD_BG_SEARCH_MIN_DELAY_MS", 1000);
+const BG_SEARCH_MAX_QUERIES_PER_RUN = getPositiveIntegerEnv("MASTERBUILD_BG_SEARCH_MAX_QUERIES_PER_RUN", 12);
+const BG_DISCOVERY_DEDUPE_LOOKBACK = getPositiveIntegerEnv("MASTERBUILD_BG_DISCOVERY_DEDUPE_LOOKBACK", 500);
 
 // One query per industry — 12 queries × ≤10 results = ≤120 discoveries per run
 const BG_SEARCH_QUERIES = [
@@ -2644,6 +2741,607 @@ const BG_SEARCH_QUERIES = [
   { q: "trending streaming gaming creator economy social media 2025",             industry: "entertainment-media" },
   { q: "trending consumer products brands going viral reddit twitter 2025",        industry: "All" },
 ];
+
+function getInsforgeRuntimeCredentialState() {
+  const explicitBaseUrl = getFirstEnv(["MASTERBUILD_INSFORGE_URL", "VITE_INSFORGE_URL"]);
+  const linkedBaseUrl = explicitBaseUrl ? "" : getLinkedInsforgeBaseUrl();
+  const baseUrl = (explicitBaseUrl || linkedBaseUrl || "").replace(/\/+$/, "");
+  const serviceRoleConfigured = hasAnyEnv(["INSFORGE_SERVICE_ROLE_KEY"]);
+  const linkedAdminConfigured = Boolean(baseUrl && getLinkedInsforgeAdminKey(baseUrl));
+  const anonConfigured = hasAnyEnv(["VITE_INSFORGE_ANON_KEY"]);
+  const tokenSources = [
+    serviceRoleConfigured ? "INSFORGE_SERVICE_ROLE_KEY" : "",
+    linkedAdminConfigured ? "linked-insforge-admin-key" : "",
+    anonConfigured ? "VITE_INSFORGE_ANON_KEY" : "",
+  ].filter(Boolean);
+
+  return {
+    baseUrlConfigured: Boolean(baseUrl),
+    baseUrlSource: explicitBaseUrl ? "env" : (linkedBaseUrl ? "linked-insforge" : ""),
+    tokenConfigured: tokenSources.length > 0,
+    tokenSources,
+  };
+}
+
+function getBackgroundRefreshReadiness() {
+  const insforgeCredentials = getInsforgeRuntimeCredentialState();
+  const openAiConfigured = hasAnyEnv(["OPENAI_API_KEY"]);
+  const braveConfigured = hasAnyEnv(["BRAVE_SEARCH_API_KEY"]);
+  const mongoConfigured = hasAnyEnv(["MONGODB_URI", "MONGODB_ATLAS_URI"]);
+  const queryCount = BG_SEARCH_QUERIES.length;
+  const rateLimitOk = queryCount <= BG_SEARCH_MAX_QUERIES_PER_RUN && BG_SEARCH_DELAY_MS >= BG_SEARCH_MIN_DELAY_MS;
+
+  const checks = [
+    {
+      name: "live-mode",
+      ok: !DEMO_MODE,
+      requiredForLive: true,
+      status: DEMO_MODE ? "demo-disabled" : "ready",
+      message: DEMO_MODE ? "Demo mode disables live background refresh runs." : "Live background refresh mode is enabled.",
+      action: DEMO_MODE ? "Unset MARKETPULSE_DEMO_MODE before attempting a live background refresh." : "",
+    },
+    {
+      name: "insforge-url",
+      ok: insforgeCredentials.baseUrlConfigured,
+      requiredForLive: true,
+      status: insforgeCredentials.baseUrlConfigured ? "configured" : "missing",
+      message: insforgeCredentials.baseUrlConfigured
+        ? "InsForge base URL is configured for background mission writes."
+        : "InsForge base URL is missing for background mission writes.",
+      action: insforgeCredentials.baseUrlConfigured ? "" : "Set MASTERBUILD_INSFORGE_URL or VITE_INSFORGE_URL.",
+      source: insforgeCredentials.baseUrlSource,
+    },
+    {
+      name: "insforge-token",
+      ok: insforgeCredentials.tokenConfigured,
+      requiredForLive: true,
+      status: insforgeCredentials.tokenConfigured ? "configured" : "missing",
+      message: insforgeCredentials.tokenConfigured
+        ? "InsForge token material is present without exposing secret values."
+        : "InsForge token material is missing for background mission writes.",
+      action: insforgeCredentials.tokenConfigured ? "" : "Set INSFORGE_SERVICE_ROLE_KEY or VITE_INSFORGE_ANON_KEY, or link a local InsForge admin key.",
+      sources: insforgeCredentials.tokenSources,
+    },
+    {
+      name: "brave-search-key",
+      ok: braveConfigured,
+      requiredForLive: true,
+      status: braveConfigured ? "configured" : "missing",
+      message: braveConfigured
+        ? "Brave Search API key is present for background source discovery."
+        : "Brave Search API key is missing, so live background discovery would produce no search evidence.",
+      action: braveConfigured ? "" : "Set BRAVE_SEARCH_API_KEY before enabling live background refresh.",
+    },
+    {
+      name: "openai-key",
+      ok: openAiConfigured,
+      requiredForLive: true,
+      status: openAiConfigured ? "configured" : "missing",
+      message: openAiConfigured
+        ? "OpenAI API key is present for background synthesis."
+        : "OpenAI API key is missing, so background synthesis cannot produce a business plan.",
+      action: openAiConfigured ? "" : "Set OPENAI_API_KEY before enabling live background refresh synthesis.",
+    },
+    {
+      name: "rate-limit-budget",
+      ok: rateLimitOk,
+      requiredForLive: true,
+      status: rateLimitOk ? "ready" : "unsafe",
+      message: rateLimitOk
+        ? "Background search cadence stays within the configured per-run query and delay guardrails."
+        : "Background search cadence exceeds the configured query count or minimum delay guardrails.",
+      action: rateLimitOk ? "" : "Reduce BG_SEARCH_QUERIES or raise MASTERBUILD_BG_SEARCH_MAX_QUERIES_PER_RUN / MASTERBUILD_BG_SEARCH_DELAY_MS.",
+      queryCount,
+      maxQueriesPerRun: BG_SEARCH_MAX_QUERIES_PER_RUN,
+      searchDelayMs: BG_SEARCH_DELAY_MS,
+      minDelayMs: BG_SEARCH_MIN_DELAY_MS,
+    },
+    {
+      name: "single-flight",
+      ok: !backgroundRefreshMonitor.currentRun,
+      requiredForLive: false,
+      status: backgroundRefreshMonitor.currentRun ? "running" : "idle",
+      message: backgroundRefreshMonitor.currentRun
+        ? "A background refresh is already running; overlapping live refreshes are rejected."
+        : "No background refresh is currently running.",
+      action: backgroundRefreshMonitor.currentRun ? "Wait for the current run to finish before starting another refresh." : "",
+      activeRunId: backgroundRefreshMonitor.currentRun?.runId ?? null,
+    },
+    {
+      name: "mongodb-vector",
+      ok: mongoConfigured,
+      requiredForLive: false,
+      status: mongoConfigured ? "configured" : "optional-missing",
+      message: mongoConfigured
+        ? "MongoDB vector sync is configured for semantic evidence storage."
+        : "MongoDB vector sync is not configured; the refresh can still write relational evidence.",
+      action: mongoConfigured ? "" : "Set MONGODB_URI or MONGODB_ATLAS_URI to enable semantic evidence sync.",
+    },
+  ];
+
+  const blockingReasons = checks
+    .filter((check) => check.requiredForLive && !check.ok)
+    .map((check) => check.name);
+  const warnings = checks
+    .filter((check) => !check.requiredForLive && !check.ok)
+    .map((check) => check.name);
+  const liveReady = blockingReasons.length === 0;
+
+  return {
+    ok: liveReady,
+    liveReady,
+    canStartNow: liveReady && !backgroundRefreshMonitor.currentRun,
+    demoMode: DEMO_MODE,
+    blockingReasons,
+    warnings,
+    checks,
+    rateLimit: {
+      queryCount,
+      maxQueriesPerRun: BG_SEARCH_MAX_QUERIES_PER_RUN,
+      searchDelayMs: BG_SEARCH_DELAY_MS,
+      minDelayMs: BG_SEARCH_MIN_DELAY_MS,
+      estimatedSearchDurationMs: queryCount * BG_SEARCH_DELAY_MS,
+      intervalMs: BG_JOB_INTERVAL_MS,
+      minAgeMs: BG_JOB_MIN_AGE_MS,
+    },
+    dedupe: {
+      recentSourceLookback: BG_DISCOVERY_DEDUPE_LOOKBACK,
+    },
+  };
+}
+
+const backgroundRefreshMonitor = {
+  currentRun: null,
+  lastRun: null,
+  recentRuns: [],
+  totals: {
+    started: 0,
+    completed: 0,
+    failed: 0,
+    skipped: 0,
+    rejected: 0,
+  },
+};
+
+function compactBackgroundRun(run) {
+  if (!run) return null;
+  return {
+    runId: run.runId,
+    trigger: run.trigger,
+    force: run.force,
+    status: run.status,
+    reason: run.reason,
+    missionId: run.missionId,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+    durationMs: run.finishedAt ? new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime() : Date.now() - new Date(run.startedAt).getTime(),
+    searchQueries: run.searchQueries,
+    discoveriesFound: run.discoveriesFound,
+    discoveriesInserted: run.discoveriesInserted,
+    duplicateSourcesSkipped: run.duplicateSourcesSkipped,
+    discoveryInsertFailures: run.discoveryInsertFailures,
+    vectorSynced: run.vectorSynced,
+    vectorErrors: run.vectorErrors,
+    synthesisStatus: run.synthesisStatus,
+    error: run.error,
+    retry: run.retry,
+    steps: run.steps.slice(-12),
+  };
+}
+
+function attachBackgroundRefreshRetry(run, reason) {
+  if (!run || run.retry) return;
+  run.retry = {
+    available: true,
+    method: "POST",
+    path: "/api/refresh",
+    trigger: "manual",
+    reason: compactHealthMessage(reason || run.error || run.reason || "background_refresh_failed"),
+    missionId: run.missionId,
+    createdAt: new Date().toISOString(),
+    replayCommand: "curl -fsS -X POST http://127.0.0.1:3001/api/refresh",
+  };
+}
+
+function backgroundRefreshSnapshot() {
+  const readiness = getBackgroundRefreshReadiness();
+  return {
+    ok: true,
+    demoMode: DEMO_MODE,
+    status: DEMO_MODE ? "disabled" : (backgroundRefreshMonitor.currentRun ? "running" : "idle"),
+    scheduler: {
+      enabled: !DEMO_MODE && readiness.liveReady,
+      blocked: !readiness.liveReady,
+      intervalMs: BG_JOB_INTERVAL_MS,
+      minAgeMs: BG_JOB_MIN_AGE_MS,
+      queryCount: BG_SEARCH_QUERIES.length,
+      searchDelayMs: BG_SEARCH_DELAY_MS,
+    },
+    readiness,
+    currentRun: compactBackgroundRun(backgroundRefreshMonitor.currentRun),
+    lastRun: compactBackgroundRun(backgroundRefreshMonitor.lastRun),
+    recentRuns: backgroundRefreshMonitor.recentRuns.map(compactBackgroundRun),
+    totals: { ...backgroundRefreshMonitor.totals },
+  };
+}
+
+function writeBackgroundRefreshEvidenceArtifact() {
+  const generatedAt = new Date().toISOString();
+  const snapshot = backgroundRefreshSnapshot();
+  const artifact = {
+    artifactType: "marketpulse.background-refresh.operation-evidence",
+    schemaVersion: 1,
+    generatedAt,
+    source: {
+      service: "ai-server",
+      endpoint: "/api/background/refresh/export",
+      demoMode: DEMO_MODE,
+    },
+    evidence: {
+      readiness: snapshot.readiness,
+      scheduler: snapshot.scheduler,
+      currentRun: snapshot.currentRun,
+      lastRun: snapshot.lastRun,
+      recentRuns: snapshot.recentRuns,
+      totals: snapshot.totals,
+    },
+    operatorSummary: {
+      status: snapshot.status,
+      canStartNow: Boolean(snapshot.readiness?.canStartNow),
+      blockingReasons: snapshot.readiness?.blockingReasons ?? [],
+      warnings: snapshot.readiness?.warnings ?? [],
+      lastRunId: snapshot.lastRun?.runId ?? null,
+      recentRunCount: snapshot.recentRuns.length,
+      totals: snapshot.totals,
+    },
+  };
+  const json = `${JSON.stringify(artifact, null, 2)}\n`;
+  const sha256 = crypto.createHash("sha256").update(json).digest("hex");
+  const filename = `background-refresh-${generatedAt.replace(/[:.]/g, "-")}.json`;
+  const directory = resolveOperationEvidenceDir();
+  const filePath = path.join(directory, filename);
+  const tempPath = `${filePath}.tmp`;
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(tempPath, json, "utf8");
+  fs.renameSync(tempPath, filePath);
+  const bytes = Buffer.byteLength(json, "utf8");
+
+  return {
+    ok: true,
+    artifactType: artifact.artifactType,
+    schemaVersion: artifact.schemaVersion,
+    generatedAt,
+    path: filePath,
+    relativePath: path.relative(process.cwd(), filePath),
+    runtimeRelativePath: path.relative(resolveMasterbuildRuntimeDir(), filePath),
+    filename,
+    bytes,
+    sha256,
+    backgroundRefresh: snapshot,
+    operatorSummary: artifact.operatorSummary,
+  };
+}
+
+function listBackgroundRefreshEvidenceArtifacts(limit = 20) {
+  const directory = resolveOperationEvidenceDir();
+  const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 100) : 20;
+  if (!fs.existsSync(directory)) {
+    return {
+      ok: true,
+      artifactType: "marketpulse.background-refresh.operation-evidence.index",
+      schemaVersion: 1,
+      directory,
+      runtimeRelativeDirectory: path.relative(resolveMasterbuildRuntimeDir(), directory),
+      count: 0,
+      artifacts: [],
+    };
+  }
+
+  const artifacts = fs.readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /^background-refresh-.+\.json$/.test(entry.name))
+    .map((entry) => {
+      const filePath = path.join(directory, entry.name);
+      const stat = fs.statSync(filePath);
+      const raw = fs.readFileSync(filePath, "utf8");
+      const sha256 = crypto.createHash("sha256").update(raw).digest("hex");
+      let parsed = null;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        parsed = null;
+      }
+      return {
+        filename: entry.name,
+        path: filePath,
+        relativePath: path.relative(process.cwd(), filePath),
+        runtimeRelativePath: path.relative(resolveMasterbuildRuntimeDir(), filePath),
+        bytes: stat.size,
+        sha256,
+        modifiedAt: stat.mtime.toISOString(),
+        generatedAt: parsed?.generatedAt ?? null,
+        status: parsed?.operatorSummary?.status ?? "unknown",
+        lastRunId: parsed?.operatorSummary?.lastRunId ?? null,
+        recentRunCount: parsed?.operatorSummary?.recentRunCount ?? null,
+        blockingReasons: parsed?.operatorSummary?.blockingReasons ?? [],
+        warnings: parsed?.operatorSummary?.warnings ?? [],
+        parseable: Boolean(parsed),
+      };
+    })
+    .sort((a, b) => String(b.generatedAt ?? b.modifiedAt).localeCompare(String(a.generatedAt ?? a.modifiedAt)))
+    .slice(0, safeLimit);
+
+  return {
+    ok: true,
+    artifactType: "marketpulse.background-refresh.operation-evidence.index",
+    schemaVersion: 1,
+    directory,
+    runtimeRelativeDirectory: path.relative(resolveMasterbuildRuntimeDir(), directory),
+    count: artifacts.length,
+    artifacts,
+  };
+}
+
+function isPathInside(childPath, parentPath) {
+  const relative = path.relative(path.resolve(parentPath), path.resolve(childPath));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function resolveBackgroundRefreshEvidenceArtifactPath(input = {}) {
+  const directory = resolveOperationEvidenceDir();
+  const runtimeDir = resolveMasterbuildRuntimeDir();
+  const filename = typeof input.filename === "string" ? input.filename.trim() : "";
+  const runtimeRelativePath = typeof input.runtimeRelativePath === "string" ? input.runtimeRelativePath.trim() : "";
+  const providedPath = typeof input.path === "string" ? input.path.trim() : "";
+
+  let candidate = "";
+  if (filename) {
+    if (!/^background-refresh-.+\.json$/.test(filename) || path.basename(filename) !== filename) {
+      throw new Error("invalid_background_refresh_artifact_filename");
+    }
+    candidate = path.join(directory, filename);
+  } else if (runtimeRelativePath) {
+    candidate = path.resolve(runtimeDir, runtimeRelativePath);
+  } else if (providedPath) {
+    candidate = path.isAbsolute(providedPath)
+      ? providedPath
+      : path.resolve(process.cwd(), providedPath);
+  } else {
+    throw new Error("background_refresh_artifact_reference_required");
+  }
+
+  if (!isPathInside(candidate, directory) || !/^background-refresh-.+\.json$/.test(path.basename(candidate))) {
+    throw new Error("background_refresh_artifact_path_outside_evidence_dir");
+  }
+
+  return candidate;
+}
+
+function inspectBackgroundRefreshEvidenceArtifact(input = {}) {
+  const inspectedAt = new Date().toISOString();
+  const filePath = resolveBackgroundRefreshEvidenceArtifactPath(input);
+  const current = backgroundRefreshSnapshot();
+  const expectedSha256 = typeof input.sha256 === "string" ? input.sha256.trim().toLowerCase() : "";
+  const base = {
+    artifactType: "marketpulse.background-refresh.operation-evidence.inspection",
+    schemaVersion: 1,
+    inspectedAt,
+    path: filePath,
+    relativePath: path.relative(process.cwd(), filePath),
+    runtimeRelativePath: path.relative(resolveMasterbuildRuntimeDir(), filePath),
+    currentSummary: {
+      status: current.status,
+      lastRunId: current.lastRun?.runId ?? null,
+      recentRunCount: current.recentRuns.length,
+      blockingReasons: current.readiness?.blockingReasons ?? [],
+      warnings: current.readiness?.warnings ?? [],
+      totals: current.totals,
+    },
+  };
+
+  if (!fs.existsSync(filePath)) {
+    return {
+      ok: false,
+      ...base,
+      exists: false,
+      validArtifact: false,
+      error: "background_refresh_artifact_not_found",
+    };
+  }
+
+  const raw = fs.readFileSync(filePath, "utf8");
+  const bytes = Buffer.byteLength(raw, "utf8");
+  const sha256 = crypto.createHash("sha256").update(raw).digest("hex");
+  let artifact = null;
+  let parseError = "";
+  try {
+    artifact = JSON.parse(raw);
+  } catch (error) {
+    parseError = compactHealthMessage(error?.message ?? error);
+  }
+
+  const validSchema =
+    artifact?.artifactType === "marketpulse.background-refresh.operation-evidence" &&
+    artifact?.schemaVersion === 1 &&
+    artifact?.operatorSummary &&
+    artifact?.evidence;
+  const artifactSummary = artifact?.operatorSummary
+    ? {
+        status: artifact.operatorSummary.status ?? "unknown",
+        lastRunId: artifact.operatorSummary.lastRunId ?? null,
+        recentRunCount: artifact.operatorSummary.recentRunCount ?? null,
+        blockingReasons: artifact.operatorSummary.blockingReasons ?? [],
+        warnings: artifact.operatorSummary.warnings ?? [],
+        totals: artifact.operatorSummary.totals ?? {},
+        generatedAt: artifact.generatedAt ?? null,
+      }
+    : null;
+
+  return {
+    ok: true,
+    ...base,
+    exists: true,
+    validArtifact: Boolean(validSchema),
+    parseable: Boolean(artifact),
+    validSchema: Boolean(validSchema),
+    parseError,
+    expectedSha256,
+    hashMatchesExpected: expectedSha256 ? sha256 === expectedSha256 : null,
+    file: {
+      filename: path.basename(filePath),
+      bytes,
+      sha256,
+      modifiedAt: fs.statSync(filePath).mtime.toISOString(),
+    },
+    artifactSummary,
+    comparison: {
+      matchesCurrentLastRunId: artifactSummary?.lastRunId === base.currentSummary.lastRunId,
+      matchesCurrentStatus: artifactSummary?.status === base.currentSummary.status,
+      artifactLastRunId: artifactSummary?.lastRunId ?? null,
+      currentLastRunId: base.currentSummary.lastRunId,
+      artifactStatus: artifactSummary?.status ?? null,
+      currentStatus: base.currentSummary.status,
+      artifactBlockingReasons: artifactSummary?.blockingReasons ?? [],
+      currentBlockingReasons: base.currentSummary.blockingReasons,
+      artifactRecentRunCount: artifactSummary?.recentRunCount ?? null,
+      currentRecentRunCount: base.currentSummary.recentRunCount,
+    },
+  };
+}
+
+function startBackgroundRefreshRun({ force, trigger }) {
+  if (backgroundRefreshMonitor.currentRun) {
+    backgroundRefreshMonitor.totals.rejected += 1;
+    recordBackgroundRefreshStep(backgroundRefreshMonitor.currentRun, "overlap-rejected", {
+      rejectedTrigger: trigger,
+      rejectedForce: force,
+      reason: "already_running",
+    });
+    structuredLog("background.refresh.rejected", {
+      reason: "already_running",
+      trigger,
+      force,
+      activeRunId: backgroundRefreshMonitor.currentRun.runId,
+    });
+    return null;
+  }
+
+  const run = {
+    runId: crypto.randomUUID(),
+    trigger,
+    force,
+    status: "running",
+    reason: "",
+    missionId: null,
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+    searchQueries: 0,
+    discoveriesFound: 0,
+    discoveriesInserted: 0,
+    duplicateSourcesSkipped: 0,
+    discoveryInsertFailures: 0,
+    vectorSynced: 0,
+    vectorErrors: 0,
+    synthesisStatus: "pending",
+    error: "",
+    retry: null,
+    steps: [],
+  };
+  backgroundRefreshMonitor.currentRun = run;
+  backgroundRefreshMonitor.totals.started += 1;
+  recordBackgroundRefreshStep(run, "started", { trigger, force });
+  return run;
+}
+
+function recordBackgroundRefreshStep(run, event, details = {}) {
+  if (!run) return;
+  const step = {
+    ts: new Date().toISOString(),
+    event,
+    ...details,
+  };
+  run.steps.push(step);
+  if (run.steps.length > 40) run.steps = run.steps.slice(-40);
+  structuredLog(`background.refresh.${event}`, {
+    runId: run.runId,
+    trigger: run.trigger,
+    force: run.force,
+    status: run.status,
+    ...details,
+  });
+}
+
+function finishBackgroundRefreshRun(run, status, details = {}) {
+  if (!run) return backgroundRefreshSnapshot();
+  run.status = status;
+  run.reason = details.reason ?? run.reason;
+  run.error = details.error ?? run.error;
+  if (status === "failed") attachBackgroundRefreshRetry(run, run.error || run.reason);
+  run.finishedAt = new Date().toISOString();
+  recordBackgroundRefreshStep(run, status, details);
+  backgroundRefreshMonitor.currentRun = backgroundRefreshMonitor.currentRun?.runId === run.runId ? null : backgroundRefreshMonitor.currentRun;
+  backgroundRefreshMonitor.lastRun = run;
+  backgroundRefreshMonitor.recentRuns = [run, ...backgroundRefreshMonitor.recentRuns.filter((entry) => entry.runId !== run.runId)].slice(0, BG_JOB_RECENT_RUN_LIMIT);
+  if (status === "completed") backgroundRefreshMonitor.totals.completed += 1;
+  if (status === "failed") backgroundRefreshMonitor.totals.failed += 1;
+  if (status === "skipped") backgroundRefreshMonitor.totals.skipped += 1;
+  return backgroundRefreshSnapshot();
+}
+
+async function cleanupFailedBackgroundRefreshRun(run, errorMessage) {
+  if (!run?.missionId) {
+    recordBackgroundRefreshStep(run, "failure-cleanup-skipped", { reason: "no_mission_created" });
+    return;
+  }
+
+  const message = compactHealthMessage(errorMessage || run.error || "Background refresh failed.");
+  const now = new Date().toISOString();
+  recordBackgroundRefreshStep(run, "failure-cleanup-started", { missionId: run.missionId, error: message });
+
+  try {
+    const insforge = createServerInsforgeClient();
+    const missionResult = await insforge.database.from("missions").update({
+      status: "error",
+      updated_at: now,
+    }).eq("id", run.missionId);
+    if (missionResult.error) {
+      recordBackgroundRefreshStep(run, "failure-cleanup-mission-failed", {
+        missionId: run.missionId,
+        error: compactHealthMessage(missionResult.error.message ?? missionResult.error),
+      });
+    } else {
+      recordBackgroundRefreshStep(run, "failure-cleanup-mission-marked", { missionId: run.missionId });
+    }
+
+    const agentResult = await updateAgentsByMission(insforge, run.missionId, {
+      status: "failed",
+      energy: 0,
+      status_detail: "Background refresh failed before completing; ready for manual retry.",
+      failure_reason: message,
+      retry_count: 1,
+      confidence: 0,
+      last_heartbeat: now,
+    }, "background refresh failure cleanup");
+    if (agentResult.error) {
+      recordBackgroundRefreshStep(run, "failure-cleanup-agents-failed", {
+        missionId: run.missionId,
+        error: compactHealthMessage(agentResult.error.message ?? agentResult.error),
+      });
+    } else {
+      recordBackgroundRefreshStep(run, "failure-cleanup-agents-marked", { missionId: run.missionId });
+    }
+  } catch (cleanupError) {
+    recordBackgroundRefreshStep(run, "failure-cleanup-failed", {
+      missionId: run.missionId,
+      error: compactHealthMessage(cleanupError?.message ?? cleanupError),
+    });
+  }
+}
+
+function recordDemoBackgroundRefreshSkip(trigger = "manual") {
+  const run = startBackgroundRefreshRun({ force: true, trigger });
+  if (!run) return backgroundRefreshSnapshot();
+  return finishBackgroundRefreshRun(run, "skipped", { reason: "demo_mode" });
+}
 
 // Map known domains to agent IDs so platform distribution looks natural
 const DOMAIN_TO_AGENT_ID = [
@@ -2714,6 +3412,81 @@ function isSafeUrl(url) {
   }
 }
 
+function normalizeDiscoverySourceUrl(rawUrl) {
+  const value = String(rawUrl ?? "").trim();
+  if (!value) return "";
+  try {
+    const parsed = new URL(value);
+    parsed.hash = "";
+    parsed.hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (/^utm_/i.test(key) || ["fbclid", "gclid", "msclkid", "igshid", "mc_cid", "mc_eid"].includes(key.toLowerCase())) {
+        parsed.searchParams.delete(key);
+      }
+    }
+    if (parsed.pathname !== "/") parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+    return parsed.toString();
+  } catch {
+    return value;
+  }
+}
+
+async function loadRecentDiscoverySourceUrls(insforge, run) {
+  try {
+    const result = await insforge.database
+      .from("discoveries")
+      .select("source_url")
+      .order("created_at", { ascending: false })
+      .limit(BG_DISCOVERY_DEDUPE_LOOKBACK);
+    if (result.error) {
+      recordBackgroundRefreshStep(run, "dedupe-lookback-failed", {
+        error: compactHealthMessage(result.error.message ?? result.error),
+      });
+      return new Set();
+    }
+    const urls = new Set(
+      (result.data ?? [])
+        .map((row) => normalizeDiscoverySourceUrl(row.source_url))
+        .filter(Boolean)
+    );
+    recordBackgroundRefreshStep(run, "dedupe-lookback-loaded", { sources: urls.size });
+    return urls;
+  } catch (error) {
+    recordBackgroundRefreshStep(run, "dedupe-lookback-failed", {
+      error: compactHealthMessage(error?.message ?? error),
+    });
+    return new Set();
+  }
+}
+
+async function insertDiscoveryBatchWithFallback(insforge, batch, run) {
+  const result = await insforge.database.from("discoveries").insert(batch);
+  if (!result.error) {
+    return { insertedRows: batch, failedRows: 0 };
+  }
+
+  recordBackgroundRefreshStep(run, "discovery-insert-batch-error", {
+    batchSize: batch.length,
+    error: compactHealthMessage(result.error.message ?? JSON.stringify(result.error)),
+  });
+
+  const insertedRows = [];
+  let failedRows = 0;
+  for (const row of batch) {
+    const single = await insforge.database.from("discoveries").insert([row]);
+    if (single.error) {
+      failedRows += 1;
+      recordBackgroundRefreshStep(run, "discovery-insert-row-error", {
+        sourceUrl: row.source_url,
+        error: compactHealthMessage(single.error.message ?? JSON.stringify(single.error)),
+      });
+    } else {
+      insertedRows.push(row);
+    }
+  }
+  return { insertedRows, failedRows };
+}
+
 async function runBraveSearch(query, retries = 2) {
   const apiKey = process.env.BRAVE_SEARCH_API_KEY;
   if (!apiKey) return [];
@@ -2758,7 +3531,62 @@ async function runBraveSearch(query, retries = 2) {
   return [];
 }
 
-async function runBackgroundDataRefresh(force = false) {
+function kickoffBackgroundDataRefresh(force = false, trigger = force ? "manual" : "scheduled") {
+  const readiness = getBackgroundRefreshReadiness();
+  if (!readiness.liveReady) {
+    structuredLog("background.refresh.rejected", {
+      reason: "readiness_failed",
+      trigger,
+      force,
+      blockingReasons: readiness.blockingReasons,
+    });
+    const snapshot = backgroundRefreshSnapshot();
+    return {
+      started: false,
+      reason: "readiness_failed",
+      statusCode: 503,
+      run: null,
+      readiness,
+      snapshot,
+      promise: Promise.resolve(snapshot),
+    };
+  }
+
+  const run = startBackgroundRefreshRun({ force, trigger });
+  if (!run) {
+    const snapshot = backgroundRefreshSnapshot();
+    return {
+      started: false,
+      reason: "already_running",
+      statusCode: 409,
+      run: null,
+      readiness,
+      snapshot,
+      promise: Promise.resolve(snapshot),
+    };
+  }
+
+  const promise = runBackgroundDataRefreshCore({ force, run }).catch((error) => {
+    const message = compactHealthMessage(error?.message ?? error);
+    console.error("[bg-job] Background refresh failed:", message);
+    attachBackgroundRefreshRetry(run, message);
+    return cleanupFailedBackgroundRefreshRun(run, message)
+      .then(() => finishBackgroundRefreshRun(run, "failed", { error: message }));
+  });
+
+  return {
+    started: true,
+    run,
+    snapshot: backgroundRefreshSnapshot(),
+    promise,
+  };
+}
+
+async function runBackgroundDataRefresh(force = false, trigger = force ? "manual" : "scheduled") {
+  return kickoffBackgroundDataRefresh(force, trigger).promise;
+}
+
+async function runBackgroundDataRefreshCore({ force, run }) {
   console.log(`[bg-job] Starting background data refresh${force ? " (forced)" : ""}...`);
   const insforge = createServerInsforgeClient();
 
@@ -2775,11 +3603,19 @@ async function runBackgroundDataRefresh(force = false) {
       const ageMs = Date.now() - new Date(latestMission.data.created_at).getTime();
       if (ageMs < BG_JOB_MIN_AGE_MS) {
         console.log(`[bg-job] Skipping — last mission ${Math.round(ageMs / 60000)}min ago`);
-        return;
+        return finishBackgroundRefreshRun(run, "skipped", {
+          reason: "recent_mission",
+          latestMissionId: latestMission.data.id,
+          latestMissionAgeMinutes: Math.round(ageMs / 60000),
+        });
       }
       if (latestMission.data.status === "queued" || latestMission.data.status === "active") {
         console.log("[bg-job] Skipping — a mission is currently active");
-        return;
+        return finishBackgroundRefreshRun(run, "skipped", {
+          reason: "active_mission",
+          latestMissionId: latestMission.data.id,
+          latestMissionStatus: latestMission.data.status,
+        });
       }
     }
   }
@@ -2796,7 +3632,12 @@ async function runBackgroundDataRefresh(force = false) {
     live_url_5: "/agent-stream/5",
     created_at: timestamp, updated_at: timestamp,
   }]);
-  if (missionInsert.error) { console.error("[bg-job] Mission insert error:", missionInsert.error); return; }
+  if (missionInsert.error) {
+    console.error("[bg-job] Mission insert error:", missionInsert.error);
+    return finishBackgroundRefreshRun(run, "failed", { reason: "mission_insert_failed", error: compactHealthMessage(missionInsert.error.message ?? missionInsert.error) });
+  }
+  run.missionId = missionId;
+  recordBackgroundRefreshStep(run, "mission-created", { missionId });
 
   const bgAgentInsert = await insertAgentRows(
     insforge,
@@ -2814,20 +3655,31 @@ async function runBackgroundDataRefresh(force = false) {
   );
   if (bgAgentInsert.error) {
     console.warn("[bg-job] Agent insert warning:", bgAgentInsert.error.message ?? bgAgentInsert.error);
+    recordBackgroundRefreshStep(run, "agent-insert-warning", { error: compactHealthMessage(bgAgentInsert.error.message ?? bgAgentInsert.error) });
   }
 
   invalidateDashboardSnapshot();
   invalidateRecsCache();
 
-  // Run Brave Search queries sequentially (1.1s gap to respect rate limits)
+  // Run Brave Search queries sequentially to respect rate limits.
   const discoveries = [];
+  const seenSourceUrls = new Set();
+  const recentSourceUrls = await loadRecentDiscoverySourceUrls(insforge, run);
   for (const { q, industry } of BG_SEARCH_QUERIES) {
+    run.searchQueries += 1;
     const results = await runBraveSearch(q);
+    recordBackgroundRefreshStep(run, "search-query", { industry, results: results.length });
     for (const r of results) {
-      if (!r.url) continue;
+      const sourceUrl = normalizeDiscoverySourceUrl(r.url);
+      if (!sourceUrl) continue;
+      if (seenSourceUrls.has(sourceUrl) || recentSourceUrls.has(sourceUrl)) {
+        run.duplicateSourcesSkipped += 1;
+        continue;
+      }
       const keywords = extractKeywordsFromResult(r.title, r.description);
       if (!keywords) continue;
       const agentId = detectAgentId(r.url);
+      seenSourceUrls.add(sourceUrl);
       discoveries.push({
         id: crypto.randomUUID(),
         mission_id:    missionId,
@@ -2836,7 +3688,7 @@ async function runBackgroundDataRefresh(force = false) {
         industry,
         title:         r.title ?? "",
         summary:       r.description ?? "",
-        source_url:    r.url,
+        source_url:    sourceUrl,
         thumbnail_url: r.thumbnail?.src ?? r.thumbnail?.original ?? "",
         keywords,
         likes:    0,
@@ -2845,23 +3697,34 @@ async function runBackgroundDataRefresh(force = false) {
         created_at: new Date().toISOString(),
       });
     }
-    await new Promise(resolve => setTimeout(resolve, 1100)); // Brave allows ~1 req/s
+    run.discoveriesFound = discoveries.length;
+    await new Promise(resolve => setTimeout(resolve, BG_SEARCH_DELAY_MS));
+  }
+  if (run.duplicateSourcesSkipped > 0) {
+    recordBackgroundRefreshStep(run, "duplicate-sources-skipped", { skipped: run.duplicateSourcesSkipped });
   }
 
   // Insert discoveries in batches of 50
   let insertedCount = 0;
+  const insertedDiscoveries = [];
   for (let i = 0; i < discoveries.length; i += 50) {
     const batch = discoveries.slice(i, i + 50);
-    const result = await insforge.database.from("discoveries").insert(batch);
-    if (result.error) {
-      console.error("[bg-job] Discovery insert error:", JSON.stringify(result.error));
-    } else {
-      insertedCount += batch.length;
-    }
+    const { insertedRows, failedRows } = await insertDiscoveryBatchWithFallback(insforge, batch, run);
+    insertedCount += insertedRows.length;
+    run.discoveryInsertFailures += failedRows;
+    insertedDiscoveries.push(...insertedRows);
   }
+  run.discoveriesFound = discoveries.length;
+  run.discoveriesInserted = insertedCount;
   console.log(`[bg-job] Inserted ${insertedCount}/${discoveries.length} discoveries`);
+  recordBackgroundRefreshStep(run, "discoveries-inserted", {
+    inserted: insertedCount,
+    found: discoveries.length,
+    failed: run.discoveryInsertFailures,
+    duplicatesSkipped: run.duplicateSourcesSkipped,
+  });
 
-  const discoveryCountsByAgent = discoveries.reduce((counts, discovery) => {
+  const discoveryCountsByAgent = insertedDiscoveries.reduce((counts, discovery) => {
     counts.set(discovery.agent_id, (counts.get(discovery.agent_id) ?? 0) + 1);
     return counts;
   }, new Map());
@@ -2882,20 +3745,30 @@ async function runBackgroundDataRefresh(force = false) {
     }, "background source agent update");
     if (result.error) {
       console.warn(`[bg-job] Agent ${agent.agentId} status warning:`, result.error.message ?? result.error);
+      recordBackgroundRefreshStep(run, "agent-status-warning", { agentId: agent.agentId, error: compactHealthMessage(result.error.message ?? result.error) });
     }
   }
 
   if (insertedCount > 0 && (process.env.MONGODB_URI || process.env.MONGODB_ATLAS_URI)) {
     try {
-      const sync = await storeDiscoveriesWithEmbeddings(discoveries);
+      const sync = await storeDiscoveriesWithEmbeddings(insertedDiscoveries);
+      run.vectorSynced = Number(sync.synced ?? 0);
+      run.vectorErrors = Number(sync.errors ?? 0);
       console.log(`[bg-job] MongoDB vector sync: ${sync.synced} stored, ${sync.errors} errors`);
+      recordBackgroundRefreshStep(run, "vector-sync", { synced: run.vectorSynced, errors: run.vectorErrors });
     } catch (mongoErr) {
       console.warn("[bg-job] MongoDB vector sync failed:", mongoErr?.message ?? mongoErr);
+      run.vectorErrors += 1;
+      recordBackgroundRefreshStep(run, "vector-sync-failed", { error: compactHealthMessage(mongoErr?.message ?? mongoErr) });
     }
+  } else {
+    recordBackgroundRefreshStep(run, "vector-sync-skipped", {
+      reason: insertedCount > 0 ? "mongodb_not_configured" : "no_discoveries_inserted",
+    });
   }
 
   // Generate business plan via AI so /api/recommendations has real data to work with
-  const topKws = discoveries
+  const topKws = insertedDiscoveries
     .flatMap(d => d.keywords.split(", "))
     .reduce((acc, kw) => { acc[kw] = (acc[kw] ?? 0) + 1; return acc; }, {});
   const topKeywordsStr = Object.entries(topKws)
@@ -2908,7 +3781,7 @@ async function runBackgroundDataRefresh(force = false) {
     status: "synthesizing",
     assignment: "Synthesizing background discoveries",
     energy: 80,
-    status_detail: `Synthesizing ${discoveries.length} background discoveries into a business plan.`,
+    status_detail: `Synthesizing ${insertedDiscoveries.length} background discoveries into a business plan.`,
     failure_reason: "",
     retry_count: 0,
     confidence: insertedCount > 0 ? 0.72 : 0.2,
@@ -2918,7 +3791,7 @@ async function runBackgroundDataRefresh(force = false) {
   try {
     const planResult = await inferWithOpenAI({
       systemPrompt: "You are a senior market research analyst. Synthesize a concise business intelligence report from trending web data. Output valid JSON only — no markdown fences.",
-      userPrompt: `Synthesize a market intelligence report from ${discoveries.length} real web results scraped across fashion, beauty, food, tech, wellness, entertainment, fintech, health, travel, real estate, and education.
+      userPrompt: `Synthesize a market intelligence report from ${insertedDiscoveries.length} real web results scraped across fashion, beauty, food, tech, wellness, entertainment, fintech, health, travel, real estate, and education.
 
 Top trending keywords by frequency: ${topKeywordsStr}
 
@@ -2944,6 +3817,7 @@ Rules:
     const plan = match ? JSON.parse(match[0]) : null;
 
     if (plan) {
+      run.synthesisStatus = "completed";
       await insforge.database.from("business_plans").insert([{
         mission_id:            missionId,
         version:               1,
@@ -2953,12 +3827,15 @@ Rules:
         user_acquisition:      plan.user_acquisition      ?? "",
         risk_analysis:         plan.risk_analysis         ?? "",
         confidence_score:      typeof plan.confidence_score === "number" ? plan.confidence_score : 75,
-        discovery_count:       discoveries.length,
+        discovery_count:       insertedDiscoveries.length,
         is_final:              true,
         raw_plan:              JSON.stringify(plan),
         created_at:            new Date().toISOString(),
       }]);
       console.log("[bg-job] Business plan generated");
+      recordBackgroundRefreshStep(run, "synthesis-completed", {
+        confidenceScore: typeof plan.confidence_score === "number" ? plan.confidence_score : 75,
+      });
       await updateAgentByMissionAndId(insforge, missionId, 5, {
         status: "done",
         assignment: "Background plan generated",
@@ -2970,6 +3847,8 @@ Rules:
         last_heartbeat: new Date().toISOString(),
       }, "background Atlas complete update");
     } else {
+      run.synthesisStatus = "unparseable";
+      recordBackgroundRefreshStep(run, "synthesis-unparseable");
       await updateAgentByMissionAndId(insforge, missionId, 5, {
         status: "failed",
         assignment: "Background synthesis produced no parseable plan",
@@ -2983,6 +3862,8 @@ Rules:
     }
   } catch (err) {
     console.error("[bg-job] Business plan generation failed:", err.message);
+    run.synthesisStatus = "failed";
+    recordBackgroundRefreshStep(run, "synthesis-failed", { error: compactHealthMessage(err?.message ?? err) });
     await updateAgentByMissionAndId(insforge, missionId, 5, {
       status: "failed",
       assignment: "Background synthesis failed",
@@ -2995,28 +3876,51 @@ Rules:
     }, "background Atlas failed update");
   }
 
+  const missionFinalStatus = run.synthesisStatus === "completed" ? "completed" : "error";
+  const runFinalStatus = missionFinalStatus === "completed" ? "completed" : "failed";
+  if (runFinalStatus === "failed") {
+    attachBackgroundRefreshRetry(run, `background_synthesis_${run.synthesisStatus || "failed"}`);
+  }
+
   // Finalize mission
   await insforge.database.from("missions").update({
-    status: "completed", updated_at: new Date().toISOString(),
+    status: missionFinalStatus, updated_at: new Date().toISOString(),
   }).eq("id", missionId);
 
   invalidateDashboardSnapshot();
   invalidateRecsCache();
 
-  console.log("[bg-job] Background data refresh complete");
+  console.log(`[bg-job] Background data refresh ${missionFinalStatus}`);
+  return finishBackgroundRefreshRun(run, runFinalStatus, {
+    missionId,
+    reason: runFinalStatus === "failed" ? `synthesis_${run.synthesisStatus || "failed"}` : undefined,
+    discoveriesFound: discoveries.length,
+    discoveriesInserted: insertedCount,
+    synthesisStatus: run.synthesisStatus,
+  });
 }
 
 function scheduleBackgroundJob() {
   if (DEMO_MODE) {
     console.log("[bg-job] Demo mode enabled; background refresh is disabled.");
+    structuredLog("background.refresh.disabled", { reason: "demo_mode" });
+    return;
+  }
+  const readiness = getBackgroundRefreshReadiness();
+  if (!readiness.liveReady) {
+    console.warn(`[bg-job] Background refresh scheduler blocked: ${readiness.blockingReasons.join(", ") || "not ready"}`);
+    structuredLog("background.refresh.scheduler-blocked", {
+      blockingReasons: readiness.blockingReasons,
+      warnings: readiness.warnings,
+    });
     return;
   }
   // Run 60 seconds after server starts so it's fully ready
   setTimeout(() => {
-    runBackgroundDataRefresh().catch(err => console.error("[bg-job] Startup run error:", err));
+    runBackgroundDataRefresh(false, "startup").catch(err => console.error("[bg-job] Startup run error:", err));
   }, 60000);
 
-  // Then repeat every 6 hours
+  // Then repeat every 12 hours
   setInterval(() => {
     runBackgroundDataRefresh().catch(err => console.error("[bg-job] Scheduled run error:", err));
   }, BG_JOB_INTERVAL_MS);
@@ -3027,6 +3931,13 @@ function scheduleBackgroundJob() {
 /* ------------------------------------------------------------------ */
 
 const server = http.createServer(async (request, response) => {
+  response.__marketPulseRequestLog = {
+    requestId: crypto.randomUUID(),
+    method: request.method ?? "UNKNOWN",
+    path: request.url ? new URL(request.url, `http://${request.headers.host}`).pathname : "unknown",
+    startedAt: Date.now(),
+  };
+
   if (!request.url) {
     writeJson(response, 404, { error: "Not found" });
     return;
@@ -3041,6 +3952,16 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === "GET" && url.pathname === "/health") {
     const health = await buildHealthReport();
+    structuredLog("runtime.health", {
+      requestId: requestLogContext(response)?.requestId,
+      ok: health.ok,
+      status: health.status,
+      demoMode: health.demoMode,
+      missingRequired: health.missingRequired,
+      degradedChecks: health.checks
+        .filter((check) => check && check.ok === false)
+        .map((check) => ({ name: check.name, required: Boolean(check.required), status: check.status })),
+    });
     writeJson(response, health.ok ? 200 : 503, health);
     return;
   }
@@ -3048,7 +3969,115 @@ const server = http.createServer(async (request, response) => {
   if (request.method === "GET" && url.pathname === "/api/worker/preflight") {
     const strict = url.searchParams.get("strict") === "1" || url.searchParams.get("strict") === "true";
     const preflight = await getWorkerPreflight({ strict });
+    structuredLog("worker.preflight", {
+      requestId: requestLogContext(response)?.requestId,
+      strict,
+      ok: Boolean(preflight.ok),
+      workerCanStart: Boolean(preflight.workerCanStart),
+      liveMissionReady: Boolean(preflight.liveMissionReady),
+      exitCode: preflight.exitCode,
+      insforgeStatus: preflight.insforge?.status ?? "unknown",
+      liveLlmStatus: preflight.liveLlm?.status ?? "unknown",
+      error: preflight.error ?? undefined,
+    });
     writeJson(response, preflight.ok ? 200 : 503, preflight);
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/background/refresh/status") {
+    writeJson(response, 200, backgroundRefreshSnapshot());
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/background/refresh/readiness") {
+    const readiness = getBackgroundRefreshReadiness();
+    structuredLog("background.refresh.readiness", {
+      requestId: requestLogContext(response)?.requestId,
+      liveReady: readiness.liveReady,
+      canStartNow: readiness.canStartNow,
+      blockingReasons: readiness.blockingReasons,
+      warnings: readiness.warnings,
+    });
+    writeJson(response, 200, readiness);
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/background/refresh/export") {
+    try {
+      const exportResult = writeBackgroundRefreshEvidenceArtifact();
+      structuredLog("background.refresh.exported", {
+        requestId: requestLogContext(response)?.requestId,
+        path: exportResult.relativePath,
+        bytes: exportResult.bytes,
+        sha256: exportResult.sha256,
+        lastRunId: exportResult.operatorSummary.lastRunId,
+        recentRunCount: exportResult.operatorSummary.recentRunCount,
+        blockingReasons: exportResult.operatorSummary.blockingReasons,
+      });
+      writeJson(response, 200, exportResult);
+    } catch (error) {
+      structuredLog("background.refresh.export_failed", {
+        requestId: requestLogContext(response)?.requestId,
+        error: compactHealthMessage(error?.message ?? error),
+      });
+      writeJson(response, 500, {
+        ok: false,
+        error: "background_refresh_export_failed",
+        message: compactHealthMessage(error?.message ?? error),
+      });
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/background/refresh/exports") {
+    try {
+      const limit = Number.parseInt(url.searchParams.get("limit") || "20", 10);
+      const index = listBackgroundRefreshEvidenceArtifacts(limit);
+      structuredLog("background.refresh.exports_listed", {
+        requestId: requestLogContext(response)?.requestId,
+        count: index.count,
+        runtimeRelativeDirectory: index.runtimeRelativeDirectory,
+      });
+      writeJson(response, 200, index);
+    } catch (error) {
+      structuredLog("background.refresh.exports_list_failed", {
+        requestId: requestLogContext(response)?.requestId,
+        error: compactHealthMessage(error?.message ?? error),
+      });
+      writeJson(response, 500, {
+        ok: false,
+        error: "background_refresh_exports_list_failed",
+        message: compactHealthMessage(error?.message ?? error),
+      });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/background/refresh/import/inspect") {
+    try {
+      const body = await readJsonBody(request);
+      const inspection = inspectBackgroundRefreshEvidenceArtifact(body);
+      structuredLog("background.refresh.import_inspected", {
+        requestId: requestLogContext(response)?.requestId,
+        ok: inspection.ok,
+        validArtifact: inspection.validArtifact,
+        runtimeRelativePath: inspection.runtimeRelativePath,
+        sha256: inspection.file?.sha256,
+        matchesCurrentLastRunId: inspection.comparison?.matchesCurrentLastRunId,
+        hashMatchesExpected: inspection.hashMatchesExpected,
+      });
+      writeJson(response, inspection.ok ? 200 : 404, inspection);
+    } catch (error) {
+      structuredLog("background.refresh.import_inspect_failed", {
+        requestId: requestLogContext(response)?.requestId,
+        error: compactHealthMessage(error?.message ?? error),
+      });
+      writeJson(response, 400, {
+        ok: false,
+        error: "background_refresh_import_inspection_failed",
+        message: compactHealthMessage(error?.message ?? error),
+      });
+    }
     return;
   }
 
@@ -3305,8 +4334,29 @@ const server = http.createServer(async (request, response) => {
   // Force-trigger a background data refresh (bypasses age/active checks)
   if (request.method === "POST" && url.pathname === "/api/refresh") {
     try {
-      writeJson(response, 200, { ok: true, message: "Background refresh triggered" });
-      void runBackgroundDataRefresh(true); // force=true
+      if (DEMO_MODE) {
+        const backgroundRefresh = recordDemoBackgroundRefreshSkip("manual");
+        writeJson(response, 200, { ok: true, message: "Background refresh skipped in demo mode", backgroundRefresh });
+        return;
+      }
+      const backgroundRefresh = kickoffBackgroundDataRefresh(true, "manual"); // force=true
+      if (!backgroundRefresh.started) {
+        writeJson(response, backgroundRefresh.statusCode ?? 409, {
+          ok: false,
+          message: backgroundRefresh.reason === "readiness_failed"
+            ? "Background refresh is not ready to run live"
+            : "Background refresh already running",
+          backgroundRefresh: backgroundRefresh.snapshot,
+          readiness: backgroundRefresh.readiness,
+        });
+        return;
+      }
+      writeJson(response, 200, {
+        ok: true,
+        message: "Background refresh triggered",
+        backgroundRefresh: backgroundRefresh.snapshot,
+      });
+      void backgroundRefresh.promise;
     } catch (error) {
       writeJson(response, 500, { error: "Failed to trigger refresh" });
     }

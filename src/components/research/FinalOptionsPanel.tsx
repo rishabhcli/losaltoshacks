@@ -9,6 +9,7 @@ import { buildFollowUpResearchPrompt } from "@/lib/followup-research";
 import { scoreFinalOptions, type OpportunityScoreBreakdown } from "@/lib/opportunity-scoring";
 import type { FinalOptionsPayload } from "@/hooks/useMasterBuildDashboard";
 import { useTheme } from "@/lib/theme";
+import { VentureOperatingWorkspace } from "./VentureOperatingWorkspace";
 
 interface Props {
   finalOptions: FinalOptionsPayload;
@@ -194,15 +195,27 @@ export function FinalOptionsPanel({ finalOptions, isCreatingFollowUp = false, on
             </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-5">
+          <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-6">
             <ScoreMetric label="Confidence" value={primaryScore.confidenceScore} icon={Gauge} />
+            <ScoreMetric label="Demand" value={primaryScore.demandScore} icon={Target} />
             <ScoreMetric label="Timing" value={primaryScore.marketTimingScore} icon={BarChart3} />
             <ScoreMetric label="Diversity" value={primaryScore.evidenceDiversityScore} icon={ShieldCheck} />
             <ScoreMetric label="Difficulty" value={primaryScore.executionDifficultyScore} icon={Target} />
             <ScoreMetric label="Risk" value={primaryScore.riskScore} icon={ShieldAlert} />
           </div>
 
-          <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr_1.1fr]">
+          <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr_1fr_1.1fr]">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Demand Evidence</div>
+              <div className="mt-2 space-y-1.5">
+                {primaryScore.demandSignals.map((signal) => (
+                  <div key={signal} className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300">
+                    <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-600" />
+                    <span>{signal}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Score Drivers</div>
               <div className="mt-2 space-y-1.5">
@@ -267,6 +280,12 @@ export function FinalOptionsPanel({ finalOptions, isCreatingFollowUp = false, on
           )}
         </CardContent>
       </Card>
+
+      <VentureOperatingWorkspace
+        finalOptions={finalOptions}
+        isCreatingFollowUp={isCreatingFollowUp}
+        onCreateFollowUpMission={onCreateFollowUpMission}
+      />
 
       {/* Market Research Summary */}
       {marketResearch.summary && (

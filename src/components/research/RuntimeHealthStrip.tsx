@@ -1,13 +1,22 @@
+import { useEffect, useState } from "react";
 import { Activity, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useRuntimeHealth } from "@/hooks/useRuntimeHealth";
 import { useWorkerPreflight } from "@/hooks/useWorkerPreflight";
+import { getRoutePreloadSnapshot, ROUTE_PRELOAD_EVENT } from "@/routeLoaders";
 
 const IMPORTANT_CHECKS = new Set(["insforge", "openai", "python-worker", "mongodb-vector", "tts"]);
 
 export function RuntimeHealthStrip() {
   const { health, error, isLoading } = useRuntimeHealth();
   const { preflight, error: workerError, isLoading: workerLoading } = useWorkerPreflight();
+  const [routePreloadStatuses, setRoutePreloadStatuses] = useState(() => getRoutePreloadSnapshot());
+
+  useEffect(() => {
+    const updateRoutePreloadStatuses = () => setRoutePreloadStatuses(getRoutePreloadSnapshot());
+    window.addEventListener(ROUTE_PRELOAD_EVENT, updateRoutePreloadStatuses);
+    return () => window.removeEventListener(ROUTE_PRELOAD_EVENT, updateRoutePreloadStatuses);
+  }, []);
 
   if (isLoading) {
     return (
@@ -46,6 +55,9 @@ export function RuntimeHealthStrip() {
         ? preflight.liveLlm?.action || "Worker can start, but live inference is not ready."
         : workerError || preflight?.message || "Worker preflight is unavailable.";
   const showWorkerDetail = workerLoading || Boolean(preflight || workerError);
+  const routePreloadFailedCount = routePreloadStatuses.filter((status) => status.status === "failed").length;
+  const routePreloadLoadedCount = routePreloadStatuses.filter((status) => status.status === "loaded").length;
+  const routePreloadPendingCount = routePreloadStatuses.filter((status) => status.status === "pending").length;
 
   return (
     <div
@@ -99,6 +111,22 @@ export function RuntimeHealthStrip() {
               {check.name}: {check.status}
             </Badge>
           ))}
+        {routePreloadStatuses.length > 0 && (
+          <Badge
+            variant="secondary"
+            className={`text-[10px] uppercase tracking-wider border-0 ${
+              routePreloadFailedCount > 0
+                ? "bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-200"
+                : "bg-white/70 dark:bg-slate-900/80 text-slate-600 dark:text-slate-200"
+            }`}
+          >
+            route-preload: {routePreloadFailedCount > 0
+              ? `${routePreloadFailedCount} failed`
+              : routePreloadPendingCount > 0
+                ? `${routePreloadPendingCount} pending`
+                : `${routePreloadLoadedCount} loaded`}
+          </Badge>
+        )}
       </div>
       {showWorkerDetail && (
         <div className="basis-full text-[11px] leading-snug text-amber-800/90 dark:text-amber-100/80">

@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   TrendingUp,
   Lightbulb,
+  BriefcaseBusiness,
   Building2,
   Clock,
   LogOut,
@@ -22,12 +23,14 @@ import { ErrorBoundary } from "@/components/market/ErrorBoundary";
 import { SplashScreen } from "@/components/market/SplashScreen";
 import { wasSplashShown } from "@/lib/splash";
 import { getIndustryLabel } from "@/lib/industry";
+import { preloadRouteModule } from "@/routeLoaders";
 
 const navItems = [
   { path: "/", icon: LayoutDashboard, label: "Dashboard" },
   { path: "/market-research", icon: Search, label: "Market Research" },
   { path: "/trends", icon: TrendingUp, label: "Trends" },
   { path: "/recommendations", icon: Lightbulb, label: "Recommendations" },
+  { path: "/ventures", icon: BriefcaseBusiness, label: "Venture Lab" },
   { path: "/briefing", icon: Volume2, label: "Briefing" },
   { path: "/report", icon: FileText, label: "Report" },
   { path: "/history", icon: Clock, label: "History" },
@@ -69,6 +72,9 @@ export function AppLayout() {
     return (
       <button
         key={item.path}
+        onFocus={() => preloadRouteModule(item.path)}
+        onMouseEnter={() => preloadRouteModule(item.path)}
+        onPointerDown={() => preloadRouteModule(item.path)}
         onClick={() => navigate(item.path)}
         className={`flex shrink-0 items-center gap-3 whitespace-nowrap px-3 py-2.5 rounded-lg transition-all cursor-pointer text-sm font-medium ${
           isActive
