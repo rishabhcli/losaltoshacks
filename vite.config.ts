@@ -90,6 +90,7 @@ export default defineConfig(() => ({
           if (id.includes("/src/components/research/OpportunityDiscoveryBacklogPanel.tsx")) return "opportunity-discovery-backlog-panel";
           if (id.includes("/src/components/research/OverlookedOpportunityAtlasPanel.tsx")) return "overlooked-opportunity-atlas-panel";
           if (id.includes("/src/components/research/AtlasValidationCommandPackPanel.tsx")) return "atlas-validation-command-pack-panel";
+          if (id.includes("/src/components/research/AtlasValidationResultLedgerPanel.tsx")) return "atlas-validation-result-ledger-panel";
           if (id.includes("/src/lib/breach-process-regression-escalations.ts")) return "breach-process-regression-escalations";
           if (id.includes("/src/lib/venture-workspace.ts")) return "venture-workspace";
           if (id.includes("/src/lib/venture-portfolio.ts")) return "venture-portfolio";
