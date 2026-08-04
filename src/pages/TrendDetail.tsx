@@ -2,6 +2,8 @@ import { useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useOsdkObject, useOsdkAction, useLinks, $Actions, marketTrend } from "@/lib/osdk-shims";
 import type { TrendSource } from "@/lib/mockData";
+import { normalizeEvidenceSources, type EvidenceSource } from "@/lib/evidence";
+import { apiFetch } from "@/lib/api";
 import {
   ArrowLeft,
   Bookmark,
@@ -67,7 +69,7 @@ export function TrendDetail() {
     setClaudeLoading(true);
     setClaudeAnalysis(null);
     try {
-      const res = await fetch(`${API_BASE}/api/ai/analyze`, {
+      const res = await apiFetch(`${API_BASE}/api/ai/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -166,6 +168,7 @@ export function TrendDetail() {
           ? "text-red-500"
           : "text-slate-500"
       : "text-slate-400";
+  const trendEvidence = normalizeEvidenceSources(trend.sources);
 
   return (
     <ScrollArea className="h-screen">
@@ -355,7 +358,7 @@ export function TrendDetail() {
           ) : recommendations && recommendations.length > 0 ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {recommendations.map(rec => (
-                <RecommendationCard key={rec.$primaryKey} rec={rec} />
+                <RecommendationCard key={rec.$primaryKey} rec={rec} trendEvidence={trendEvidence} />
               ))}
             </div>
           ) : (
@@ -492,9 +495,14 @@ interface RecObj {
   targetDemographic: string | undefined;
   actionPlan: string | undefined;
   estimatedRevenuePotential: string | undefined;
+  sourceEvidence?: EvidenceSource[];
 }
 
-function RecommendationCard({ rec }: { rec: RecObj }) {
+function RecommendationCard({ rec, trendEvidence }: { rec: RecObj; trendEvidence: EvidenceSource[] }) {
+  const recommendationEvidence = normalizeEvidenceSources(rec.sourceEvidence);
+  const evidenceSources = recommendationEvidence.length > 0 ? recommendationEvidence : trendEvidence;
+  const inheritsTrendEvidence = recommendationEvidence.length === 0 && trendEvidence.length > 0;
+  const platformCount = new Set(evidenceSources.map((source) => String(source.platform ?? "source").trim().toLowerCase()).filter(Boolean)).size;
   return (
     <div className="border border-slate-200 glass rounded-xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-all">
       <div className="flex items-start justify-between gap-2 mb-2">
@@ -502,6 +510,23 @@ function RecommendationCard({ rec }: { rec: RecObj }) {
         <StatusBadge value={rec.priority} />
       </div>
       <p className="text-xs text-slate-500 mb-3">{rec.description}</p>
+      {evidenceSources.length > 0 ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2" aria-label="Recommendation evidence summary">
+          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+            <ShieldCheck className="h-3 w-3" />
+            {inheritsTrendEvidence ? "Trend evidence" : "Source Evidence"}: {evidenceSources.length} source{evidenceSources.length === 1 ? "" : "s"}
+          </span>
+          <span className="text-[11px] text-slate-400">
+            {platformCount} platform{platformCount === 1 ? "" : "s"}
+            {inheritsTrendEvidence ? " · inherited from linked trend" : ""}
+          </span>
+        </div>
+      ) : (
+        <div className="mt-3 inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
+          <AlertCircle className="h-3 w-3" />
+          Evidence missing
+        </div>
+      )}
       <div className="flex flex-wrap gap-4 text-xs mb-3">
         <div>
           <span className="text-slate-400 font-medium uppercase tracking-wider text-[10px]">Confidence </span>

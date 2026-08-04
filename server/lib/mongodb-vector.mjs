@@ -1,4 +1,5 @@
 import { MongoClient } from "mongodb";
+import { boundedNumber, sanitizeDiscoveryRow } from "./response-validation.mjs";
 
 let _client = null;
 let _db = null;
@@ -117,18 +118,19 @@ export async function storeDiscoveryWithEmbedding(discovery) {
       return { success: false, error: "discovery.id is required" };
     }
 
+    const safeDiscovery = sanitizeDiscoveryRow(discovery);
     const doc = {
       id,
       mission_id: discovery.mission_id ?? null,
-      agent_id: discovery.agent_id ?? null,
+      agent_id: safeDiscovery.agent_id,
       platform: discovery.platform ?? null,
       industry: discovery.industry ?? null,
       source_url: discovery.source_url ?? "",
       thumbnail_url: discovery.thumbnail_url ?? "",
       keywords: discovery.keywords ?? "",
-      likes: discovery.likes ?? 0,
-      views: discovery.views ?? 0,
-      comments: discovery.comments ?? 0,
+      likes: safeDiscovery.likes,
+      views: safeDiscovery.views,
+      comments: safeDiscovery.comments,
       created_at: discovery.created_at ?? new Date().toISOString(),
       embedding,
       vectorized_at: new Date().toISOString(),
@@ -235,17 +237,20 @@ export async function vectorSearch({
     const raw = await collection.aggregate(pipeline).toArray();
 
     return {
-      results: raw.map((r) => ({
+      results: raw.map((r) => {
+        const safeDiscovery = sanitizeDiscoveryRow(r);
+        return {
         keywords: r.keywords ?? "",
         source_url: r.source_url ?? "",
         thumbnail_url: r.thumbnail_url ?? "",
-        agent_id: r.agent_id ?? 5,
-        likes: r.likes ?? 0,
-        views: r.views ?? 0,
-        comments: r.comments ?? 0,
+        agent_id: safeDiscovery.agent_id || 5,
+        likes: safeDiscovery.likes,
+        views: safeDiscovery.views,
+        comments: safeDiscovery.comments,
         created_at: r.created_at ?? new Date().toISOString(),
-        score: typeof r.score === "number" ? r.score : 0,
-      })),
+        score: boundedNumber(r.score, { fallback: 0, min: 0, max: 1 }),
+        };
+      }),
       count: raw.length,
     };
   } catch (err) {

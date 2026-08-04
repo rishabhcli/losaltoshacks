@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Loader2, Mic, Play, Square, RotateCcw, Search, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { apiFetch } from "@/lib/api";
 
 interface Props {
   isRunning: boolean;
@@ -80,7 +81,7 @@ export function MissionControl({
 
     setIsDictating(true);
     try {
-      const response = await fetch(`${API_BASE}/api/ai/tts-minimax`, {
+      const response = await apiFetch(`${API_BASE}/api/ai/tts-minimax`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: textToSpeak }),

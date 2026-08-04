@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/api";
 import { invalidateLiveResearchCache } from "@/lib/osdk-shims";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
@@ -15,7 +16,7 @@ export function useRecommendationFollowUpMission() {
 
     setIsCreatingFollowUp(true);
     try {
-      const response = await fetch(`${API_BASE}/api/mission/create`, {
+      const response = await apiFetch(`${API_BASE}/api/mission/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: trimmed }),

@@ -82,6 +82,7 @@
   "scripts": {
     "ai:server": "node server/ai-server.mjs",
     "api:contracts": "node scripts/verify-api-contracts.mjs",
+    "api:auth": "node scripts/verify-api-auth.mjs",
     "build": "vite build",
     "build:check-chunks": "node scripts/check-build-chunks.mjs",
     "db:assets:verify": "node scripts/verify-insforge-assets.mjs",
@@ -98,12 +99,15 @@
     "preview": "vite preview",
     "schema:verify:decisions": "node scripts/verify-recommendation-decisions.mjs",
     "schema:verify:masterbuild": "node scripts/verify-masterbuild-schema.mjs",
+    "schema:verify:ownership": "node scripts/verify-owner-isolation.mjs",
     "smoke:decision:browser": "node scripts/smoke-browser-decision.mjs",
+    "server:test": "node --test server/lib/response-validation.test.mjs",
     "startup:check": "node scripts/verify-local-startup.mjs",
     "test": "vitest run",
     "type-check": "tsc --noEmit",
     "verify:maygoals": "pnpm db:assets:verify && pnpm api:contracts && pnpm type-check && pnpm lint && pnpm test -- src/lib/venture-portfolio.test.ts && pnpm startup:check && pnpm exec playwright test e2e/app.spec.ts -g \"accessibility smoke|sidebar navigation to Market Research works|portfolio import audit|related idea merge audits|no-send reply proof capture|core demo flow\" && pnpm verify:production",
     "verify:production": "pnpm build && pnpm build:check-chunks",
+    "worker:test": "python -m unittest agents.test_model_output agents.test_atomic_file agents.test_background_task",
     "worker:live": "python agents/orchestrator.py",
     "worker:preflight": "python scripts/verify-live-worker-preflight.py"
   },

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { usePreferences } from "@/hooks/usePreferences";
+import { apiFetch } from "@/lib/api";
 import { INDUSTRY_AUTO_PROMPTS, AUTO_MISSION_COOLDOWN_MS } from "@/lib/industryPrompts";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
@@ -33,7 +34,7 @@ function saveRecord(email: string, record: AutoMissionRecord) {
 
 async function getActiveMissionStatus(): Promise<"active" | "none"> {
   try {
-    const res = await fetch(`${API_BASE}/api/dashboard`, { cache: "no-store" });
+    const res = await apiFetch(`${API_BASE}/api/dashboard`, { cache: "no-store" });
     if (!res.ok) return "none";
     const data = await res.json() as { mission?: { status?: string } | null };
     const status = data?.mission?.status ?? "";
@@ -46,7 +47,7 @@ async function getActiveMissionStatus(): Promise<"active" | "none"> {
 
 async function createMission(prompt: string): Promise<string | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/mission/create`, {
+    const res = await apiFetch(`${API_BASE}/api/mission/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt }),

@@ -126,17 +126,24 @@ create or replace function public.reset_masterbuild()
 returns void
 language plpgsql
 security definer
+set search_path = pg_catalog, public, pg_temp
 as $$
+declare
+  v_owner_id uuid := auth.uid();
 begin
-  delete from public.builder_outputs;
-  delete from public.business_plans;
-  delete from public.agent_thoughts;
-  delete from public.agent_memory;
-  delete from public.control_commands;
-  delete from public.signals;
-  delete from public.logs;
-  delete from public.discoveries;
-  delete from public.agents;
-  delete from public.missions;
+  if v_owner_id is null then
+    raise exception 'An authenticated owner is required to reset MasterBuild data';
+  end if;
+
+  delete from public.builder_outputs where mission_id in (select id from public.missions where owner_id = v_owner_id);
+  delete from public.business_plans where mission_id in (select id from public.missions where owner_id = v_owner_id);
+  delete from public.agent_thoughts where mission_id in (select id from public.missions where owner_id = v_owner_id);
+  delete from public.agent_memory where mission_id in (select id from public.missions where owner_id = v_owner_id);
+  delete from public.control_commands where mission_id in (select id from public.missions where owner_id = v_owner_id);
+  delete from public.signals where mission_id in (select id from public.missions where owner_id = v_owner_id);
+  delete from public.logs where mission_id in (select id from public.missions where owner_id = v_owner_id);
+  delete from public.discoveries where mission_id in (select id from public.missions where owner_id = v_owner_id);
+  delete from public.agents where mission_id in (select id from public.missions where owner_id = v_owner_id);
+  delete from public.missions where owner_id = v_owner_id;
 end;
 $$;

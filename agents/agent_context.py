@@ -24,6 +24,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from atomic_file import append_text_atomic, write_text_atomic
+from background_task import observe_task
+
 CONTEXT_DIR = Path(os.getenv("MASTERBUILD_CONTEXT_DIR", Path(__file__).resolve().parent / "runtime" / "context"))
 
 # ── InsForge memory sync state ────────────────────────────────────────
@@ -88,6 +91,7 @@ async def _sync_to_insforge(filename: str, content: str, *, updated_by: str = "o
             )
     except Exception as e:
         print(f"[agent_context] InsForge sync error for {filename}: {e}")
+        raise
 
 
 def _fire_sync(filename: str, content: str, updated_by: str = "orchestrator") -> None:
@@ -96,7 +100,8 @@ def _fire_sync(filename: str, content: str, updated_by: str = "orchestrator") ->
         return
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(_sync_to_insforge(filename, content, updated_by=updated_by))
+        task = loop.create_task(_sync_to_insforge(filename, content, updated_by=updated_by))
+        observe_task(task, label=f"InsForge context sync for {filename}")
     except RuntimeError:
         pass  # No event loop — skip sync (e.g. during tests)
 
@@ -116,7 +121,7 @@ async def hydrate_from_insforge(client: Any, mission_id: str) -> int:
             filename = str(row.get("filename", ""))
             content = str(row.get("content", ""))
             if filename:
-                (CONTEXT_DIR / filename).write_text(content, encoding="utf-8")
+                write_text_atomic(CONTEXT_DIR / filename, content)
         return len(rows)
     except Exception as e:
         print(f"[agent_context] hydrate error: {e}")
@@ -134,15 +139,14 @@ def read_md(filename: str) -> str:
 
 def write_md(filename: str, content: str, *, updated_by: str = "orchestrator") -> None:
     _ensure_dir()
-    (CONTEXT_DIR / filename).write_text(content, encoding="utf-8")
+    write_text_atomic(CONTEXT_DIR / filename, content)
     _fire_sync(filename, content, updated_by)
 
 
 def append_md(filename: str, block: str, *, updated_by: str = "orchestrator") -> None:
     _ensure_dir()
     path = CONTEXT_DIR / filename
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(block)
+    append_text_atomic(path, block)
     # Read back the full content for sync
     full_content = path.read_text(encoding="utf-8")
     _fire_sync(filename, full_content, updated_by)

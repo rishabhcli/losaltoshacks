@@ -1,7 +1,9 @@
+import { apiFetch } from "./api";
+
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
 
 export async function generateAudio(text: string): Promise<string> {
-  const response = await fetch(`${BASE_URL}/api/ai/tts`, {
+  const response = await apiFetch(`${BASE_URL}/api/ai/tts`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

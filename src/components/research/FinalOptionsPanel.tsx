@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { scoreEvidenceQuality } from "@/lib/evidence-quality";
+import { buildEvidenceTrustSummary } from "@/lib/evidence-trust";
 import { buildFollowUpResearchPrompt } from "@/lib/followup-research";
 import { scoreFinalOptions, type OpportunityScoreBreakdown } from "@/lib/opportunity-scoring";
 import type { FinalOptionsPayload } from "@/hooks/useMasterBuildDashboard";
@@ -80,6 +81,11 @@ export function FinalOptionsPanel({ finalOptions, isCreatingFollowUp = false, on
     }
     return Array.from(byUrl.values());
   }, [options]);
+  const evidenceTrust = useMemo(() => buildEvidenceTrustSummary(allEvidence), [allEvidence]);
+  const evidenceTrustByUrl = useMemo(
+    () => new Map(evidenceTrust.sources.map((source) => [source.url, source])),
+    [evidenceTrust.sources],
+  );
   const hasEvidence = allEvidence.length > 0;
 
   const handleCopyPrompt = useCallback(() => {
@@ -123,47 +129,107 @@ export function FinalOptionsPanel({ finalOptions, isCreatingFollowUp = false, on
           </div>
 
           {hasEvidence && (
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2">
-              {allEvidence.slice(0, 6).map((evidence) => {
-                const quality = scoreEvidenceQuality(evidence);
-                return (
-                  <a
-                    key={`${evidence.platform}-${evidence.url}`}
-                    href={evidence.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="rounded-lg border border-slate-200 dark:border-slate-800/80 bg-slate-50/70 dark:bg-slate-950/70 p-3 transition-colors hover:border-blue-200 hover:bg-blue-50/60 dark:hover:border-blue-800/80 dark:hover:bg-blue-950/25"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="text-[10px] capitalize">
-                        {evidence.platform || "web"}
-                      </Badge>
-                      <Badge variant="secondary" className={scoreBadgeClass(quality.score)}>
-                        Evidence quality {quality.score}
-                      </Badge>
-                      <ExternalLink className="ml-auto h-3.5 w-3.5 text-slate-400" />
+            <>
+              <div
+                role="region"
+                aria-label="Evidence trust ledger"
+                className="mt-4 border-y border-slate-200/80 py-3 dark:border-slate-800/80"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-300">
+                    Evidence trust ledger
+                  </span>
+                  <Badge variant="outline" className="text-[10px] text-slate-500 dark:text-slate-300">
+                    Heuristic only
+                  </Badge>
+                  <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                    {evidenceTrust.methodNote.replace("Heuristic only: ", "")}
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-5">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">Sources</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                      {evidenceTrust.uniqueSourceCount}/{evidenceTrust.sourceCount}
                     </div>
-                    <div className="mt-2 text-xs font-semibold text-slate-800 dark:text-slate-100 line-clamp-2">
-                      {evidence.title || evidence.keywords || evidence.url}
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">Platforms</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">{evidenceTrust.platformCount}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">Credibility</div>
+                    <div className="mt-1 text-sm font-semibold text-blue-700 dark:text-blue-300">{evidenceTrust.averageCredibility}/100</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">Novelty</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">{evidenceTrust.averageNovelty}/100</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">Contradiction risk</div>
+                    <div className={`mt-1 text-sm font-semibold ${evidenceTrust.contradictionRisk >= 30 ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}`}>
+                      {evidenceTrust.contradictionRisk}/100
                     </div>
-                    {evidence.summary && (
-                      <p className="mt-1 text-[11px] leading-relaxed text-slate-500 dark:text-slate-300 line-clamp-2">
-                        {evidence.summary}
-                      </p>
-                    )}
-                    <div className="mt-2 space-y-1">
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">{quality.reasons[1]}</p>
-                      {quality.warnings[0] ? (
-                        <p className="flex items-center gap-1 text-[11px] text-amber-700 dark:text-amber-300">
-                          <AlertTriangle className="h-3 w-3 shrink-0" />
-                          {quality.warnings[0]}
+                  </div>
+                </div>
+                {(evidenceTrust.unknownFreshnessCount > 0 || evidenceTrust.staleCount > 0 || evidenceTrust.warnings.length > 0) && (
+                  <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-amber-700 dark:text-amber-300">
+                    {evidenceTrust.unknownFreshnessCount > 0 && <span>Freshness unknown: {evidenceTrust.unknownFreshnessCount}</span>}
+                    {evidenceTrust.staleCount > 0 && <span>Stale: {evidenceTrust.staleCount}</span>}
+                    {evidenceTrust.duplicateCount > 0 && <span>Duplicates: {evidenceTrust.duplicateCount}</span>}
+                    {evidenceTrust.contradictionRisk >= 30 && <span>Review contradiction cues</span>}
+                  </div>
+                )}
+              </div>
+              <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
+                {allEvidence.slice(0, 6).map((evidence) => {
+                  const quality = scoreEvidenceQuality(evidence);
+                  const trust = evidenceTrustByUrl.get(evidence.url);
+                  return (
+                    <a
+                      key={`${evidence.platform}-${evidence.url}`}
+                      href={evidence.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-lg border border-slate-200 dark:border-slate-800/80 bg-slate-50/70 dark:bg-slate-950/70 p-3 transition-colors hover:border-blue-200 hover:bg-blue-50/60 dark:hover:border-blue-800/80 dark:hover:bg-blue-950/25"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-[10px] capitalize">
+                          {evidence.platform || "web"}
+                        </Badge>
+                        <Badge variant="secondary" className={scoreBadgeClass(quality.score)}>
+                          Evidence quality {quality.score}
+                        </Badge>
+                        {trust && (
+                          <Badge variant="outline" className="text-[10px] text-slate-500 dark:text-slate-300">
+                            Credibility {trust.credibilityScore}
+                          </Badge>
+                        )}
+                        <ExternalLink className="ml-auto h-3.5 w-3.5 text-slate-400" />
+                      </div>
+                      <div className="mt-2 text-xs font-semibold text-slate-800 dark:text-slate-100 line-clamp-2">
+                        {evidence.title || evidence.keywords || evidence.url}
+                      </div>
+                      {evidence.summary && (
+                        <p className="mt-1 text-[11px] leading-relaxed text-slate-500 dark:text-slate-300 line-clamp-2">
+                          {evidence.summary}
                         </p>
-                      ) : null}
-                    </div>
-                  </a>
-                );
-              })}
-            </div>
+                      )}
+                      <div className="mt-2 space-y-1">
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">{quality.reasons[1]}</p>
+                        {trust && <p className="text-[11px] text-slate-500 dark:text-slate-400">Novelty {trust.noveltyScore} | Contradiction risk {trust.contradictionScore}</p>}
+                        {quality.warnings[0] ? (
+                          <p className="flex items-center gap-1 text-[11px] text-amber-700 dark:text-amber-300">
+                            <AlertTriangle className="h-3 w-3 shrink-0" />
+                            {quality.warnings[0]}
+                          </p>
+                        ) : null}
+                      </div>
+                    </a>
+                  );
+                })}
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

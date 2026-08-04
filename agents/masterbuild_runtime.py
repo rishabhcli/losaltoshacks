@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import shutil
 import signal
 import time
 from collections import deque
@@ -23,6 +22,9 @@ from openai import AsyncOpenAI
 
 import agent_context
 from livestream_tiktok import build_local_browser_session
+from atomic_file import copy_file_atomic, write_text_atomic
+from background_task import observe_task
+from model_output import validate_business_plan
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -49,7 +51,7 @@ def read_linked_insforge_project() -> dict[str, Any] | None:
         return None
     try:
         payload = json.loads(config_path.read_text())
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
 
@@ -285,7 +287,7 @@ async def fetch_platform_content(url: str, platform: str, brave_description: str
                 result["title"] = brave_description[:100] if brave_description else url
                 result["content"] = f"Post context: {brave_description}" if brave_description else ""
 
-    except Exception as e:
+    except (httpx.HTTPError, json.JSONDecodeError, ValueError, TypeError, KeyError, IndexError) as e:
         print(f"[fetch_content] {platform} fetch failed for {url[:80]}: {e}")
         # Fallback to brave description
         result["title"] = brave_description[:100] if brave_description else url.split("/")[-1][:60]
@@ -723,7 +725,7 @@ class BraveSearchClient:
             brave_query = self._build_query(platform, query)
             try:
                 results = await self.search(brave_query, count=max_results)
-            except Exception as error:
+            except (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError) as error:
                 print(f"[brave] search failed for {platform}: {error}")
                 continue
 
@@ -800,7 +802,7 @@ def _normalize_cloud_findings(output: Any) -> list[dict[str, str]]:
         if text:
             try:
                 payload = extract_json_block(text)
-            except Exception:
+            except ValueError:
                 payload = {}
         else:
             payload = {}
@@ -889,7 +891,7 @@ class BrowserUseCloudClient:
                     await asyncio.sleep(wait_seconds)
                     continue
                 raise
-            except Exception as error:
+            except (httpx.RequestError, ValueError) as error:
                 last_error = error
                 if attempt < retries - 1:
                     await asyncio.sleep(min(2 ** (attempt + 1), 12))
@@ -1188,7 +1190,7 @@ class InsForgeRuntimeClient:
                 retry_on_429=False,
             )
             return rows[0] if rows else None
-        except Exception as error:
+        except (httpx.HTTPError, ValueError) as error:
             if self._is_rate_limited_error(error):
                 print("[insforge] mission poll skipped due to rate limit")
                 return None
@@ -1204,7 +1206,7 @@ class InsForgeRuntimeClient:
                 params=params,
                 retry_on_429=False,
             )
-        except Exception as error:
+        except (httpx.HTTPError, ValueError) as error:
             if self._is_rate_limited_error(error):
                 print("[insforge] agent read skipped due to rate limit")
                 return []
@@ -1220,7 +1222,7 @@ class InsForgeRuntimeClient:
                 params=params,
                 retry_on_429=False,
             )
-        except Exception as error:
+        except (httpx.HTTPError, ValueError) as error:
             if self._is_rate_limited_error(error):
                 print("[insforge] discovery read skipped due to rate limit")
                 return []
@@ -1236,7 +1238,7 @@ class InsForgeRuntimeClient:
                 params=params,
                 retry_on_429=False,
             )
-        except Exception as error:
+        except (httpx.HTTPError, ValueError) as error:
             if self._is_rate_limited_error(error):
                 print("[insforge] control command poll skipped due to rate limit")
                 return []
@@ -1267,7 +1269,7 @@ class InsForgeRuntimeClient:
                 values=payload,
                 retry_on_429=False,
             )
-        except Exception as error:
+        except (httpx.HTTPError, ValueError) as error:
             if self._is_rate_limited_error(error):
                 print(f"[insforge] skipped agent {agent_id} update due to rate limit")
                 return
@@ -1284,7 +1286,7 @@ class InsForgeRuntimeClient:
                         )
                         print("[insforge] agent lifecycle columns unavailable; using legacy agent updates")
                         return
-                    except Exception as retry_error:
+                    except (httpx.HTTPError, ValueError) as retry_error:
                         if self._is_rate_limited_error(retry_error):
                             print(f"[insforge] skipped agent {agent_id} update due to rate limit")
                             return
@@ -1307,7 +1309,7 @@ class InsForgeRuntimeClient:
                 ],
                 retry_on_429=False,
             )
-        except Exception as error:
+        except (httpx.HTTPError, ValueError) as error:
             if self._is_rate_limited_error(error):
                 print("[insforge] skipped log write due to rate limit")
                 return
@@ -1330,7 +1332,7 @@ class InsForgeRuntimeClient:
                 ],
                 retry_on_429=False,
             )
-        except Exception as error:
+        except (httpx.HTTPError, ValueError) as error:
             if self._is_rate_limited_error(error):
                 print("[insforge] skipped signal write due to rate limit")
                 return
@@ -1340,8 +1342,8 @@ class InsForgeRuntimeClient:
         """Execute raw SQL on InsForge (for schema creation)."""
         try:
             await self._request("POST", "/api/database/sql", json={"query": sql})
-        except Exception as e:
-            print(f"[insforge] SQL execution error: {e}")
+        except (httpx.HTTPError, ValueError) as error:
+            print(f"[insforge] SQL execution error: {error}")
             raise
 
     async def get_all_discovered_urls(self, mission_id: str) -> set[str]:
@@ -1353,11 +1355,11 @@ class InsForgeRuntimeClient:
                 retry_on_429=False,
             )
             return {str(r.get("source_url", "")) for r in records if r.get("source_url")}
-        except Exception as error:
+        except (httpx.HTTPError, ValueError) as error:
             if self._is_rate_limited_error(error):
                 print("[insforge] discovered-url read skipped due to rate limit")
                 return set()
-            return set()
+            raise
 
     async def append_discovery(
         self,
@@ -1392,7 +1394,7 @@ class InsForgeRuntimeClient:
                 ],
                 retry_on_429=False,
             )
-        except Exception as error:
+        except (httpx.HTTPError, ValueError) as error:
             if self._is_rate_limited_error(error):
                 print("[insforge] skipped discovery write due to rate limit")
                 return
@@ -1411,7 +1413,7 @@ class InsForgeRuntimeClient:
                 },
                 retry_on_429=False,
             )
-        except Exception as error:
+        except (httpx.HTTPError, ValueError) as error:
             if self._is_rate_limited_error(error):
                 raise RuntimeError("Preview upload skipped due to rate limit") from error
             raise
@@ -1506,8 +1508,9 @@ class InsForgeRuntimeClient:
                 }],
                 retry_on_429=False,
             )
-        except Exception as e:
-            print(f"[insforge] append_thought error: {e}")
+        except Exception as error:
+            print(f"[insforge] append_thought error: {error}")
+            raise
 
     # ── Business Plans ────────────────────────────────────────────────
 
@@ -1545,8 +1548,9 @@ class InsForgeRuntimeClient:
                 }],
                 retry_on_429=False,
             )
-        except Exception as e:
-            print(f"[insforge] append_business_plan error: {e}")
+        except Exception as error:
+            print(f"[insforge] append_business_plan error: {error}")
+            raise
 
 
 class PreviewManager:
@@ -1562,7 +1566,7 @@ class PreviewManager:
 
         if screenshot_path:
             target = agent_dir / "latest.jpg"
-            shutil.copyfile(screenshot_path, target)
+            copy_file_atomic(screenshot_path, target)
 
         metadata = {
             "agentId": agent_id,
@@ -1573,7 +1577,7 @@ class PreviewManager:
             "heartbeatAt": utc_now(),
             "note": note,
         }
-        (agent_dir / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+        write_text_atomic(agent_dir / "metadata.json", json.dumps(metadata, indent=2))
 
 
 class MasterBuildAI:
@@ -1623,7 +1627,7 @@ class MasterBuildAI:
             return
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(self._insforge_client.append_thought(
+            task = loop.create_task(self._insforge_client.append_thought(
                 self._mission_id,
                 agent_id=agent_id,
                 thought_type=thought_type,
@@ -1634,6 +1638,7 @@ class MasterBuildAI:
                 tokens_used=tokens_used,
                 duration_ms=duration_ms,
             ))
+            observe_task(task, label="InsForge thought logging")
         except RuntimeError:
             pass
 
@@ -1737,8 +1742,8 @@ class MasterBuildAI:
                 cleaned = [str(item).strip() for item in parsed if str(item).strip()]
                 if cleaned:
                     return cleaned[:count]
-        except Exception:
-            pass
+        except Exception as error:
+            print(f"[ai] generate_terms fallback for {platform}: {error}")
 
         return [f"{prompt} pain points", f"{prompt} workflow", f"{prompt} alternatives"][:count]
 
@@ -1764,8 +1769,8 @@ class MasterBuildAI:
             cleaned = result.strip().strip('"').strip("'").strip()
             if cleaned and len(cleaned) < 200:
                 return cleaned
-        except Exception:
-            pass
+        except Exception as error:
+            print(f"[ai] generate_next_query fallback for {platform}: {error}")
 
         return last_keywords
 
@@ -1807,8 +1812,8 @@ class MasterBuildAI:
                 keywords = str(parsed.get("keywords", query)).strip() or query
                 summary = str(parsed.get("summary", title)).strip() or title or query
                 return keywords, summary
-        except Exception:
-            pass
+        except Exception as error:
+            print(f"[ai] summarize_discovery fallback for {platform or 'unknown'}: {error}")
 
         return query, title or query
 
@@ -1918,8 +1923,8 @@ class MasterBuildAI:
             )
             if isinstance(parsed, dict) and isinstance(parsed.get("options"), list):
                 return parsed
-        except Exception:
-            pass
+        except Exception as error:
+            print(f"[ai] market research report fallback: {error}")
 
         fallback_options: list[dict[str, Any]] = []
         fallback_discoveries = discoveries[:3] or [
@@ -2001,8 +2006,8 @@ class MasterBuildAI:
             )
             if isinstance(parsed, dict):
                 return parsed
-        except Exception:
-            pass
+        except Exception as error:
+            print(f"[ai] implementation plan fallback: {error}")
 
         option_title = str(winning_option.get("title", "")).strip() or original_prompt
         option_concept = str(winning_option.get("concept", "")).strip() or original_prompt
@@ -2080,8 +2085,8 @@ class MasterBuildAI:
             parsed = extract_json_block(raw)
             if isinstance(parsed, dict) and "action" in parsed:
                 return parsed
-        except Exception:
-            pass
+        except Exception as error:
+            print(f"[ai] action planner fallback for agent {agent_id}: {error}")
         return {"action": "search", "query": page_title or "trending content", "reasoning": "fallback"}
 
     async def coordinate_strategy(self) -> str:
@@ -2103,8 +2108,8 @@ class MasterBuildAI:
             )
             if result and "strategy" in result.lower():
                 return result
-        except Exception:
-            pass
+        except Exception as error:
+            print(f"[ai] strategy coordinator fallback: {error}")
         return agent_context.get_strategy()
 
     async def synthesize_business_plan(
@@ -2148,28 +2153,30 @@ class MasterBuildAI:
             f"Produce the {'final' if is_final else 'updated'} business plan as JSON."
         )
 
-        try:
-            parsed = extract_json_block(
-                await self.generate_chat_completion(
-                    system_prompt, user_prompt, max_tokens=800,
-                    thought_type="refinement", action_label=f"business_plan_{'final' if is_final else 'update'}",
+        last_error: Exception | None = None
+        action_label = f"business_plan_{'final' if is_final else 'update'}"
+        for attempt in range(2):
+            attempt_prompt = user_prompt
+            if attempt:
+                attempt_prompt += (
+                    "\n\nREPAIR REQUEST: The previous response did not satisfy the JSON contract. "
+                    "Return the complete object with every required key, non-empty strings, "
+                    "a numeric confidence_score from 0 to 100, and exactly 3 to 5 next steps."
                 )
-            )
-            if isinstance(parsed, dict) and "market_opportunity" in parsed:
-                return parsed
-        except Exception:
-            pass
+            try:
+                parsed = extract_json_block(
+                    await self.generate_chat_completion(
+                        system_prompt, attempt_prompt, max_tokens=800,
+                        thought_type="refinement", action_label=action_label,
+                    )
+                )
+                return validate_business_plan(parsed)
+            except Exception as error:
+                last_error = error
+                if attempt == 0:
+                    print(f"[ai] Business-plan output failed validation; requesting one repair: {error}")
 
-        return {
-            "market_opportunity": "Pending — insufficient discovery data.",
-            "competitive_landscape": "Pending — need more research.",
-            "revenue_models": "Pending — exploring options.",
-            "user_acquisition": "Pending — identifying channels.",
-            "risk_analysis": "Pending — assessing risks.",
-            "confidence_score": max(5, min(len(discoveries) * 3, 30)),
-            "executive_summary": f"Business plan for: {original_prompt}. Research in progress.",
-            "recommended_next_steps": ["Continue research", "Gather more discoveries", "Analyze competitive landscape"],
-        }
+        raise RuntimeError(f"business_plan_structured_output_failed: {last_error}") from last_error
 
 
 class MasterBuildOrchestrator:
@@ -2233,6 +2240,27 @@ class MasterBuildOrchestrator:
         self._openai_browser_model = os.getenv("OPENAI_BROWSER_MODEL", "gpt-4o")
         self._openai_mini_model = "gpt-4o-mini"
         self._openai_available = bool(self._openai_api_key)
+
+    async def _report_runtime_error(
+        self,
+        mission_id: str,
+        message: str,
+        *,
+        agent_id: int | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Keep recoverable loop failures visible in both stdout and mission logs."""
+        print(f"[orchestrator] {message}")
+        try:
+            await self.client.append_log(
+                mission_id,
+                agent_id=agent_id,
+                log_type="error",
+                message=message,
+                metadata=metadata or {},
+            )
+        except Exception as log_error:
+            print(f"[orchestrator] could not record runtime failure: {log_error}")
 
     def _create_minimax_llm(self):
         """Create a browser-use ChatOpenAI backed by MiniMax M2.7 with think-tag stripping.
@@ -2586,6 +2614,7 @@ class MasterBuildOrchestrator:
             )
             tasks.append(showcase_task)
 
+        runtime_task_failures: list[str] = []
         try:
             if use_cloud_agents:
                 showcase_task = asyncio.create_task(asyncio.sleep(0))
@@ -2613,15 +2642,32 @@ class MasterBuildOrchestrator:
             completion_task.cancel()
             for task in tasks + [control_task]:
                 task.cancel()
-            await asyncio.gather(
+            managed_tasks = [
                 *tasks,
                 control_task,
                 strategy_task,
                 business_plan_task,
                 builder_trigger_task,
                 completion_task,
-                return_exceptions=True,
-            )
+            ]
+            task_results = await asyncio.gather(*managed_tasks, return_exceptions=True)
+            for task, result in zip(managed_tasks, task_results, strict=True):
+                if not isinstance(result, BaseException) or isinstance(result, asyncio.CancelledError):
+                    continue
+                task_label = task.get_name()
+                failure = f"{task_label}: {result}"
+                runtime_task_failures.append(failure)
+                print(f"[orchestrator] background task failed for mission {mission_id}: {failure}")
+                try:
+                    await self.client.append_log(
+                        mission_id,
+                        agent_id=None,
+                        log_type="error",
+                        message=f"Background task failed: {failure}",
+                        metadata={"task": task_label},
+                    )
+                except Exception as log_error:
+                    print(f"[orchestrator] could not record background task failure: {log_error}")
 
             stop_reason = str(self.stop_context.get("reason", "")).strip() if self.stop_context else ""
             was_superseded = stop_reason == "superseded"
@@ -2638,8 +2684,12 @@ class MasterBuildOrchestrator:
                             "replacement_prompt": self.stop_context.get("replacement_prompt", ""),
                         },
                     )
-                except Exception:
-                    pass
+                except Exception as error:
+                    await self._report_runtime_error(
+                        mission_id,
+                        f"Superseded mission status log failed: {error}",
+                        metadata={"component": "superseded_status_log"},
+                    )
             else:
                 # ── Final business plan synthesis ──────────────────────
                 try:
@@ -2688,8 +2738,12 @@ class MasterBuildOrchestrator:
                         ),
                         metadata={"discovery_count": len(discoveries)},
                     )
-                except Exception as e:
-                    print(f"[orchestrator] final business plan error: {e}")
+                except Exception as error:
+                    await self._report_runtime_error(
+                        mission_id,
+                        f"Final business plan synthesis failed: {error}",
+                        metadata={"component": "final_business_plan"},
+                    )
 
                 if market_research_spec is not None:
                     try:
@@ -2700,20 +2754,27 @@ class MasterBuildOrchestrator:
                             is_final=True,
                         )
                     except Exception as error:
-                        await self.client.append_log(
+                        await self._report_runtime_error(
                             mission_id,
+                            f"Market research finalization failed: {error}",
                             agent_id=market_research_spec.agent_id,
-                            log_type="error",
-                            message=f"Market research finalization failed: {error}",
-                            metadata={},
+                            metadata={"component": "market_research_finalization"},
                         )
 
-            final_status = "stopped" if (was_superseded or was_manually_stopped) else "completed"
+            final_status = (
+                "error"
+                if runtime_task_failures
+                else "stopped"
+                if (was_superseded or was_manually_stopped)
+                else "completed"
+            )
             final_message = (
                 "Mission superseded by a newer request."
                 if was_superseded
                 else "Mission stopped."
                 if was_manually_stopped
+                else f"Mission completed with {len(runtime_task_failures)} background task failure(s)."
+                if runtime_task_failures
                 else "Mission completed."
             )
             await self.client.update_mission(mission_id, status=final_status, stopped_at=utc_now())
@@ -2804,8 +2865,12 @@ class MasterBuildOrchestrator:
                 )
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                pass
+            except Exception as error:
+                await self._report_runtime_error(
+                    mission_id,
+                    f"Strategy update failed: {error}",
+                    metadata={"component": "periodic_strategy_update"},
+                )
             await asyncio.sleep(self.strategy_poll_seconds)
 
     async def periodic_business_plan_synthesis(self, mission_id: str, prompt: str) -> None:
@@ -2887,7 +2952,11 @@ class MasterBuildOrchestrator:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                print(f"[orchestrator] business plan synthesis error: {e}")
+                await self._report_runtime_error(
+                    mission_id,
+                    f"Business plan synthesis loop failed: {e}",
+                    metadata={"component": "periodic_business_plan_synthesis"},
+                )
             await asyncio.sleep(self.plan_poll_seconds)
 
     async def monitor_builder_trigger(self, mission_id: str, prompt: str) -> None:
@@ -2931,7 +3000,11 @@ class MasterBuildOrchestrator:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                print(f"[orchestrator] builder trigger error: {e}")
+                await self._report_runtime_error(
+                    mission_id,
+                    f"Builder trigger loop failed: {e}",
+                    metadata={"component": "monitor_builder_trigger"},
+                )
             if not builder_launched:
                 await asyncio.sleep(self.builder_poll_seconds)
 
@@ -3046,7 +3119,11 @@ class MasterBuildOrchestrator:
             except asyncio.CancelledError:
                 raise
             except Exception as error:
-                print(f"[orchestrator] auto completion monitor error: {error}")
+                await self._report_runtime_error(
+                    mission_id,
+                    f"Auto-completion monitor failed: {error}",
+                    metadata={"component": "monitor_auto_completion"},
+                )
 
             await asyncio.sleep(self.auto_complete_poll_seconds)
 

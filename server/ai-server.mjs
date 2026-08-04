@@ -7,6 +7,36 @@ import { inferWithOpenAI } from "./lib/openai.mjs";
 import { generateSpeechWithElevenLabs } from "./lib/elevenlabs.mjs";
 import { generateSpeechWithMiniMax } from "./lib/minimax.mjs";
 import { loadProjectEnv } from "./lib/env.mjs";
+import { createApiAuthenticator } from "./lib/api-auth.mjs";
+import { createRateLimiter } from "./lib/rate-limit.mjs";
+import { parseList, resolveCorsOrigin, validateImageUrl } from "./lib/request-security.mjs";
+import { readJsonBody } from "./lib/request-body.mjs";
+import { assertBusinessPlanObject, assertRecommendationArray, parseModelJson } from "./lib/structured-output.mjs";
+import { writeFileAtomic } from "./lib/atomic-file.mjs";
+import {
+  boundedInteger,
+  sanitizeAgentRow,
+  sanitizeBusinessPlanRow,
+  sanitizeBusinessPlanRows,
+  sanitizeDiscoveryRow,
+  sanitizeLogRow,
+  sanitizeMemoryRow,
+  sanitizeRows,
+  sanitizeSignalRow,
+  sanitizeThoughtRow,
+} from "./lib/response-validation.mjs";
+import {
+  parseBoundedInteger,
+  validateAgentRetryBody,
+  validateBackgroundRefreshInspectionBody,
+  validateInferBody,
+  validateMissionCreateBody,
+  validateMissionReferenceBody,
+  validateSemanticSearchBody,
+  validateThemeBody,
+  validateTrendAnalysisBody,
+  validateTtsBody,
+} from "./lib/request-validation.mjs";
 import { createServerInsforgeClient } from "./lib/insforge-server.mjs";
 import {
   getLinkedInsforgeAdminKey,
@@ -16,13 +46,54 @@ import { vectorSearch, storeDiscoveriesWithEmbeddings } from "./lib/mongodb-vect
 
 loadProjectEnv();
 
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+let server = null;
+let shutdownStarted = false;
+let backgroundStartupTimer = null;
+let backgroundInterval = null;
+
+async function shutdownServer(exitCode, reason) {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  if (backgroundStartupTimer) clearTimeout(backgroundStartupTimer);
+  if (backgroundInterval) clearInterval(backgroundInterval);
+
+  console.error(`[ai-server] Draining before exit (${reason}).`);
+  const forceExitTimer = setTimeout(() => {
+    server?.closeAllConnections?.();
+    process.exit(exitCode);
+  }, 5000);
+
+  try {
+    if (server?.listening) {
+      await new Promise((resolve) => {
+        server.close(() => resolve());
+        server.closeIdleConnections?.();
+      });
+    }
+  } catch (error) {
+    console.error("[ai-server] Graceful shutdown failed:", error);
+  } finally {
+    clearTimeout(forceExitTimer);
+    process.exit(exitCode);
+  }
+}
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[ai-server] Fatal unhandled rejection:", reason);
+  void shutdownServer(1, "unhandledRejection");
 });
 
-process.on("uncaughtException", (err) => {
-  console.error("Uncaught Exception thrown:", err);
-  process.exit(1);
+process.on("uncaughtException", (error) => {
+  console.error("[ai-server] Fatal uncaught exception:", error);
+  void shutdownServer(1, "uncaughtException");
+});
+
+process.once("SIGINT", () => {
+  void shutdownServer(0, "SIGINT");
+});
+
+process.once("SIGTERM", () => {
+  void shutdownServer(0, "SIGTERM");
 });
 
 const port = Number.parseInt(process.env.AI_SERVER_PORT || "3001", 10);
@@ -69,12 +140,23 @@ function clearBrowserAgentPreviewFrames(agentIds = [1, 2, 3, 4]) {
   }
 }
 
-function writeJson(response, statusCode, body) {
+function corsHeaders(response) {
+  const headers = {
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+  };
+  if (response.__marketPulseCorsOrigin) {
+    headers["Access-Control-Allow-Origin"] = response.__marketPulseCorsOrigin;
+    headers.Vary = "Origin";
+  }
+  return headers;
+}
+
+function writeJson(response, statusCode, body, extraHeaders = {}) {
   const requestContext = requestLogContext(response);
   response.writeHead(statusCode, {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    ...corsHeaders(response),
+    ...extraHeaders,
     "Content-Type": "application/json; charset=utf-8",
   });
   response.end(JSON.stringify(body));
@@ -90,15 +172,15 @@ function writeJson(response, statusCode, body) {
   }
 }
 
-async function readJsonBody(request) {
-  const chunks = [];
+function writeJsonBodyError(response, error) {
+  if (!error || !["payload_too_large", "invalid_json_body", "invalid_request"].includes(error.code)) return false;
 
-  for await (const chunk of request) {
-    chunks.push(chunk);
-  }
-
-  const raw = Buffer.concat(chunks).toString("utf8");
-  return raw ? JSON.parse(raw) : {};
+  writeJson(response, error.statusCode, {
+    ok: false,
+    error: error.code,
+    message: error.message,
+  });
+  return true;
 }
 
 function hasAnyEnv(names) {
@@ -197,6 +279,7 @@ function runWorkerPreflight({ strict = false } = {}) {
           return;
         }
 
+        const message = compactHealthMessage(stderr || error?.message || stdout || "Worker preflight failed before returning JSON.");
         resolve({
           ok: false,
           strict,
@@ -204,7 +287,17 @@ function runWorkerPreflight({ strict = false } = {}) {
           liveMissionReady: false,
           exitCode,
           error: error?.killed ? "worker_preflight_timeout" : "worker_preflight_parse_failed",
-          message: compactHealthMessage(stderr || error?.message || stdout || "Worker preflight failed before returning JSON."),
+          message,
+          insforge: {
+            status: error?.killed ? "timeout" : "unavailable",
+            message,
+          },
+          liveLlm: {
+            status: "unknown",
+            openaiConfigured: hasAnyEnv(["OPENAI_API_KEY"]),
+            minimaxConfigured: hasAnyEnv(["MINIMAX_API_KEY"]),
+            action: "Set OPENAI_API_KEY for OpenAI inference, or MINIMAX_API_KEY for the worker fallback.",
+          },
         });
       }
     );
@@ -452,7 +545,7 @@ const RESETTABLE_TABLES = [
   "logs", "discoveries", "signals", "control_commands", "builder_outputs", "agent_memory",
 ];
 
-const MISSION_COLUMNS = "id,prompt,status,live_url_1,live_url_2,live_url_3,live_url_4,live_url_5,final_options,created_at,stopped_at";
+const MISSION_COLUMNS = "id,owner_id,prompt,status,live_url_1,live_url_2,live_url_3,live_url_4,live_url_5,final_options,created_at,stopped_at";
 const AGENT_COLUMNS = "id,agent_id,name,platform,role,status,current_url,profile_path,assignment,energy,status_detail,failure_reason,retry_count,confidence,last_heartbeat";
 const LEGACY_AGENT_COLUMNS = "id,agent_id,status,current_url,profile_path,energy";
 const DISCOVERY_COLUMNS = "id,source_url,thumbnail_url,agent_id,platform,title,summary,keywords,industry,likes,views,comments,created_at";
@@ -566,12 +659,27 @@ async function fetchAgentsForDashboard(insforge, missionId) {
     .order("agent_id", { ascending: true });
 }
 
-let dashboardSnapshotCache = null;
-let dashboardSnapshotFetchedAt = 0;
-let dashboardSnapshotInFlight = null;
+let dashboardSnapshotCache = new Map();
+let dashboardSnapshotInFlight = new Map();
 
 const BACKGROUND_MISSION_PROMPT_PREFIX = "Background market research:";
 const DEMO_MODE = ["1", "true", "yes"].includes(String(process.env.MARKETPULSE_DEMO_MODE ?? "").toLowerCase());
+const apiAuthenticator = createApiAuthenticator({
+  getBaseUrl: () => (
+    getFirstEnv(["MASTERBUILD_INSFORGE_URL", "VITE_INSFORGE_URL"]) ||
+    getLinkedInsforgeBaseUrl()
+  ),
+});
+const corsAllowedOrigins = parseList(getFirstEnv(["MARKETPULSE_ALLOWED_ORIGINS", "APP_ORIGIN"]));
+const apiRateWindowMs = getPositiveIntegerEnv("MARKETPULSE_API_RATE_WINDOW_MS", 60_000);
+const apiIpRateLimiter = createRateLimiter({ windowMs: apiRateWindowMs });
+const apiUserRateLimiter = createRateLimiter({ windowMs: apiRateWindowMs });
+const apiGeneralRateLimit = getPositiveIntegerEnv("MARKETPULSE_API_RATE_LIMIT", 120);
+const apiProviderRateLimit = getPositiveIntegerEnv("MARKETPULSE_API_PROVIDER_RATE_LIMIT", 30);
+const apiUserGeneralRateLimit = getPositiveIntegerEnv("MARKETPULSE_API_USER_RATE_LIMIT", 120);
+const apiUserProviderRateLimit = getPositiveIntegerEnv("MARKETPULSE_API_USER_PROVIDER_RATE_LIMIT", 30);
+const allowedImageHosts = parseList(getFirstEnv(["MARKETPULSE_ALLOWED_IMAGE_HOSTS"]))
+  .map((host) => host.toLowerCase());
 
 let demoDashboardState = null;
 
@@ -893,8 +1001,7 @@ function buildDemoDashboardState(prompt, status = "completed") {
 }
 
 async function handleDemoMissionCreate(request, response) {
-  const body = await readJsonBody(request);
-  const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
+  const { prompt } = validateMissionCreateBody(await readJsonBody(request));
 
   if (!prompt) {
     structuredLog("mission.create.rejected", { mode: "demo", reason: "mission_prompt_required" });
@@ -942,8 +1049,8 @@ async function handleDemoMissionReset(_request, response) {
 }
 
 async function handleDemoAgentRetry(request, response) {
-  const body = await readJsonBody(request);
-  const agentId = Number(body?.agentId);
+  const { agentId: rawAgentId } = validateAgentRetryBody(await readJsonBody(request));
+  const agentId = Number(rawAgentId);
 
   if (!Number.isInteger(agentId) || agentId < 1 || agentId > 5) {
     structuredLog("agent.retry.rejected", { mode: "demo", agentId: Number.isFinite(agentId) ? agentId : null, reason: "agent_id_invalid" });
@@ -1150,8 +1257,8 @@ function demoRecommendationsPayload() {
 }
 
 function invalidateDashboardSnapshot() {
-  dashboardSnapshotCache = null;
-  dashboardSnapshotFetchedAt = 0;
+  dashboardSnapshotCache.clear();
+  dashboardSnapshotInFlight.clear();
 }
 
 function isBackgroundMissionPrompt(prompt) {
@@ -1166,6 +1273,16 @@ function selectLatestUserFacingMission(rows) {
 function filterUserFacingMissions(rows) {
   if (!Array.isArray(rows)) return [];
   return rows.filter((row) => !isBackgroundMissionPrompt(row?.prompt));
+}
+
+function getRequestOwnerId(request) {
+  const ownerId = String(request?.__marketPulseUser?.id ?? "").trim();
+  return ownerId || null;
+}
+
+function scopeMissionQuery(query, request) {
+  const ownerId = getRequestOwnerId(request);
+  return ownerId ? query.eq("owner_id", ownerId) : query;
 }
 
 function normalizeMissionPreviewUrls(row) {
@@ -1184,14 +1301,26 @@ function normalizeMissionPreviewUrls(row) {
   return mission;
 }
 
-async function resolveMissionId(insforge, missionId) {
-  if (missionId) return missionId;
+async function resolveMissionId(insforge, missionId, request) {
+  const ownerId = getRequestOwnerId(request);
+  if (!ownerId) return null;
 
-  const result = await insforge.database
+  if (missionId) {
+    const ownedMission = await insforge.database
+      .from("missions")
+      .select("id")
+      .eq("id", missionId)
+      .eq("owner_id", ownerId)
+      .maybeSingle();
+    if (ownedMission.error) throw ownedMission.error;
+    return typeof ownedMission.data?.id === "string" ? ownedMission.data.id : null;
+  }
+
+  const result = scopeMissionQuery(insforge.database
     .from("missions")
     .select("id,prompt")
     .order("created_at", { ascending: false })
-    .limit(USER_MISSION_LOOKBACK_LIMIT);
+    .limit(USER_MISSION_LOOKBACK_LIMIT), request);
 
   if (result.error) throw result.error;
 
@@ -1204,8 +1333,7 @@ async function resolveMissionId(insforge, missionId) {
 /* ------------------------------------------------------------------ */
 
 async function handleMissionCreate(request, response) {
-  const body = await readJsonBody(request);
-  const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
+  const { prompt } = validateMissionCreateBody(await readJsonBody(request));
 
   if (!prompt) {
     structuredLog("mission.create.rejected", { mode: "live", reason: "mission_prompt_required" });
@@ -1213,11 +1341,11 @@ async function handleMissionCreate(request, response) {
   }
 
   const insforge = createServerInsforgeClient();
-  const priorMissionResult = await insforge.database
+  const priorMissionResult = scopeMissionQuery(insforge.database
     .from("missions")
     .select("id,status")
     .order("created_at", { ascending: false })
-    .limit(10);
+    .limit(10), request);
 
   if (priorMissionResult.error) throw priorMissionResult.error;
 
@@ -1239,7 +1367,8 @@ async function handleMissionCreate(request, response) {
       const missionStopping = await insforge.database
         .from("missions")
         .update({ status: "stopping" })
-        .eq("id", priorMissionId);
+        .eq("id", priorMissionId)
+        .eq("owner_id", getRequestOwnerId(request));
       if (missionStopping.error) throw missionStopping.error;
 
       const agentStopping = await updateAgentsByMission(insforge, priorMissionId, {
@@ -1276,6 +1405,7 @@ async function handleMissionCreate(request, response) {
 
   const missionInsert = await insforge.database.from("missions").insert([{
     id: missionId,
+    owner_id: getRequestOwnerId(request),
     prompt,
     status: "queued",
     live_url_1: null,
@@ -1329,7 +1459,9 @@ async function handleMissionCreate(request, response) {
 
     if (logInsert.error) throw logInsert.error;
   } catch (insertError) {
-    await insforge.database.from("missions").delete().eq("id", missionId);
+    await insforge.database.from("missions").delete()
+      .eq("id", missionId)
+      .eq("owner_id", getRequestOwnerId(request));
     throw insertError;
   }
 
@@ -1354,13 +1486,11 @@ async function handleMissionCreate(request, response) {
 /* ------------------------------------------------------------------ */
 
 async function handleMissionStop(request, response) {
-  const body = await readJsonBody(request);
-  const missionId = typeof body?.missionId === "string" && body.missionId.trim()
-    ? body.missionId.trim()
-    : null;
+  const { missionId: requestedMissionId } = validateMissionReferenceBody(await readJsonBody(request));
+  const missionId = requestedMissionId || null;
 
   const insforge = createServerInsforgeClient();
-  const targetId = await resolveMissionId(insforge, missionId);
+  const targetId = await resolveMissionId(insforge, missionId, request);
 
   if (!targetId) {
     structuredLog("mission.stop", { mode: "live", missionId: null, changed: false });
@@ -1378,7 +1508,8 @@ async function handleMissionStop(request, response) {
   const missionUpdate = await insforge.database
     .from("missions")
     .update({ status: "stopping" })
-    .eq("id", targetId);
+    .eq("id", targetId)
+    .eq("owner_id", getRequestOwnerId(request));
   if (missionUpdate.error) throw missionUpdate.error;
 
   const agentUpdate = await updateAgentsByMission(insforge, targetId, {
@@ -1419,13 +1550,11 @@ async function handleMissionStop(request, response) {
 /* ------------------------------------------------------------------ */
 
 async function handleMissionReset(request, response) {
-  const body = await readJsonBody(request);
-  const missionId = typeof body?.missionId === "string" && body.missionId.trim()
-    ? body.missionId.trim()
-    : null;
+  const { missionId: requestedMissionId } = validateMissionReferenceBody(await readJsonBody(request));
+  const missionId = requestedMissionId || null;
 
   const insforge = createServerInsforgeClient();
-  const targetId = await resolveMissionId(insforge, missionId);
+  const targetId = await resolveMissionId(insforge, missionId, request);
 
   if (!targetId) {
     structuredLog("mission.reset", { mode: "live", missionId: null, changed: false });
@@ -1506,7 +1635,8 @@ async function handleMissionReset(request, response) {
         refined_idea: null,
         final_options: null,
       })
-      .eq("id", targetId);
+      .eq("id", targetId)
+      .eq("owner_id", getRequestOwnerId(request));
     if (missionReset.error) {
       console.warn(`[ai-server] Mission reset warning: ${missionReset.error.message}`);
     }
@@ -1547,11 +1677,9 @@ async function handleMissionReset(request, response) {
 /* ------------------------------------------------------------------ */
 
 async function handleAgentRetry(request, response) {
-  const body = await readJsonBody(request);
-  const agentId = Number(body?.agentId);
-  const missionId = typeof body?.missionId === "string" && body.missionId.trim()
-    ? body.missionId.trim()
-    : null;
+  const { agentId: rawAgentId, missionId: requestedMissionId } = validateAgentRetryBody(await readJsonBody(request));
+  const agentId = Number(rawAgentId);
+  const missionId = requestedMissionId || null;
 
   if (!Number.isInteger(agentId) || agentId < 1 || agentId > 5) {
     structuredLog("agent.retry.rejected", { mode: "live", agentId: Number.isFinite(agentId) ? agentId : null, reason: "agent_id_invalid" });
@@ -1559,7 +1687,7 @@ async function handleAgentRetry(request, response) {
   }
 
   const insforge = createServerInsforgeClient();
-  const targetId = await resolveMissionId(insforge, missionId);
+  const targetId = await resolveMissionId(insforge, missionId, request);
 
   if (!targetId) {
     structuredLog("agent.retry.rejected", { mode: "live", agentId, reason: "mission_not_found" });
@@ -1570,6 +1698,7 @@ async function handleAgentRetry(request, response) {
     .from("missions")
     .select("id,status")
     .eq("id", targetId)
+    .eq("owner_id", getRequestOwnerId(request))
     .maybeSingle();
   if (missionResult.error) throw missionResult.error;
   if (!missionResult.data) {
@@ -1630,7 +1759,8 @@ async function handleAgentRetry(request, response) {
     const missionUpdate = await insforge.database
       .from("missions")
       .update({ status: "queued", stopped_at: null })
-      .eq("id", targetId);
+      .eq("id", targetId)
+      .eq("owner_id", getRequestOwnerId(request));
     if (missionUpdate.error) throw missionUpdate.error;
   }
 
@@ -1665,14 +1795,28 @@ async function handleAgentRetry(request, response) {
 /*  Route: GET /api/dashboard                                          */
 /* ------------------------------------------------------------------ */
 
-async function fetchDashboardSnapshot() {
+async function fetchDashboardSnapshot(request) {
+  if (!getRequestOwnerId(request)) {
+    return {
+      mission: null,
+      recentMissions: [],
+      agents: [],
+      discoveries: [],
+      logs: [],
+      signals: [],
+      thoughts: [],
+      memory: [],
+      businessPlans: [],
+    };
+  }
+
   const insforge = createServerInsforgeClient();
 
-  const missionRowsResult = await insforge.database
+  const missionRowsResult = scopeMissionQuery(insforge.database
     .from("missions")
     .select(MISSION_COLUMNS)
     .order("created_at", { ascending: false })
-    .limit(USER_MISSION_LOOKBACK_LIMIT);
+    .limit(USER_MISSION_LOOKBACK_LIMIT), request);
 
   if (missionRowsResult.error) throw missionRowsResult.error;
 
@@ -1715,42 +1859,45 @@ async function fetchDashboardSnapshot() {
   return {
     mission,
     recentMissions: filterUserFacingMissions(missionRows).map((row) => normalizeMissionPreviewUrls(row)).slice(0, 12),
-    agents: agentResult.data ?? [],
-    discoveries: discoveryResult.data ?? [],
-    logs: logResult.data ?? [],
-    signals: signalResult.data ?? [],
-    thoughts: thoughtsResult.error ? [] : (thoughtsResult.data ?? []),
-    memory: memoryResult.error ? [] : (memoryResult.data ?? []),
-    businessPlans: businessPlanResult.error ? [] : (businessPlanResult.data ?? []),
+    agents: sanitizeRows(agentResult.data, sanitizeAgentRow),
+    discoveries: sanitizeRows(discoveryResult.data, sanitizeDiscoveryRow),
+    logs: sanitizeRows(logResult.data, sanitizeLogRow),
+    signals: sanitizeRows(signalResult.data, sanitizeSignalRow),
+    thoughts: thoughtsResult.error ? [] : sanitizeRows(thoughtsResult.data, sanitizeThoughtRow),
+    memory: memoryResult.error ? [] : sanitizeRows(memoryResult.data, sanitizeMemoryRow),
+    businessPlans: businessPlanResult.error ? [] : sanitizeBusinessPlanRows(businessPlanResult.data),
   };
 }
 
-async function handleDashboard(_request, response) {
+async function handleDashboard(request, response) {
+  const cacheKey = getRequestOwnerId(request) ?? "anonymous";
   const now = Date.now();
-  if (dashboardSnapshotCache && now - dashboardSnapshotFetchedAt < DASHBOARD_CACHE_TTL_MS) {
-    writeJson(response, 200, dashboardSnapshotCache);
+  const cached = dashboardSnapshotCache.get(cacheKey);
+  if (cached && now - cached.fetchedAt < DASHBOARD_CACHE_TTL_MS) {
+    writeJson(response, 200, cached.snapshot);
     return;
   }
 
-  if (!dashboardSnapshotInFlight) {
-    dashboardSnapshotInFlight = fetchDashboardSnapshot()
+  let inFlight = dashboardSnapshotInFlight.get(cacheKey);
+  if (!inFlight) {
+    inFlight = fetchDashboardSnapshot(request)
       .then((snapshot) => {
-        dashboardSnapshotCache = snapshot;
-        dashboardSnapshotFetchedAt = Date.now();
+        dashboardSnapshotCache.set(cacheKey, { snapshot, fetchedAt: Date.now() });
         return snapshot;
       })
       .finally(() => {
-        dashboardSnapshotInFlight = null;
+        dashboardSnapshotInFlight.delete(cacheKey);
       });
+    dashboardSnapshotInFlight.set(cacheKey, inFlight);
   }
 
   try {
-    const snapshot = await dashboardSnapshotInFlight;
+    const snapshot = await inFlight;
     writeJson(response, 200, snapshot);
   } catch (error) {
     console.error("[ai-server] Failed to load dashboard snapshot.", error);
-    if (dashboardSnapshotCache) {
-      writeJson(response, 200, dashboardSnapshotCache);
+    if (cached) {
+      writeJson(response, 200, cached.snapshot);
       return;
     }
     writeJson(response, 500, { error: error.message || "Internal Server Error" });
@@ -2317,14 +2464,14 @@ function synthesizeInsightsFromPlan(plan, missionPrompt) {
   return insights;
 }
 
-async function handleTrends(_request, response) {
+async function handleTrends(request, response) {
   const insforge = createServerInsforgeClient();
 
-  const missionRowsResult = await insforge.database
+  const missionRowsResult = scopeMissionQuery(insforge.database
     .from("missions")
     .select("id,prompt,status,final_options")
     .order("created_at", { ascending: false })
-    .limit(USER_MISSION_LOOKBACK_LIMIT);
+    .limit(USER_MISSION_LOOKBACK_LIMIT), request);
 
   if (missionRowsResult.error) {
     writeJson(response, 200, { trends: [], insights: [] });
@@ -2356,8 +2503,8 @@ async function handleTrends(_request, response) {
       .maybeSingle(),
   ]);
 
-  const discoveries = discResult.data ?? [];
-  const plan = planResult.data ?? null;
+  const discoveries = sanitizeRows(discResult.data, sanitizeDiscoveryRow);
+  const plan = sanitizeBusinessPlanRow(planResult.data);
 
   let trends = synthesizeTrendsFromDiscoveries(discoveries, missionPrompt, missionId);
 
@@ -2419,14 +2566,14 @@ function industryRankForSort(industry, focusIndustry) {
   return 1;
 }
 
-async function generateLiveRecommendations(focusIndustry = null) {
+async function generateLiveRecommendations(focusIndustry = null, request) {
   const insforge = createServerInsforgeClient();
 
-  const missionRowsResult = await insforge.database
+  const missionRowsResult = scopeMissionQuery(insforge.database
     .from("missions")
     .select("id,prompt,status,final_options")
     .order("created_at", { ascending: false })
-    .limit(USER_MISSION_LOOKBACK_LIMIT);
+    .limit(USER_MISSION_LOOKBACK_LIMIT), request);
 
   if (missionRowsResult.error) return { recommendations: [] };
 
@@ -2450,7 +2597,8 @@ async function generateLiveRecommendations(focusIndustry = null) {
 
   if (planResult.error || !planResult.data) return { recommendations: [], missionId };
 
-  const plan = planResult.data;
+  const plan = sanitizeBusinessPlanRow(planResult.data);
+  if (!plan) return { recommendations: [], missionId };
 
   // Build live trend summary from the same mission so recommendations stay
   // anchored to specific items, services, and features rather than generic themes.
@@ -2461,7 +2609,7 @@ async function generateLiveRecommendations(focusIndustry = null) {
     .order("created_at", { ascending: false })
     .limit(40);
 
-  const discoveries = discResult.data ?? [];
+  const discoveries = sanitizeRows(discResult.data, sanitizeDiscoveryRow);
   const topKeywords = discoveries
     .flatMap((d) => (d.keywords ?? "").split(",").map((k) => k.trim()).filter(Boolean))
     .slice(0, 20)
@@ -2559,14 +2707,18 @@ Rules:
       temperature: 0.35,
     });
 
-    const text = result.text ?? "";
-    // Strip markdown code fences if present
-    const clean = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-    const match = clean.match(/\[[\s\S]*\]/);
-    if (match) rawRecs = JSON.parse(match[0]);
+    rawRecs = assertRecommendationArray(parseModelJson(result.text, {
+      expectedType: "array",
+      operation: "live recommendations",
+    }), { operation: "live recommendations" });
   } catch (e) {
     console.error("[ai-server] Failed to generate live recommendations:", e.message);
-    return { recommendations: [] };
+    return {
+      recommendations: [],
+      missionId,
+      degraded: true,
+      warning: "live_recommendations_unavailable",
+    };
   }
 
   const trendTitleMap = new Map(
@@ -2659,14 +2811,16 @@ Rules:
 async function handleRecommendations(request, response) {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   const rawIndustry = url.searchParams.get("industry")?.trim();
-  const cacheKey = rawIndustry && rawIndustry.length > 0 ? rawIndustry : "__all__";
-  const focusIndustry = cacheKey === "__all__" ? null : cacheKey;
+  const industryKey = rawIndustry && rawIndustry.length > 0 ? rawIndustry : "__all__";
+  const ownerKey = getRequestOwnerId(request) ?? "anonymous";
+  const cacheKey = `${ownerKey}:${industryKey}`;
+  const focusIndustry = industryKey === "__all__" ? null : industryKey;
 
   const now = Date.now();
   if (
     recsCache &&
     now - recsCachedAt < RECS_CACHE_TTL_MS &&
-    recsCache.focusIndustry === cacheKey
+    recsCache.cacheKey === cacheKey
   ) {
     writeJson(response, 200, recsCache.payload);
     return;
@@ -2674,10 +2828,10 @@ async function handleRecommendations(request, response) {
 
   let flight = recsInflightByKey.get(cacheKey);
   if (!flight) {
-    flight = generateLiveRecommendations(focusIndustry)
+    flight = generateLiveRecommendations(focusIndustry, request)
       .then((result) => {
         if (result.recommendations && result.recommendations.length > 0) {
-          recsCache = { focusIndustry: cacheKey, payload: result };
+          recsCache = { cacheKey, payload: result };
           recsCachedAt = Date.now();
         }
         return result;
@@ -2692,7 +2846,7 @@ async function handleRecommendations(request, response) {
     const result = await flight;
     const cacheOk =
       recsCache &&
-      recsCache.focusIndustry === cacheKey &&
+      recsCache.cacheKey === cacheKey &&
       recsCache.payload?.recommendations?.length > 0;
 
     if ((!result.recommendations || result.recommendations.length === 0) && cacheOk) {
@@ -2704,7 +2858,7 @@ async function handleRecommendations(request, response) {
     console.error("[ai-server] handleRecommendations error:", error);
     const cacheOk =
       recsCache &&
-      recsCache.focusIndustry === cacheKey &&
+      recsCache.cacheKey === cacheKey &&
       recsCache.payload?.recommendations?.length > 0;
     if (cacheOk) {
       writeJson(response, 200, recsCache.payload);
@@ -3000,10 +3154,7 @@ function writeBackgroundRefreshEvidenceArtifact() {
   const filename = `background-refresh-${generatedAt.replace(/[:.]/g, "-")}.json`;
   const directory = resolveOperationEvidenceDir();
   const filePath = path.join(directory, filename);
-  const tempPath = `${filePath}.tmp`;
-  fs.mkdirSync(directory, { recursive: true });
-  fs.writeFileSync(tempPath, json, "utf8");
-  fs.renameSync(tempPath, filePath);
+  writeFileAtomic(filePath, json, "utf8");
   const bytes = Buffer.byteLength(json, "utf8");
 
   return {
@@ -3752,8 +3903,8 @@ async function runBackgroundDataRefreshCore({ force, run }) {
   if (insertedCount > 0 && (process.env.MONGODB_URI || process.env.MONGODB_ATLAS_URI)) {
     try {
       const sync = await storeDiscoveriesWithEmbeddings(insertedDiscoveries);
-      run.vectorSynced = Number(sync.synced ?? 0);
-      run.vectorErrors = Number(sync.errors ?? 0);
+      run.vectorSynced = boundedInteger(sync.synced, { fallback: 0, min: 0 });
+      run.vectorErrors = boundedInteger(sync.errors, { fallback: 0, min: 0 });
       console.log(`[bg-job] MongoDB vector sync: ${sync.synced} stored, ${sync.errors} errors`);
       recordBackgroundRefreshStep(run, "vector-sync", { synced: run.vectorSynced, errors: run.vectorErrors });
     } catch (mongoErr) {
@@ -3812,54 +3963,40 @@ Rules:
       temperature: 0.3,
     });
 
-    const cleaned = planResult.text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    const plan = match ? JSON.parse(match[0]) : null;
+    const plan = assertBusinessPlanObject(parseModelJson(planResult.text, {
+      expectedType: "object",
+      operation: "background business plan",
+    }), { operation: "background business plan" });
 
-    if (plan) {
-      run.synthesisStatus = "completed";
-      await insforge.database.from("business_plans").insert([{
-        mission_id:            missionId,
-        version:               1,
-        market_opportunity:    plan.market_opportunity    ?? "",
-        competitive_landscape: plan.competitive_landscape ?? "",
-        revenue_models:        plan.revenue_models        ?? "",
-        user_acquisition:      plan.user_acquisition      ?? "",
-        risk_analysis:         plan.risk_analysis         ?? "",
-        confidence_score:      typeof plan.confidence_score === "number" ? plan.confidence_score : 75,
-        discovery_count:       insertedDiscoveries.length,
-        is_final:              true,
-        raw_plan:              JSON.stringify(plan),
-        created_at:            new Date().toISOString(),
-      }]);
-      console.log("[bg-job] Business plan generated");
-      recordBackgroundRefreshStep(run, "synthesis-completed", {
-        confidenceScore: typeof plan.confidence_score === "number" ? plan.confidence_score : 75,
-      });
-      await updateAgentByMissionAndId(insforge, missionId, 5, {
-        status: "done",
-        assignment: "Background plan generated",
-        energy: 60,
-        status_detail: "Background research synthesized into a saved business plan.",
-        failure_reason: "",
-        retry_count: 0,
-        confidence: typeof plan.confidence_score === "number" ? Math.max(0, Math.min(1, plan.confidence_score / 100)) : 0.75,
-        last_heartbeat: new Date().toISOString(),
-      }, "background Atlas complete update");
-    } else {
-      run.synthesisStatus = "unparseable";
-      recordBackgroundRefreshStep(run, "synthesis-unparseable");
-      await updateAgentByMissionAndId(insforge, missionId, 5, {
-        status: "failed",
-        assignment: "Background synthesis produced no parseable plan",
-        energy: 0,
-        status_detail: "The AI response did not contain a parseable business-plan JSON object.",
-        failure_reason: "No parseable business-plan JSON returned",
-        retry_count: 1,
-        confidence: 0.15,
-        last_heartbeat: new Date().toISOString(),
-      }, "background Atlas unparseable update");
-    }
+    run.synthesisStatus = "completed";
+    await insforge.database.from("business_plans").insert([{
+      mission_id:            missionId,
+      version:               1,
+      market_opportunity:    plan.market_opportunity    ?? "",
+      competitive_landscape: plan.competitive_landscape ?? "",
+      revenue_models:        plan.revenue_models        ?? "",
+      user_acquisition:      plan.user_acquisition      ?? "",
+      risk_analysis:         plan.risk_analysis         ?? "",
+      confidence_score:      plan.confidence_score,
+      discovery_count:       insertedDiscoveries.length,
+      is_final:              true,
+      raw_plan:              JSON.stringify(plan),
+      created_at:            new Date().toISOString(),
+    }]);
+    console.log("[bg-job] Business plan generated");
+    recordBackgroundRefreshStep(run, "synthesis-completed", {
+      confidenceScore: plan.confidence_score,
+    });
+    await updateAgentByMissionAndId(insforge, missionId, 5, {
+      status: "done",
+      assignment: "Background plan generated",
+      energy: 60,
+      status_detail: "Background research synthesized into a saved business plan.",
+      failure_reason: "",
+      retry_count: 0,
+      confidence: Math.max(0, Math.min(1, plan.confidence_score / 100)),
+      last_heartbeat: new Date().toISOString(),
+    }, "background Atlas complete update");
   } catch (err) {
     console.error("[bg-job] Business plan generation failed:", err.message);
     run.synthesisStatus = "failed";
@@ -3916,12 +4053,12 @@ function scheduleBackgroundJob() {
     return;
   }
   // Run 60 seconds after server starts so it's fully ready
-  setTimeout(() => {
+  backgroundStartupTimer = setTimeout(() => {
     runBackgroundDataRefresh(false, "startup").catch(err => console.error("[bg-job] Startup run error:", err));
   }, 60000);
 
   // Then repeat every 12 hours
-  setInterval(() => {
+  backgroundInterval = setInterval(() => {
     runBackgroundDataRefresh().catch(err => console.error("[bg-job] Scheduled run error:", err));
   }, BG_JOB_INTERVAL_MS);
 }
@@ -3930,7 +4067,7 @@ function scheduleBackgroundJob() {
 /*  HTTP Server                                                        */
 /* ------------------------------------------------------------------ */
 
-const server = http.createServer(async (request, response) => {
+server = http.createServer(async (request, response) => {
   response.__marketPulseRequestLog = {
     requestId: crypto.randomUUID(),
     method: request.method ?? "UNKNOWN",
@@ -3944,6 +4081,20 @@ const server = http.createServer(async (request, response) => {
   }
 
   const url = new URL(request.url, `http://${request.headers.host}`);
+  response.__marketPulseCorsOrigin = resolveCorsOrigin({
+    origin: request.headers.origin,
+    demoMode: DEMO_MODE,
+    allowedOrigins: corsAllowedOrigins,
+  });
+
+  if (!DEMO_MODE && request.headers.origin && !response.__marketPulseCorsOrigin) {
+    writeJson(response, 403, {
+      ok: false,
+      error: "cors_origin_not_allowed",
+      message: "This API server only accepts browser requests from configured origins.",
+    });
+    return;
+  }
 
   if (request.method === "OPTIONS") {
     writeJson(response, 204, {});
@@ -3982,6 +4133,54 @@ const server = http.createServer(async (request, response) => {
     });
     writeJson(response, preflight.ok ? 200 : 503, preflight);
     return;
+  }
+
+  if (url.pathname.startsWith("/api/")) {
+    // Preview JPEGs are loaded by an <img> element, which cannot attach the
+    // bearer header. They contain ephemeral local browser frames only; all
+    // data, mutation, and provider-proxy routes remain session-gated below.
+    const isPublicPreviewFrame = /^\/api\/agent-stream\/[1-5]\/frame$/.test(url.pathname);
+    if (!DEMO_MODE && !isPublicPreviewFrame) {
+      const isProviderRoute = /^\/api\/(ai|search|mission|refresh)/.test(url.pathname);
+      const rateClass = isProviderRoute ? "provider" : "general";
+      const clientKey = `ip:${request.socket?.remoteAddress ?? "unknown"}:${rateClass}`;
+      const ipLimit = isProviderRoute ? apiProviderRateLimit : apiGeneralRateLimit;
+      const ipRate = apiIpRateLimiter.check(clientKey, ipLimit);
+      if (!ipRate.allowed) {
+        writeJson(response, 429, {
+          ok: false,
+          error: "rate_limit_exceeded",
+          message: "Too many API requests from this client. Retry after the indicated delay.",
+        }, { "Retry-After": String(ipRate.retryAfterSeconds) });
+        return;
+      }
+
+      const authentication = await apiAuthenticator(request);
+      if (!authentication.ok) {
+        structuredLog("api.auth.rejected", {
+          requestId: requestLogContext(response)?.requestId,
+          path: url.pathname,
+          statusCode: authentication.statusCode,
+          error: authentication.body.error,
+        });
+        writeJson(response, authentication.statusCode, authentication.body);
+        return;
+      }
+      request.__marketPulseUser = authentication.user;
+      response.__marketPulseUser = authentication.user;
+
+      const userKey = `user:${authentication.user.id}:${rateClass}`;
+      const userLimit = isProviderRoute ? apiUserProviderRateLimit : apiUserGeneralRateLimit;
+      const userRate = apiUserRateLimiter.check(userKey, userLimit);
+      if (!userRate.allowed) {
+        writeJson(response, 429, {
+          ok: false,
+          error: "user_rate_limit_exceeded",
+          message: "This user session has reached its API request budget. Retry after the indicated delay.",
+        }, { "Retry-After": String(userRate.retryAfterSeconds) });
+        return;
+      }
+    }
   }
 
   if (request.method === "GET" && url.pathname === "/api/background/refresh/status") {
@@ -4031,7 +4230,12 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === "GET" && url.pathname === "/api/background/refresh/exports") {
     try {
-      const limit = Number.parseInt(url.searchParams.get("limit") || "20", 10);
+      const limit = parseBoundedInteger(url.searchParams.get("limit"), {
+        defaultValue: 20,
+        min: 1,
+        max: 100,
+        field: "limit",
+      });
       const index = listBackgroundRefreshEvidenceArtifacts(limit);
       structuredLog("background.refresh.exports_listed", {
         requestId: requestLogContext(response)?.requestId,
@@ -4044,6 +4248,7 @@ const server = http.createServer(async (request, response) => {
         requestId: requestLogContext(response)?.requestId,
         error: compactHealthMessage(error?.message ?? error),
       });
+      if (writeJsonBodyError(response, error)) return;
       writeJson(response, 500, {
         ok: false,
         error: "background_refresh_exports_list_failed",
@@ -4055,7 +4260,7 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === "POST" && url.pathname === "/api/background/refresh/import/inspect") {
     try {
-      const body = await readJsonBody(request);
+      const body = validateBackgroundRefreshInspectionBody(await readJsonBody(request));
       const inspection = inspectBackgroundRefreshEvidenceArtifact(body);
       structuredLog("background.refresh.import_inspected", {
         requestId: requestLogContext(response)?.requestId,
@@ -4072,6 +4277,7 @@ const server = http.createServer(async (request, response) => {
         requestId: requestLogContext(response)?.requestId,
         error: compactHealthMessage(error?.message ?? error),
       });
+      if (writeJsonBodyError(response, error)) return;
       writeJson(response, 400, {
         ok: false,
         error: "background_refresh_import_inspection_failed",
@@ -4084,7 +4290,7 @@ const server = http.createServer(async (request, response) => {
   // Text-to-Speech (ElevenLabs)
   if (request.method === "POST" && url.pathname === "/api/ai/tts") {
     try {
-      const body = await readJsonBody(request);
+      const body = validateTtsBody(await readJsonBody(request));
       if (!body.text) {
         writeJson(response, 400, { error: "Text is required" });
         return;
@@ -4093,7 +4299,7 @@ const server = http.createServer(async (request, response) => {
       const audioStream = await generateSpeechWithElevenLabs(body.text, body.voiceId);
       
       response.writeHead(200, {
-        "Access-Control-Allow-Origin": "*",
+        ...corsHeaders(response),
         "Content-Type": "audio/mpeg",
       });
       
@@ -4105,6 +4311,7 @@ const server = http.createServer(async (request, response) => {
       }
       response.end();
     } catch (error) {
+      if (writeJsonBodyError(response, error)) return;
       writeJson(response, 500, {
         ok: false,
         error: error instanceof Error ? error.message : "Unknown AI server error.",
@@ -4116,7 +4323,7 @@ const server = http.createServer(async (request, response) => {
   // Text-to-Speech (MiniMax)
   if (request.method === "POST" && url.pathname === "/api/ai/tts-minimax") {
     try {
-      const body = await readJsonBody(request);
+      const body = validateTtsBody(await readJsonBody(request), { miniMax: true });
       if (!body.text) {
         writeJson(response, 400, { error: "Text is required" });
         return;
@@ -4130,7 +4337,7 @@ const server = http.createServer(async (request, response) => {
       });
 
       response.writeHead(200, {
-        "Access-Control-Allow-Origin": "*",
+        ...corsHeaders(response),
         "Content-Type": "audio/mpeg",
       });
 
@@ -4143,6 +4350,7 @@ const server = http.createServer(async (request, response) => {
       response.end();
     } catch (error) {
       console.error("[ai-server] MiniMax TTS error:", error);
+      if (writeJsonBodyError(response, error)) return;
       writeJson(response, 500, {
         ok: false,
         error: error instanceof Error ? error.message : "Unknown TTS error.",
@@ -4154,17 +4362,31 @@ const server = http.createServer(async (request, response) => {
   // AI inference
   if (request.method === "POST" && url.pathname === "/api/ai/infer") {
     try {
-      const body = await readJsonBody(request);
+      const body = validateInferBody(await readJsonBody(request));
+      if (!body.userPrompt) {
+        writeJson(response, 400, { error: "userPrompt is required" });
+        return;
+      }
+      const imageValidation = validateImageUrl(body?.imageUrl, { allowedHosts: allowedImageHosts });
+      if (!imageValidation.ok) {
+        writeJson(response, 400, {
+          ok: false,
+          error: "image_url_not_allowed",
+          message: imageValidation.message,
+        });
+        return;
+      }
       const result = await inferWithOpenAI({
         systemPrompt: body.systemPrompt,
         userPrompt: body.userPrompt,
-        imageUrl: body.imageUrl,
+        imageUrl: imageValidation.url,
         model: body.model,
         temperature: body.temperature,
       });
 
       writeJson(response, 200, { ok: true, model: result.model, text: result.text });
     } catch (error) {
+      if (writeJsonBodyError(response, error)) return;
       writeJson(response, 500, {
         ok: false,
         error: error instanceof Error ? error.message : "Unknown AI server error.",
@@ -4182,6 +4404,7 @@ const server = http.createServer(async (request, response) => {
       }
       await handleMissionCreate(request, response);
     } catch (error) {
+      if (writeJsonBodyError(response, error)) return;
       writeJson(response, 500, { error: error instanceof Error ? error.message : "Failed to create mission." });
     }
     return;
@@ -4196,6 +4419,7 @@ const server = http.createServer(async (request, response) => {
       }
       await handleMissionStop(request, response);
     } catch (error) {
+      if (writeJsonBodyError(response, error)) return;
       writeJson(response, 500, { error: error instanceof Error ? error.message : "Failed to stop mission." });
     }
     return;
@@ -4210,6 +4434,7 @@ const server = http.createServer(async (request, response) => {
       }
       await handleMissionReset(request, response);
     } catch (error) {
+      if (writeJsonBodyError(response, error)) return;
       writeJson(response, 500, { error: error instanceof Error ? error.message : "Failed to reset mission." });
     }
     return;
@@ -4224,6 +4449,7 @@ const server = http.createServer(async (request, response) => {
       }
       await handleAgentRetry(request, response);
     } catch (error) {
+      if (writeJsonBodyError(response, error)) return;
       writeJson(response, 500, { error: error instanceof Error ? error.message : "Failed to retry agent." });
     }
     return;
@@ -4262,7 +4488,7 @@ const server = http.createServer(async (request, response) => {
       if (fs.existsSync(framePath)) {
         const bytes = fs.readFileSync(framePath);
         response.writeHead(200, {
-          "Access-Control-Allow-Origin": "*",
+          ...corsHeaders(response),
           "Content-Type": "image/jpeg",
           "Cache-Control": "no-store, no-cache, must-revalidate",
           "Content-Length": bytes.length,
@@ -4272,7 +4498,7 @@ const server = http.createServer(async (request, response) => {
         // Return placeholder SVG
         const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720"><rect width="1280" height="720" fill="#f8fafc"/><text x="640" y="340" text-anchor="middle" fill="#94a3b8" font-size="28" font-family="system-ui">Agent ${agentId} — Waiting for preview</text><text x="640" y="380" text-anchor="middle" fill="#cbd5e1" font-size="16" font-family="system-ui">Browser session will appear here</text></svg>`;
         response.writeHead(200, {
-          "Access-Control-Allow-Origin": "*",
+          ...corsHeaders(response),
           "Content-Type": "image/svg+xml",
           "Cache-Control": "no-store, no-cache, must-revalidate",
         });
@@ -4287,16 +4513,15 @@ const server = http.createServer(async (request, response) => {
   // Theme sync — frontend writes current theme so the browser showcase matches
   if (request.method === "POST" && url.pathname === "/api/theme") {
     try {
-      const body = await readJsonBody(request);
-      const theme = body?.theme === "dark" ? "dark" : "light";
+      const { theme } = validateThemeBody(await readJsonBody(request));
       const envRuntime = process.env.MASTERBUILD_RUNTIME_DIR;
       const runtimeDir = envRuntime
         ? (path.isAbsolute(envRuntime) ? envRuntime : path.join(process.cwd(), envRuntime))
         : path.join(process.cwd(), "runtime");
-      fs.mkdirSync(runtimeDir, { recursive: true });
-      fs.writeFileSync(path.join(runtimeDir, "theme.txt"), theme);
+      writeFileAtomic(path.join(runtimeDir, "theme.txt"), theme);
       writeJson(response, 200, { ok: true, theme });
     } catch (error) {
+      if (writeJsonBodyError(response, error)) return;
       writeJson(response, 500, { error: "Failed to sync theme" });
     }
     return;
@@ -4380,29 +4605,18 @@ const server = http.createServer(async (request, response) => {
   // ── MongoDB Atlas Vector Search ─────────────────────────────────────────
   if (request.method === "POST" && url.pathname === "/api/search/semantic") {
     try {
-      const body = await readJsonBody(request);
-      const query = typeof body?.query === "string" ? body.query.trim() : "";
+      const {
+        query,
+        limit,
+        mission_id,
+        industry,
+        platform,
+        agent_id,
+      } = validateSemanticSearchBody(await readJsonBody(request));
       if (!query) {
         writeJson(response, 400, { error: "query is required" });
         return;
       }
-      const limit = Math.min(Number(body?.limit) || 12, 50);
-      const mission_id =
-        typeof body?.mission_id === "string" && body.mission_id.trim()
-          ? body.mission_id.trim()
-          : null;
-      const industry =
-        typeof body?.industry === "string" && body.industry.trim()
-          ? body.industry.trim()
-          : null;
-      const platform =
-        typeof body?.platform === "string" && body.platform.trim()
-          ? body.platform.trim()
-          : null;
-      const agent_id =
-        body?.agent_id != null && body.agent_id !== ""
-          ? Number(body.agent_id)
-          : null;
 
       const { results, error } = await vectorSearch({
         query,
@@ -4421,6 +4635,7 @@ const server = http.createServer(async (request, response) => {
       writeJson(response, 200, { results, query });
     } catch (error) {
       console.error("[ai-server] Semantic search error:", error.message);
+      if (writeJsonBodyError(response, error)) return;
       writeJson(response, 500, { error: error.message ?? "Semantic search failed" });
     }
     return;
@@ -4429,8 +4644,16 @@ const server = http.createServer(async (request, response) => {
   // ── GPT-4o Deep Trend Analysis ───────────────────────────────────────────
   if (request.method === "POST" && url.pathname === "/api/ai/analyze") {
     try {
-      const body = await readJsonBody(request);
-      if (!body?.title) {
+      const {
+        title,
+        industry,
+        description,
+        keywords,
+        trendScore,
+        growthRate,
+        mentionCount,
+      } = validateTrendAnalysisBody(await readJsonBody(request));
+      if (!title) {
         writeJson(response, 400, { error: "title is required" });
         return;
       }
@@ -4439,13 +4662,13 @@ const server = http.createServer(async (request, response) => {
 
       const userPrompt = `Perform a deep strategic analysis of this emerging market trend:
 
-**Trend:** ${body.title}
-**Industry:** ${body.industry ?? "Not specified"}
-**Description:** ${body.description ?? "N/A"}
-**Keywords:** ${body.keywords ?? "N/A"}
-**Trend Score:** ${body.trendScore ?? "N/A"}/100
-**Growth Rate:** ${body.growthRate != null ? `${Number(body.growthRate).toFixed(1)}%` : "N/A"}
-**Mention Volume:** ${body.mentionCount ?? "N/A"}
+**Trend:** ${title}
+**Industry:** ${industry ?? "Not specified"}
+**Description:** ${description ?? "N/A"}
+**Keywords:** ${keywords ?? "N/A"}
+**Trend Score:** ${trendScore ?? "N/A"}/100
+**Growth Rate:** ${growthRate != null ? `${growthRate.toFixed(1)}%` : "N/A"}
+**Mention Volume:** ${mentionCount ?? "N/A"}
 
 Provide your analysis in exactly these sections:
 
@@ -4477,6 +4700,7 @@ Will this trend accelerate, plateau, or fade? Why?`;
       writeJson(response, 200, { ok: true, analysis: result.text, model: result.model ?? "gpt-4o" });
     } catch (error) {
       console.error("[ai-server] Analyze error:", error.message);
+      if (writeJsonBodyError(response, error)) return;
       writeJson(response, 500, { ok: false, error: error.message ?? "Analysis failed" });
     }
     return;

@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { Volume2, Loader2, Square } from "lucide-react";
+import { apiFetch } from "@/lib/api";
 
 interface VoiceButtonProps {
   getText: () => string;
@@ -27,7 +28,7 @@ export function VoiceButton({ getText, className = "", label = "Hear", size = "s
 
     setState("loading");
     try {
-      const res = await fetch(`${API_BASE}/api/ai/tts`, {
+      const res = await apiFetch(`${API_BASE}/api/ai/tts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: text.slice(0, 5000) }),

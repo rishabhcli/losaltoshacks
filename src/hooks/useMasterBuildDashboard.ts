@@ -1,4 +1,5 @@
 import { startTransition, useCallback, useEffect, useRef, useState } from "react";
+import { apiFetch } from "@/lib/api";
 import { insforge } from "@/lib/insforge";
 import {
   hasMasterBuildDashboardShape,
@@ -137,7 +138,7 @@ const REALTIME_EVENTS = REALTIME_CHANNELS.map((ch) => `${ch}_changed`);
 let realtimeSetupPromise: Promise<void> | null = null;
 
 async function callMissionControlRoute<T>(path: string, body: Record<string, unknown>) {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await apiFetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     cache: "no-store",
@@ -159,7 +160,7 @@ async function callMissionControlRoute<T>(path: string, body: Record<string, unk
 }
 
 async function fetchDashboardSnapshot(): Promise<MasterBuildDashboardSnapshot> {
-  const response = await fetch(`${API_BASE}/api/dashboard`, {
+  const response = await apiFetch(`${API_BASE}/api/dashboard`, {
     method: "GET",
     cache: "no-store",
   });

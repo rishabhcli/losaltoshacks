@@ -7,7 +7,11 @@ import { getRoutePreloadSnapshot, ROUTE_PRELOAD_EVENT } from "@/routeLoaders";
 
 const IMPORTANT_CHECKS = new Set(["insforge", "openai", "python-worker", "mongodb-vector", "tts"]);
 
-export function RuntimeHealthStrip() {
+interface RuntimeHealthStripProps {
+  themeSyncError?: string | null;
+}
+
+export function RuntimeHealthStrip({ themeSyncError = null }: RuntimeHealthStripProps) {
   const { health, error, isLoading } = useRuntimeHealth();
   const { preflight, error: workerError, isLoading: workerLoading } = useWorkerPreflight();
   const [routePreloadStatuses, setRoutePreloadStatuses] = useState(() => getRoutePreloadSnapshot());
@@ -31,14 +35,15 @@ export function RuntimeHealthStrip() {
     return (
       <div className="flex items-center gap-2 px-5 py-2 border-b border-amber-200/80 dark:border-amber-900/70 bg-amber-50/80 dark:bg-amber-950/30 text-xs text-amber-800 dark:text-amber-200">
         <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-        Runtime health unavailable{error ? `: ${error}` : ""}
+        Runtime health unavailable{error ? `: ${error}` : ""}{themeSyncError ? ` Theme sync unavailable: ${themeSyncError}` : ""}
       </div>
     );
   }
 
   const requiredFailures = health.checks.filter((check) => check.required && !check.ok);
   const optionalIssues = health.checks.filter((check) => !check.required && !check.ok && IMPORTANT_CHECKS.has(check.name));
-  const hasIssues = requiredFailures.length > 0 || optionalIssues.length > 0;
+  const hasBackendIssues = requiredFailures.length > 0 || optionalIssues.length > 0;
+  const hasIssues = hasBackendIssues || Boolean(themeSyncError);
   const primaryIssue = requiredFailures[0] ?? optionalIssues[0] ?? null;
   const workerStatus = workerLoading
     ? "checking"
@@ -77,7 +82,9 @@ export function RuntimeHealthStrip() {
       </span>
       {hasIssues && (
         <span className="text-amber-800/90 dark:text-amber-100/80">
-          Live backend degraded{primaryIssue ? `: ${primaryIssue.message}` : ""}
+          {hasBackendIssues
+            ? `Live backend degraded${primaryIssue ? `: ${primaryIssue.message}` : ""}`
+            : "Theme synchronization degraded"}
         </span>
       )}
       {!hasIssues && (
@@ -131,6 +138,11 @@ export function RuntimeHealthStrip() {
       {showWorkerDetail && (
         <div className="basis-full text-[11px] leading-snug text-amber-800/90 dark:text-amber-100/80">
           Worker preflight: {workerDetail}
+        </div>
+      )}
+      {themeSyncError && (
+        <div className="basis-full text-[11px] leading-snug text-amber-800/90 dark:text-amber-100/80">
+          Theme sync unavailable: {themeSyncError}
         </div>
       )}
     </div>

@@ -1,4 +1,5 @@
 import { getRequiredEnv, loadProjectEnv } from "./env.mjs";
+import { parseProviderJson } from "./structured-output.mjs";
 
 loadProjectEnv();
 
@@ -31,12 +32,14 @@ export async function generateImageWithGemini({ prompt, aspectRatio = "1:1" }) {
   });
 
   const text = await response.text();
-  
   let payload;
   try {
-    payload = JSON.parse(text);
-  } catch {
-    payload = {};
+    payload = parseProviderJson(text, { provider: "Gemini", operation: "image response" });
+  } catch (error) {
+    if (!response.ok) {
+      throw new Error(`Gemini request failed with status ${response.status}.`);
+    }
+    throw error;
   }
 
   if (!response.ok) {

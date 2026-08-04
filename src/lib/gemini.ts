@@ -1,3 +1,5 @@
+import { apiFetch } from "./api";
+
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 
 export interface GeminiImageInput {
@@ -15,7 +17,7 @@ function getApiBaseUrl() {
 }
 
 export async function generateImageWithGemini(input: GeminiImageInput): Promise<GeminiImageResult> {
-  const response = await fetch(`${getApiBaseUrl()}/api/ai/image`, {
+  const response = await apiFetch(`${getApiBaseUrl()}/api/ai/image`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

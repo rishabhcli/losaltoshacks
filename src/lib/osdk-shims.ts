@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { apiFetch } from "./api";
 import { insforge } from "./insforge";
 import type { EvidenceSource } from "./evidence";
 
@@ -128,7 +129,7 @@ function fetchLiveData(opts?: { force?: boolean }): Promise<void> {
   if (!force && _liveData && now - _liveFetchedAt < LIVE_CACHE_TTL) return Promise.resolve();
   if (_liveFetchPromise) return _liveFetchPromise;
 
-  _liveFetchPromise = fetch(`${API_BASE}/api/trends`, { cache: "no-store" })
+  _liveFetchPromise = apiFetch(`${API_BASE}/api/trends`, { cache: "no-store" })
     .then((r) => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json() as Promise<{ trends?: unknown[]; insights?: unknown[] }>;
@@ -168,7 +169,7 @@ function fetchLiveRecommendations(opts?: { industry?: string; force?: boolean })
     const qs = key === "__all__" ? "" : `?industry=${encodeURIComponent(key)}`;
     const requestedKey = key;
 
-    inflight = fetch(`${API_BASE}/api/recommendations${qs}`, { cache: "no-store" })
+    inflight = apiFetch(`${API_BASE}/api/recommendations${qs}`, { cache: "no-store" })
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json() as Promise<{ recommendations?: unknown[] }>;

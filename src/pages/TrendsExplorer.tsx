@@ -12,6 +12,7 @@ import { usePreferences } from "@/hooks/usePreferences";
 import { getIndustryLabel, INDUSTRY_OPTIONS } from "@/lib/industry";
 import { TrendSparkline } from "@/components/market/TrendSparkline";
 import { StabilityBadge } from "@/components/market/StabilityBadge";
+import { apiFetch } from "@/lib/api";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
 
@@ -45,7 +46,7 @@ export function TrendsExplorer() {
     if (!q.trim()) return;
     setSemanticLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/search/semantic`, {
+      const res = await apiFetch(`${API_BASE}/api/search/semantic`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: q, limit: 12 }),

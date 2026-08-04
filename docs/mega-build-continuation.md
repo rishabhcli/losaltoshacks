@@ -4,9 +4,9 @@
 
 - Branch: `main`
 - Status summary: runtime stabilization, citation propagation, agent-state inspectability, live worker lifecycle persistence, richer health checks, InsForge decision persistence loops, briefing trust controls, trend memory, AI output audit trails, and a fresh live InsForge mission-queue proof implemented; working tree has scoped code/test/docs changes plus the user-provided `plans_losaltoshacks.md`.
-- Runtime modes verified: local demo mode with `MARKETPULSE_DEMO_MODE=1`; live API server mode against the fresh active InsForge backend `r5em4tn7` with OpenAI intentionally reported as missing.
+- Runtime modes verified: local demo mode with `MARKETPULSE_DEMO_MODE=1`; historical live API proof against replacement backend `r5em4tn7` with OpenAI intentionally reported as missing. The backend is currently paused.
 - Checked-in development env now points at `r5em4tn7`; local server-only verifiers/smokes can use the ignored `.insforge/project.json` API key when explicit service env is absent.
-- The Python worker now uses the same active InsForge env surfaces and linked-project fallback as the Node server; current preflight reaches `r5em4tn7` and reports the live LLM provider as missing.
+- The Python worker uses the same InsForge env surfaces and linked-project fallback as the Node server; the last live preflight reached `r5em4tn7` and reported the live LLM provider as missing before that backend was paused.
 
 ## Completed Slice
 
@@ -17,6 +17,15 @@
 - Added a briefing trust ledger and strict-evidence mode so executive briefings show source coverage, platform coverage, evidence-backed recommendation coverage, risk labels, and warnings before the user trusts the draft.
 - Added a deterministic trend memory layer for Trend Detail: lifecycle classification, detection age, momentum change, forecast confidence, source/platform mix, watch window, next checks, and evidence warnings.
 - Added a reusable AI output audit trail for generated artifacts. Reports and briefings now show artifact mode, model/source mode, mission prompt summary, source inputs, structured input counts, generated time, token estimate, uncertainty label, and review warnings.
+- Added a source-level evidence trust ledger to final research results. It compares attached source metadata and language for heuristic credibility, novelty, duplicate URLs, freshness, platform diversity, and contradiction risk, while explicitly labeling the result as non-authoritative.
+- Added Trend Detail recommendation evidence parity. Linked recommendation cards now show their own source count or an explicit trend-evidence fallback, platform coverage, and an evidence-missing state instead of implying unsupported provenance.
+- Added a production-only API boundary. Non-demo data, mutation, search, inference, and provider routes validate InsForge bearer sessions, allow-list browser origins, enforce IP/user request budgets, bound JSON request bodies, validate request shapes/ranges, and reject un-allow-listed or private inference image URLs; demo mode remains explicitly open for the deterministic harness.
+- Added explicit structured-output handling for Node provider responses and live model JSON. Fenced/prose-wrapped JSON is normalized, malformed provider/model output is typed as a failure, recommendation payloads require object items, and background business plans require their declared keys before persistence.
+- Added numeric response validation. Dashboard, trend, and recommendation rows now sanitize persisted energy/confidence/retry/engagement/token/duration/version/count fields before use; MongoDB vector payloads sanitize discovery metrics and cap similarity scores; `pnpm server:test` covers malformed numeric inputs.
+- Added atomic local artifact writes. Generated-app materialization, worker context/preview metadata, server theme/operation evidence, seed exports, and verifier reports now use same-directory temp files with fsync and atomic rename; Python and Vitest tests cover replacement and temp cleanup.
+- Added async failure observability. Scheduled Python sync/thought tasks now consume unexpected rejections, the orchestrator logs managed-task failures and marks the mission `error`, and Market Research surfaces theme-sync failures in the runtime strip; intentional cancellation remains quiet.
+- Hardened the AI server process boundary. Unhandled rejections and uncaught exceptions now trigger the same bounded HTTP drain and non-zero exit path; scheduled refresh timers are cleared, while `SIGINT`/`SIGTERM` exit cleanly after draining.
+- Added the owner-isolation contract for live missions: `missions.owner_id` is the ownership root, child-table RLS inherits through a `SECURITY DEFINER` helper, mission reads/writes and in-process caches are partitioned by authenticated user, and `insforge/migration_owner_isolation.sql` is ready for the next active backend.
 - Restored Market Research to the main navigation.
 - Split Vitest from Playwright with `vitest.config.ts`.
 - Added an e2e core demo flow: launch mission, inspect evidence, accept an opportunity, verify Accepted Ideas, then view Report and Briefing.
@@ -305,6 +314,39 @@
   - Final verification after the AI output audit slice: `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`, `git diff --check`, and `pnpm exec playwright test` all passed. Vitest reported 17 passed and 2 intentionally skipped env tests; Playwright reported 30 passed; build still has the known large-chunk warning.
   - Ports 3360/3361/3210/3211 were clear after cleanup.
 
+- Evidence trust ledger verification (2026-08-04):
+  - `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`, and `git diff --check` passed. Vitest reported 122 passed and 2 intentionally skipped env tests; the build retained the known large-chunk warning.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "final results"` passed both desktop and 390px mobile flows, verifying the real demo mission flow exposes the ledger, heuristic disclaimer, three aggregate score fields, freshness warning, per-source novelty/contradiction labels, and no horizontal overflow.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "core demo flow"` passed in 2 minutes, preserving the surrounding evidence, report, briefing, and follow-up transitions.
+  - The full `pnpm exec playwright test e2e/app.spec.ts` run passed all 37 tests, including degraded InsForge/worker states, the core mission flow, Venture Lab, and API contracts.
+  - The live-worker boundary is unchanged: this slice is deterministic UI scoring over attached metadata and does not prove external source truth or live LLM mission execution.
+
+- Trend Detail evidence parity and readiness verification (2026-08-04):
+  - `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`, `node --check server/ai-server.mjs`, `pnpm startup:check`, `pnpm api:contracts`, `pnpm build:check-chunks`, and `git diff --check` passed. Vitest reported 122 passed and 2 intentionally skipped environment tests; the chunk budget checked 97 JavaScript chunks under 500 kB.
+  - `pnpm exec playwright test e2e/app.spec.ts -g "generated trend detail"` passed, proving linked recommendation cards expose source evidence or trend-evidence fallback details in the real generated trend route.
+  - The full `pnpm exec playwright test e2e/app.spec.ts` run passed all 37 tests in 5.1 minutes, including the 1.7-minute portfolio import audit and the strict worker-preflight blocker.
+  - Worker preflight timeout/unavailable fallback now preserves structured `insforge` and `liveLlm` status fields, while the live boundary remains explicit: current demo verification does not prove Python/browser worker execution or live LLM inference.
+
+- Production API boundary verification (2026-08-04):
+  - `pnpm api:auth` passed, proving missing and invalid user sessions receive `401`, a valid session reaches the authenticated route layer, and `/health` remains public.
+  - `src/lib/api.test.ts` covers bearer extraction, valid-session caching, invalid/unavailable auth-provider handling, request budgets, and inference image URL restrictions.
+  - `src/lib/request-body.test.ts` covers declared and streamed body limits plus malformed JSON; a temporary demo server probe returned `413 payload_too_large`, `400 invalid_json_body`, and `200` for a normal mission request.
+  - `src/lib/request-validation.test.ts` covers normalized provider/search/trend inputs, type failures, numeric ranges, and bounded query parsing; `pnpm api:contracts` proves invalid route shapes return `400 invalid_request` before demo provider work.
+  - `src/lib/structured-output.test.ts` and `agents/test_model_output.py` cover direct, fenced, prose-wrapped, malformed, wrong-shaped, incomplete, and field-invalid model output; live recommendation/background-plan paths and the Python plan path now fail explicitly instead of accepting fabricated fallback content.
+  - `server/lib/response-validation.test.mjs` and `pnpm server:test` cover non-finite, fractional, and out-of-range persisted telemetry; `node --check server/lib/mongodb-vector.mjs` passed after applying the same bounds to vector search results.
+  - `src/lib/atomic-file.test.ts` and `agents/test_atomic_file.py` cover atomic replacement and temporary-file cleanup; `pnpm worker:test` runs both worker contract suites.
+  - `agents/test_background_task.py` covers scheduled-task rejection reporting; the orchestrator now records unexpected managed-task failures before final mission status is written.
+  - An isolated demo AI server with an injected rejected promise emitted the fatal rejection, drained, and exited; `node --check server/ai-server.mjs`, `pnpm lint`, and `pnpm type-check` passed afterward.
+  - The full demo Playwright suite passed all 37 tests after browser calls moved to the authenticated fetch helper; deterministic demo behavior remained intact.
+  - Non-demo CORS is explicit through `MARKETPULSE_ALLOWED_ORIGINS`; the only public non-readiness exception is ephemeral local preview JPEGs because image elements cannot carry bearer headers.
+  - The live boundary is unchanged: this gate does not prove a live worker/LLM, and remote owner-migration application plus the two-user tenant matrix remain required for multi-user isolation.
+
+- Owner-isolation contract verification (2026-08-04):
+  - `pnpm schema:verify:ownership` passed against the checked-in schema, migration, RLS policy, and server-filter contract.
+  - `insforge/migration_owner_isolation.sql` adds `missions.owner_id`, an ownership helper, protected owner updates, owner-scoped policies for all MasterBuild child tables, and owner-scoped reset/start functions.
+  - The server writes authenticated owner IDs to new live missions, verifies mission IDs belong to the caller before stop/reset/retry, scopes dashboard/trend/recommendation reads, and partitions dashboard/recommendation caches by user.
+  - Remote application is intentionally pending: the linked replacement backend currently reports `paused`, so no remote schema mutation or live tenant matrix claim is made.
+
 ## Runtime Evidence
 
 - Playwright web servers:
@@ -395,12 +437,20 @@
 
 ## Known Gaps
 
-- Full live InsForge-backed mission execution with the Python/browser worker and live OpenAI inference was not proven; the live proof currently covers API health, schema, mission queue writes, dashboard reads, Python worker InsForge preflight, and blocked-mission behavior when no LLM key exists.
-- The official MarketPulse project under `Hackathon` (`mdd528ty`) remains paused historically, but checked-in development env now targets the fresh active proof backend `https://r5em4tn7.us-west.insforge.app`. Local server-only commands can use the ignored `.insforge/project.json` admin key when explicit service env is absent.
+- Full live InsForge-backed mission execution with the Python/browser worker and live OpenAI inference was not proven; the historical live proof covered API health, schema, mission queue writes, dashboard reads, Python worker InsForge preflight, and blocked-mission behavior when no LLM key existed.
+- The official MarketPulse project under `Hackathon` (`mdd528ty`) and the replacement backend `r5em4tn7` currently report `paused`; historical live smoke results should not be read as current availability proof.
 - The InsForge MCP backend is a different project with course-planning tables, so do not apply MarketPulse mission SQL through that MCP connection unless it is intentionally retargeted.
-- Decision persistence has a live table and client write path on `r5em4tn7`; service-role and browser-auth smokes now prove real persistence behavior. The browser-auth smoke deliberately uses the disposable backend and temporarily relaxes email verification, then restores it.
-- The active replacement backend normally requires email verification by code. Real production-user proof without temporarily changing auth config still needs a verification code/inbox path.
-- Trend Detail now exposes trend memory and source mix, but its linked recommendation cards could still get the same compact evidence badge treatment for parity.
+- The owner-isolation schema/RLS contract is checked in but not remotely applied or tenant-matrix verified because the linked backend is paused; issue #33 remains open at the deployment boundary.
+- Decision persistence has a historical live table/client proof on `r5em4tn7`; browser-authenticated production-user proof needs an active backend and a verification-code inbox path.
+- Trend Detail recommendation cards now expose evidence parity for the demo/live payload shape, but this remains provenance metadata display rather than independent source verification.
+- The API gate authenticates users, and the checked-in missions migration, RLS policies, and server filters now enforce per-user owner isolation; issue #33 still requires remote migration application and a two-user tenant matrix before multi-user production readiness.
+- API request budgets are currently in-process. Durable edge-level rate limits, provider spend caps, and cross-instance usage accounting still require deployment infrastructure.
+- Structured output is hardened for Node recommendations/business plans and the Python business-plan path, but provider-specific response schemas and broader generated-artifact stages remain open under Issue #25.
+- Numeric request and persisted response boundaries are hardened for current API/telemetry/vector paths; provider-specific response schemas and broader generated-artifact fields remain open under Issues #25 and #30.
+- Local artifact writes are atomic for the current Node/Python filesystem surfaces; external storage/database durability and direct test-fixture writes remain outside Issue #26's guarantee.
+- Scheduled local async paths now expose unexpected task failures, but a repo-wide `no-floating-promises` rule and full client promise audit remain under Issue #28.
+- Python persistence and final-synthesis paths now re-raise unexpected failures or append mission error logs; 54 broad catches remain intentionally concentrated in browser recovery and degraded provider fallbacks, so Issue #27 is improved but not closed.
+- The AI server now exits on escaped process-level failures, but production restart/alert behavior remains deployment-supervisor work under Issue #29.
 - Audio generation still depends on external TTS secrets; text briefing remains usable without them, and the page now waits for explicit playback before requesting TTS.
 
 ## Next Highest-Leverage Loops

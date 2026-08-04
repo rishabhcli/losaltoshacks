@@ -46,7 +46,7 @@ pnpm dev:demo
 
 The hardest part was making an ambitious agent product honest. It is easy to build a fake command center; it is harder to show when a source is missing, when an agent failed, when the backend is degraded, or when a result is only demo-seeded.
 
-We also found real infrastructure drift during verification. The original MarketPulse InsForge backend was paused, so we created and verified against a fresh active replacement backend while keeping the docs explicit about the difference. A live dashboard smoke caught a missing `discoveries.industry` column, which we fixed in schema and verifier code.
+We also found real infrastructure drift during verification. The original MarketPulse InsForge backend was paused, so we created and verified against a replacement backend; that replacement is now paused as well, making those live checks historical rather than current availability proof. A live dashboard smoke caught a missing `discoveries.industry` column, which we fixed in schema and verifier code.
 
 ## Accomplishments That We're Proud Of
 

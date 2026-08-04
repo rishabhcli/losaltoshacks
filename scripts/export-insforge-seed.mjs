@@ -1,5 +1,6 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
+import { writeFileAtomic } from "../server/lib/atomic-file.mjs";
 
 import {
   MOCK_DEMOGRAPHICS,
@@ -14,7 +15,7 @@ const outputDir = resolve(process.cwd(), process.argv[2] ?? "tmp/insforge-seed")
 mkdirSync(outputDir, { recursive: true });
 
 const writeSeedFile = (name, data) => {
-  writeFileSync(resolve(outputDir, name), JSON.stringify(data, null, 2) + "\n");
+  writeFileAtomic(resolve(outputDir, name), JSON.stringify(data, null, 2) + "\n");
 };
 
 writeSeedFile(

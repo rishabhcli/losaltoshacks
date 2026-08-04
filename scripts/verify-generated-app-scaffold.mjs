@@ -7,6 +7,7 @@ import {
   normalizeScaffolds,
   pickScaffold,
 } from "./materialize-generated-app.mjs";
+import { writeFileAtomic } from "../server/lib/atomic-file.mjs";
 
 function usage() {
   return [
@@ -140,7 +141,7 @@ async function main() {
   if (args.reportOut) {
     const reportPath = path.resolve(args.reportOut);
     fs.mkdirSync(path.dirname(reportPath), { recursive: true });
-    fs.writeFileSync(reportPath, `${reportJson}\n`);
+    writeFileAtomic(reportPath, `${reportJson}\n`);
     console.log(`Report: ${reportPath}`);
   }
   console.log(reportJson);

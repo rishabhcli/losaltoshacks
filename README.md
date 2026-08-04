@@ -54,6 +54,18 @@ This command starts `server/ai-server.mjs` in demo mode on an isolated local por
 
 Set `MASTERBUILD_LOG_STRUCTURED=1` when running the AI server to emit JSON-line runtime logs for HTTP responses, health checks, worker preflight degradation, mission create/stop/reset, and agent retry lifecycle events. `pnpm api:contracts` and `pnpm startup:check` enable these logs for their child server processes and include recent server output in failure summaries.
 
+## Production API Boundary
+
+When `MARKETPULSE_DEMO_MODE` is not `1`, data, mutation, search, inference, and provider proxy routes under `/api/*` require a validated InsForge bearer session. Browser requests use the authenticated SDK session through `src/lib/api.ts`; direct callers must send `Authorization: Bearer <user-token>`. Public readiness endpoints remain `/health` and `/api/worker/preflight`; ephemeral local agent preview JPEGs remain public because an image element cannot attach bearer headers.
+
+Configure `MARKETPULSE_ALLOWED_ORIGINS` with an exact comma-separated browser-origin allow-list. Configure `MARKETPULSE_ALLOWED_IMAGE_HOSTS` before using remote `imageUrl` inference; private hosts, credentials, non-HTTPS URLs, and non-allow-listed hosts are rejected. The server also applies separate in-process IP and user request budgets, with provider routes using their tighter limits, bounds JSON request bodies with `MARKETPULSE_MAX_BODY_BYTES` (default `1048576`), and validates request shapes/ranges in `server/lib/request-validation.mjs`. Oversized bodies receive `413`; malformed JSON and invalid request shapes receive `400`. Verify the auth boundary with:
+
+```bash
+pnpm api:auth
+```
+
+The current gate is not a complete multi-tenant boundary: the checked-in owner migration/RLS contract still needs remote application and a two-user verification matrix on an active backend, and durable edge-level rate limits and provider spend caps still require deployment infrastructure.
+
 ## Run The Demo
 
 One command:
@@ -413,7 +425,7 @@ pnpm schema:verify:decisions
 
 That verifier creates a temporary auth user to satisfy the real `auth.users` foreign key, writes a disposable `recommendation_decisions` row, updates it from accepted to dismissed, reads it back, then deletes both records.
 
-The checked-in development env now points at the active replacement MarketPulse backend used for local proof. If you intentionally switch back to another backend, link that backend locally or export an explicit override before live schema/runtime proof:
+The checked-in development env points at the replacement MarketPulse backend used for historical live proof. The current `r5em4tn7` project is paused, so local demo checks remain the active verification path until an active backend is linked. If you intentionally switch to another backend, link that backend locally or export an explicit override before live schema/runtime proof:
 
 ```bash
 MASTERBUILD_INSFORGE_URL=https://your-app.region.insforge.app \
@@ -461,8 +473,7 @@ The e2e suite starts the demo AI server on `3211` and Vite on `3210`, then prove
 
 - Styling is pinned to Tailwind CSS 3.4.17 with PostCSS, `tailwind.config.cjs`, and `tailwindcss-animate`; the v4-only `@tailwindcss/vite`, `@theme`, and `tw-animate-css` path has been removed to match the project instructions.
 - Live recommendations require live mission data and AI credentials. Demo mode is intentionally labeled and deterministic for local proof.
-- A live InsForge mission-queue smoke has been proven against the active replacement backend without ad-hoc env overrides: `/health` showed InsForge ready, `/api/mission/create` wrote real mission/agent rows, and `/api/dashboard` read them back. Full live worker execution still needs `OPENAI_API_KEY`.
-- The Python worker now reaches that active backend without command-prefix overrides. Current preflight shows InsForge ready and the live LLM provider missing, so full worker output remains blocked on `OPENAI_API_KEY` or `MINIMAX_API_KEY`.
-- A live InsForge decision-persistence smoke has been proven against the same active replacement backend with `pnpm schema:verify:decisions`.
-- Browser-authenticated decision persistence can be verified on the disposable active backend with `pnpm smoke:decision:browser`. That smoke temporarily disables email verification on the disposable backend, signs up through the real UI, accepts the demo recommendation, verifies the accepted row in InsForge, then restores auth config and deletes the smoke records.
+- Historical live InsForge mission-queue and decision-persistence smokes passed against the replacement backend before it was paused; those results are not current availability proof.
+- `pnpm schema:verify:ownership` checks the owner-scoped schema, migration, RLS policy, and server-filter contract. Applying `insforge/migration_owner_isolation.sql` still requires an active linked backend.
+- Full live worker output remains blocked on `OPENAI_API_KEY` or `MINIMAX_API_KEY` after an active backend is available.
 - Audio generation gracefully fails if ElevenLabs/MiniMax keys are absent; report and briefing text remain usable.

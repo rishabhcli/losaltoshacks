@@ -78,14 +78,24 @@ function prefixStream(stream, prefix) {
   });
 }
 
-async function fetchJson(path, { method = "GET", body, statuses = [200], recordErrors = true, requestTimeoutMs = 5000 } = {}) {
+async function fetchJson(path, {
+  method = "GET",
+  body,
+  rawBody,
+  statuses = [200],
+  recordErrors = true,
+  requestTimeoutMs = 5000,
+} = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  const requestBody = rawBody === undefined
+    ? (body === undefined ? undefined : JSON.stringify(body))
+    : rawBody;
   try {
     const response = await fetch(`${baseUrl}${path}`, {
       method,
-      headers: body === undefined ? undefined : { "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: requestBody === undefined ? undefined : { "content-type": "application/json" },
+      body: requestBody,
       signal: controller.signal,
     });
     const text = await response.text();
@@ -520,6 +530,7 @@ const childEnv = {
   ...process.env,
   AI_SERVER_PORT: String(port),
   MARKETPULSE_DEMO_MODE: "1",
+  MARKETPULSE_MAX_BODY_BYTES: process.env.MARKETPULSE_MAX_BODY_BYTES || "4096",
   MASTERBUILD_WORKER_PREFLIGHT_TIMEOUT_MS: process.env.MASTERBUILD_WORKER_PREFLIGHT_TIMEOUT_MS || "12000",
   MASTERBUILD_LOG_STRUCTURED: "1",
   MASTERBUILD_RUNTIME_DIR: runtimeDir,
@@ -586,6 +597,66 @@ try {
   }
   record("mission-create-empty-rejected");
 
+  const oversizedMission = await fetchJson("/api/mission/create", {
+    method: "POST",
+    body: { prompt: "bounded body test", padding: "x".repeat(5000) },
+    statuses: [413],
+  });
+  if (oversizedMission.json?.error !== "payload_too_large") {
+    addError("oversized mission body should return payload_too_large.", { body: oversizedMission.json });
+  }
+  record("mission-create-oversized-rejected", { status: oversizedMission.response?.status ?? null });
+
+  const malformedMission = await fetchJson("/api/mission/create", {
+    method: "POST",
+    rawBody: '{"prompt":',
+    statuses: [400],
+  });
+  if (malformedMission.json?.error !== "invalid_json_body") {
+    addError("malformed mission body should return invalid_json_body.", { body: malformedMission.json });
+  }
+  record("mission-create-malformed-rejected", { status: malformedMission.response?.status ?? null });
+
+  const invalidMissionShape = await fetchJson("/api/mission/create", {
+    method: "POST",
+    body: { prompt: 42 },
+    statuses: [400],
+  });
+  if (invalidMissionShape.json?.error !== "invalid_request") {
+    addError("wrong mission prompt shape should return invalid_request.", { body: invalidMissionShape.json });
+  }
+  record("mission-create-invalid-shape-rejected", { status: invalidMissionShape.response?.status ?? null });
+
+  const invalidSearch = await fetchJson("/api/search/semantic", {
+    method: "POST",
+    body: { query: "trend", limit: 51 },
+    statuses: [400],
+  });
+  if (invalidSearch.json?.error !== "invalid_request") {
+    addError("out-of-range semantic search limit should return invalid_request.", { body: invalidSearch.json });
+  }
+  record("semantic-search-invalid-limit-rejected", { status: invalidSearch.response?.status ?? null });
+
+  const invalidInference = await fetchJson("/api/ai/infer", {
+    method: "POST",
+    body: { userPrompt: 42 },
+    statuses: [400],
+  });
+  if (invalidInference.json?.error !== "invalid_request") {
+    addError("wrong inference prompt shape should return invalid_request.", { body: invalidInference.json });
+  }
+  record("inference-invalid-shape-rejected", { status: invalidInference.response?.status ?? null });
+
+  const invalidAnalysis = await fetchJson("/api/ai/analyze", {
+    method: "POST",
+    body: { title: 42 },
+    statuses: [400],
+  });
+  if (invalidAnalysis.json?.error !== "invalid_request") {
+    addError("wrong analysis title shape should return invalid_request.", { body: invalidAnalysis.json });
+  }
+  record("analysis-invalid-shape-rejected", { status: invalidAnalysis.response?.status ?? null });
+
   await fetchJson("/api/mission/reset", { method: "POST", statuses: [200] });
 
   const prompt = "AI wellness apps for Gen Z";
@@ -622,6 +693,12 @@ try {
 
   const backgroundStatus = await fetchJson("/api/background/refresh/status");
   validateBackgroundRefreshStatus(backgroundStatus.json);
+
+  const invalidBackgroundExportsLimit = await fetchJson("/api/background/refresh/exports?limit=101", { statuses: [400] });
+  if (invalidBackgroundExportsLimit.json?.error !== "invalid_request") {
+    addError("out-of-range background export limit should return invalid_request.", { body: invalidBackgroundExportsLimit.json });
+  }
+  record("background-exports-invalid-limit-rejected", { status: invalidBackgroundExportsLimit.response?.status ?? null });
 
   const backgroundReadiness = await fetchJson("/api/background/refresh/readiness");
   validateBackgroundRefreshReadiness(backgroundReadiness.json);

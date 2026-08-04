@@ -1,6 +1,6 @@
 # MarketPulse Acceptance Gate Audit
 
-Last updated: 2026-05-11
+Last updated: 2026-08-04
 
 Objective audited: follow `plans_losaltoshacks.md` by pushing MarketPulse toward a serious autonomous market-intelligence operating system through real shipped code, tests, runtime proof, honest docs, and visible product improvement.
 
@@ -22,6 +22,15 @@ Most local/demo gates are satisfied with strong evidence. The remaining blockers
 | Keep demo honest, not fake live claims | `MARKETPULSE_DEMO_MODE=1`, runtime health strip, README notes, and `/health` distinguish demo readiness from live degradation. | Satisfied |
 | One command or documented pair to run locally | `pnpm dev:demo` in `scripts/run-demo.mjs`; README also documents two-terminal equivalent. | Satisfied |
 | Health checks for required/optional services | `/health` checks AI server, InsForge DB probe, OpenAI, Python worker readiness, MongoDB vector, TTS, Brave Search, and runtime dir; `/api/worker/preflight` runs the real Python preflight with strict mode support and short cache/dedupe for repeated UI/API checks. | Satisfied |
+| Production API route authentication | Non-demo `/api/*` routes require a validated InsForge bearer session through `server/lib/api-auth.mjs`; browser calls use `src/lib/api.ts`; `pnpm api:auth` proves missing, invalid, and valid-session behavior while preserving public health and preview-frame exceptions. | Satisfied for the API boundary |
+| Production API abuse controls | Non-demo CORS uses `MARKETPULSE_ALLOWED_ORIGINS`; IP/user request budgets cover general and provider routes; bounded JSON bodies reject oversized or malformed payloads; `/api/ai/infer` rejects private or un-allow-listed image URLs; unit and demo probes cover the limiter, URL, and body policies. | Satisfied in-process; edge quotas/spend caps remain open |
+| Production API input validation | `server/lib/request-validation.mjs` validates JSON object shapes, string lengths, provider numeric ranges, mission/agent identifiers, theme values, evidence-artifact references, semantic-search limits, and trend-analysis fields; `pnpm api:contracts` proves invalid shapes return `400` before provider/database work. | Satisfied for current request routes; response schemas remain open |
+| Structured model-output handling | `server/lib/structured-output.mjs` parses direct/fenced/prose-wrapped JSON, validates recommendation/business-plan fields, rejects malformed provider responses and wrong model shapes, and live paths fail explicitly; `agents/model_output.py` validates Python plans and allows one repair request before failing. | Partially satisfied; broader provider-specific/generated-artifact schemas remain open |
+| Numeric response validation | `server/lib/response-validation.mjs` bounds persisted agent energy/confidence/retries, discovery engagement counts, thought tokens/durations, memory versions, and business-plan metrics before dashboard/trend/recommendation use; MongoDB vector results apply the same bounds and cap scores to `[0,1]`; `pnpm server:test` covers non-finite, fractional, and out-of-range values. | Satisfied for current numeric response paths; broader generated artifact schemas remain open |
+| Atomic artifact writes | `server/lib/atomic-file.mjs` writes through same-directory temp files with file and best-effort directory `fsync` before rename; generated-app materialization, worker context/preview metadata, server theme/evidence, seed exports, and verifier reports use the helper; Node and Python tests cover replacement and temp cleanup. | Satisfied for current local artifact writers |
+| Async and Python failure observability | `agents/background_task.py` consumes scheduled task results, the orchestrator records unexpected managed-task failures and finishes the mission as `error`, Python persistence/final-synthesis failures re-raise or enter mission logs, and Market Research surfaces theme-sync failures in the runtime strip; `pnpm worker:test` covers the observer contract. | Satisfied for current scheduled/persistence paths; browser recovery taxonomy and broader client floating-promise lint remain open |
+| Fatal process handling | `server/ai-server.mjs` treats unhandled rejections and uncaught exceptions as fatal, stops new traffic, clears background timers, drains the HTTP server, and force-exits after a bounded timeout; `SIGINT`/`SIGTERM` use the same drain path. | Satisfied for the AI server process boundary |
+| Multi-user mission isolation | `insforge/migration_owner_isolation.sql` adds `missions.owner_id`, parent-derived child RLS, protected owner updates, and owner-scoped reset/start functions; the server scopes live reads/writes and caches by validated user; `pnpm schema:verify:ownership` passes the static contract. | Implemented in code; remote apply and two-user matrix pending an active backend |
 | Server dashboard contract cleanup | `src/lib/masterbuild-contract.ts`, `useMasterBuildDashboard`, and Playwright API contract assertion. | Satisfied |
 | Evidence visible beyond Market Research | Evidence surfaces in recommendations, final options, reports, briefings, accepted/rejected flows; `src/lib/evidence.ts` normalizes source metadata, `src/lib/evidence-quality.ts` scores final-option source quality plus freshness warnings, and `src/lib/briefing-trust.ts` summarizes briefing source/platform coverage. | Satisfied |
 | Opportunity ranking inspectable and actionable | `src/lib/opportunity-scoring.ts` deterministically scores final mission options from evidence diversity, confidence, timing, execution load, risk, contradiction pressure, and missing channels; `FinalOptionsPanel` shows score drivers/warnings and `Research Evidence Gap` launches a targeted follow-up mission from `src/lib/followup-research.ts`; e2e asserts the scorecard and follow-up flow. | Satisfied for final mission options |
@@ -34,8 +43,8 @@ Most local/demo gates are satisfied with strong evidence. The remaining blockers
 | Accept/reject decision workflow persists | Local/demo fallback, InsForge table, service-role decision verifier, and browser-auth smoke on disposable backend. | Satisfied with caveat |
 | Core user flow e2e tested | `e2e/app.spec.ts` core demo flow launches mission, inspects evidence, accepts opportunity, checks Accepted Ideas, Report, and Briefing. | Satisfied |
 | Missing-LLM worker state visible | Runtime health strip surfaces `python-worker: missing-llm`, calls `/api/worker/preflight`, shows `worker-preflight: llm-missing`, and displays the OpenAI/MiniMax action text; focused Playwright coverage injects the real blocked-worker dashboard state and verifies `BLOCKED`, `5 needs review`, `Mission Error`, plus visible `Clear Mission` and `Retry Prompt` recovery controls. | Satisfied |
-| Browser-auth decision persistence proof | `pnpm smoke:decision:browser` signs up through real UI, accepts `Launch Gen Z Recovery Planner`, verifies InsForge row, and cleans up. | Satisfied on disposable backend |
-| Live mission queue proof | Live API server wrote/read real `missions`, `agents`, and `logs` rows against `r5em4tn7`; latest proof runs without ad-hoc env overrides and cleans its smoke rows. | Satisfied |
+| Browser-auth decision persistence proof | Historical `pnpm smoke:decision:browser` proof signed up through real UI, accepted `Launch Gen Z Recovery Planner`, verified the InsForge row, and cleaned up. | Historical proof; rerun requires an active backend and inbox path |
+| Live mission queue proof | Historical live API proof wrote/read real `missions`, `agents`, and `logs` rows against `r5em4tn7`; the linked backend now reports `paused`, so this is not current availability proof. | Historical proof; rerun required on an active backend |
 | Full live worker proof | Python worker preflight reaches `r5em4tn7` without command-prefix overrides and a disposable worker smoke marks missions/agents blocked when LLM credentials are absent. Live OpenAI-generated discoveries/plans/final options are not run end-to-end. | Blocked by missing live OpenAI/MiniMax credential |
 | Design feels professional and responsive | Playwright desktop/mobile specs, mobile width/scroll regression assertion, manual screenshots, runtime health strip smoke. | Satisfied for current slice |
 | Devpost story truthful | `docs/devpost-submission.md` updated to describe current real/demo/live state and next gaps. | Satisfied |
@@ -95,7 +104,7 @@ Evidence:
 - Trend Detail now translates the selected trend into a memory snapshot with lifecycle, detection age, source mix, forecast confidence, watch items, and evidence warnings.
 - Reports and briefings now carry an explicit AI output audit trail so users can see generation mode, model/source mode, prompt summary, input/source counts, token estimate, uncertainty, and warnings before acting on the generated artifact.
 
-Status: satisfied for the current shipped slice. Final mission options now have inspectable deterministic opportunity scoring, source-level quality/freshness warnings, a rendered follow-up mission path for evidence gaps, accepted/rejected decision-library review context, recommendation-level follow-up mission launch, briefing-level trust controls, trend-level memory/forecast context, and report/briefing output audit trails; deeper evidence-level credibility, novelty, and contradiction scoring remains future work.
+Status: satisfied for the current shipped slice. Final mission options now have inspectable deterministic opportunity scoring, source-level quality/freshness warnings, heuristic credibility/novelty/contradiction scoring, a rendered follow-up mission path for evidence gaps, accepted/rejected decision-library review context, recommendation-level follow-up mission launch, briefing-level trust controls, trend-level memory/forecast context, and report/briefing output audit trails.
 
 ### Gate E: Agent System Is Inspectable
 
@@ -133,6 +142,7 @@ Evidence:
 - The latest continuation entry records the briefing trust screenshots, the strict-evidence rendered QA, and the on-demand audio behavior.
 - The latest continuation entry also records the trend memory screenshots, rendered Playwright fallback reason, and the new generated-trend e2e proof.
 - The latest continuation entry records the AI output audit screenshots, rendered fallback reason, console health, and full verification ladder.
+- The latest continuation entry records the production-only API session gate, authenticated browser fetch helper, and non-demo auth integration proof.
 
 Status: satisfied.
 
@@ -142,6 +152,9 @@ Status: satisfied.
 node --check scripts/run-demo.mjs
 node --check scripts/smoke-browser-decision.mjs
 node --check server/ai-server.mjs
+node --check server/lib/api-auth.mjs
+pnpm api:auth
+pnpm schema:verify:ownership
 python -m py_compile agents/masterbuild_runtime.py agents/orchestrator.py agents/agent_context.py agents/builder_agent.py
 node --check server/ai-server.mjs
 pnpm worker:preflight

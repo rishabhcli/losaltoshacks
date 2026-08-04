@@ -12,6 +12,7 @@ $$;
 
 create table if not exists public.missions (
   id uuid primary key default gen_random_uuid(),
+  owner_id uuid references auth.users(id) on delete cascade,
   prompt text not null,
   status text not null default 'queued'
     check (status in ('queued', 'active', 'stopping', 'stopped', 'completed', 'error')),
@@ -72,6 +73,7 @@ create table if not exists public.agents (
   updated_at timestamptz not null default timezone('utc', now())
 );
 
+alter table public.missions add column if not exists owner_id uuid references auth.users(id) on delete cascade;
 alter table public.missions add column if not exists refined_idea text;
 alter table public.missions add column if not exists final_options jsonb;
 alter table public.missions drop column if exists live_url_6;
@@ -167,6 +169,7 @@ create table if not exists public.control_commands (
 );
 
 create index if not exists missions_created_at_idx on public.missions (created_at desc);
+create index if not exists missions_owner_id_created_at_idx on public.missions (owner_id, created_at desc);
 create index if not exists agents_mission_id_idx on public.agents (mission_id);
 create index if not exists discoveries_created_at_idx on public.discoveries (created_at desc);
 create index if not exists discoveries_mission_id_idx on public.discoveries (mission_id);
@@ -204,6 +207,7 @@ create or replace function public.publish_masterbuild_change()
 returns trigger
 language plpgsql
 security definer
+set search_path = pg_catalog, public, pg_temp
 as $$
 declare
   payload jsonb;
@@ -261,14 +265,21 @@ create or replace function public.reset_masterbuild()
 returns void
 language plpgsql
 security definer
+set search_path = pg_catalog, public, pg_temp
 as $$
+declare
+  v_owner_id uuid := auth.uid();
 begin
-  delete from public.control_commands;
-  delete from public.signals;
-  delete from public.logs;
-  delete from public.discoveries;
-  delete from public.agents;
-  delete from public.missions;
+  if v_owner_id is null then
+    raise exception 'An authenticated owner is required to reset MasterBuild data';
+  end if;
+
+  delete from public.control_commands where mission_id in (select id from public.missions where owner_id = v_owner_id);
+  delete from public.signals where mission_id in (select id from public.missions where owner_id = v_owner_id);
+  delete from public.logs where mission_id in (select id from public.missions where owner_id = v_owner_id);
+  delete from public.discoveries where mission_id in (select id from public.missions where owner_id = v_owner_id);
+  delete from public.agents where mission_id in (select id from public.missions where owner_id = v_owner_id);
+  delete from public.missions where owner_id = v_owner_id;
 end;
 $$;
 
@@ -283,15 +294,22 @@ returns table (
 )
 language plpgsql
 security definer
+set search_path = pg_catalog, public, pg_temp
 as $$
 declare
   v_mission_id uuid := gen_random_uuid();
   v_now timestamptz := timezone('utc', now());
+  v_owner_id uuid := auth.uid();
 begin
+  if v_owner_id is null then
+    raise exception 'An authenticated owner is required to start a MasterBuild mission';
+  end if;
+
   perform public.reset_masterbuild();
 
   insert into public.missions (
     id,
+    owner_id,
     prompt,
     status,
     live_url_1,
@@ -303,6 +321,7 @@ begin
     updated_at
   ) values (
     v_mission_id,
+    v_owner_id,
     mission_prompt,
     'queued',
     '/agent-stream/1',

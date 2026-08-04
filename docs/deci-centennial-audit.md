@@ -55,8 +55,10 @@
 > ### [Issue #8]: Request bodies are fully buffered in memory and `JSON.parse`d on the event loop with no size limit
 > * **Category:** A
 > * **SystemicImpact:** A single large or malicious payload blocks the event loop (synchronous parse) and can exhaust process memory, stalling *all* concurrent requests on that instance. There is no backpressure.
-> * **TechnicalBreakdown:** `readJsonBody` (lines 93–101) does `for await (const chunk of request) chunks.push(chunk)` then `Buffer.concat(chunks).toString("utf8")` and `JSON.parse(raw)` — no `Content-Length`/`MAX_BODY` cap (grep for body-size guards returns none).
+> * **TechnicalBreakdown (historical):** The original `readJsonBody` did `for await (const chunk of request) chunks.push(chunk)` then `Buffer.concat(chunks).toString("utf8")` and `JSON.parse(raw)` — with no `Content-Length`/`MAX_BODY` cap.
 > * **RemediationParadigm:** Enforce a strict body-size limit with a streaming parser, reject oversized payloads with 413, and offload heavy parsing to worker threads.
+> * **Current remediation (2026-08-04):** `server/lib/request-body.mjs` rejects oversized declared and streamed bodies before they can exceed `MARKETPULSE_MAX_BODY_BYTES` (default 1 MiB), returns `413 payload_too_large`, returns `400 invalid_json_body` for malformed JSON, and is covered by `src/lib/request-body.test.ts` plus a live demo probe.
+> * **Remaining boundary:** JSON parsing is still synchronous but capped; worker-thread parsing and deployment-level request/spend enforcement remain future infrastructure work.
 
 > ### [Issue #9]: No process supervision — the AI server and Python orchestrator have no restart story
 > * **Category:** A
@@ -157,42 +159,57 @@
 > * **SystemicImpact:** Missing/huge/mistyped fields flow straight into LLM calls, Mongo queries, and file writes, producing provider errors, malformed writes, or memory pressure. No defense at the boundary.
 > * **TechnicalBreakdown:** No schema-validation dependency exists (no `zod`/`ajv`/`joi`/`yup` in `package.json`); handlers read `body.systemPrompt`, `body.imageUrl`, etc. directly (e.g., `/api/ai/infer`, `ai-server.mjs:4155–4170`).
 > * **RemediationParadigm:** Define request/response schemas (Zod) at every endpoint, reject invalid input with 4xx, and derive TypeScript types from the schemas.
+> * **Current remediation (2026-08-04):** `server/lib/request-validation.mjs` now validates every JSON-consuming route: mission and agent identifiers, prompt/text lengths, inference fields, TTS ranges, semantic-search filters/limits, trend-analysis numbers, theme values, evidence-artifact references, and bounded export-list query limits. Invalid shapes return `400 invalid_request` before provider, database, or filesystem work; `src/lib/request-validation.test.ts` and `pnpm api:contracts` cover the boundary.
+> * **Remaining boundary:** Full response schemas remain separate work, while Node structured-output handling is tracked under Issue #25; the implementation is intentionally dependency-free rather than a full Zod/type-generation layer.
 
 > ### [Issue #25]: Malformed LLM output is silently coerced to `{}` — downstream renders garbage
 > * **Category:** C
 > * **SystemicImpact:** When a model returns prose, fenced JSON, or truncated output, the parser returns an empty object and the pipeline proceeds with missing fields — corrupt artifacts with no error and no retry.
-> * **TechnicalBreakdown:** `server/lib/openai.mjs:8–17` `parseJson` does `try { JSON.parse(text) } catch { return {} }`; `server/lib/gemini.mjs:35–40` does the same. No fence-stripping, schema check, or repair/retry.
+> * **TechnicalBreakdown (historical):** The original Node provider adapters swallowed invalid JSON into `{}`, while live recommendation and background-plan paths used greedy regex parsing and could treat an empty/missing result as a normal fallback.
 > * **RemediationParadigm:** Use structured-output/JSON-mode, strip code fences, validate against a schema, and retry with a repair prompt on failure instead of swallowing it.
+> * **Current remediation (2026-08-04):** `server/lib/structured-output.mjs` now gives provider JSON failures typed errors, accepts direct/fenced/prose-wrapped model JSON, validates recommendation enums/ranges and business-plan field types, and rejects malformed or wrong-shaped output. Live recommendations expose an explicit degraded warning, background synthesis records failure instead of saving an empty plan, and the Python worker validates complete plans with one bounded repair request before failing; `src/lib/structured-output.test.ts` and `agents/test_model_output.py` cover the contracts.
+> * **Remaining boundary:** Provider-specific response schemas and the broader generated-artifact stages in the Python builder still need separate treatment.
 
 > ### [Issue #26]: File writes are non-atomic — a crash mid-write leaves partial/corrupt files
 > * **Category:** C
 > * **SystemicImpact:** Generated app scaffolds and runtime artifacts can be left half-written if the process dies during a write, corrupting the materialized output.
 > * **TechnicalBreakdown:** `scripts/materialize-generated-app.mjs:152` calls `fs.writeFileSync(file.fullPath, file.content)` directly (after `mkdirSync`), with no temp-file + atomic `rename`.
 > * **RemediationParadigm:** Write to a temp file then `fs.rename` (atomic on the same filesystem); fsync where durability matters; checksum-verify after write.
+> * **Current remediation (2026-08-04):** `server/lib/atomic-file.mjs` now writes same-directory temp files, flushes file contents with `fsync`, renames atomically, and best-effort syncs the directory. Generated-app materialization, verifier reports, seed exports, server theme/evidence artifacts, Python worker context files, preview frames, and metadata use atomic helpers; Python append cycles use a lock file; `src/lib/atomic-file.test.ts`, `agents/test_atomic_file.py`, and `pnpm worker:test` cover replacement, append behavior, and temporary-file cleanup.
+> * **Remaining boundary:** External storage/database writes and intentionally direct test-fixture writes remain outside this local filesystem guarantee.
 
 > ### [Issue #27]: 69 broad `except Exception` blocks hide failures in the agent runtime
 > * **Category:** C
 > * **SystemicImpact:** The Python runtime catches nearly everything generically, masking the real failure mode. Corrupted state and silent partial completions accumulate with no signal.
 > * **TechnicalBreakdown:** `grep -c "except Exception" agents/masterbuild_runtime.py` → 69, scattered across LLM calls, file I/O, and provider fallbacks (lines 288, 726, 1191, 1270…).
 > * **RemediationParadigm:** Catch specific exceptions, attach structured context, re-raise or route to a typed error channel, and alert on swallowed failures.
+> * **Current remediation (2026-08-04):** The InsForge persistence client now limits recoverable catches to HTTP/response parsing failures, preserves rate-limit fallbacks, and re-raises arbitrary database/write failures. Context sync, thought logging, business-plan writes, final synthesis, and finalization failures remain observable through task observers or mission error logs. Provider fallbacks now print their failure context, and the main periodic orchestrator loops route unexpected failures through `_report_runtime_error` instead of silently continuing. The runtime has 54 remaining broad catches, primarily around browser cleanup/recovery and deliberately degraded provider/UI fallbacks.
+> * **Remaining boundary:** `agents/builder_agent.py` and browser-use recovery paths still need a dedicated typed exception taxonomy; those catches now either mark the stage/agent failed, print context, or explicitly return a documented fallback, but they are not yet uniformly structured.
 
 > ### [Issue #28]: Fire-and-forget promises drop errors on both client and server
 > * **Category:** C
 > * **SystemicImpact:** Async work whose result/rejection is ignored leaves the system in an undefined state — a write may have failed while the UI shows success.
 > * **TechnicalBreakdown:** Client: `MarketResearch.tsx:32–38` `fetch(...).catch(() => {})`. Server: the unhandled-rejection handler (below) only logs, so floated rejections are non-fatal and invisible.
 > * **RemediationParadigm:** `await` and handle every promise; lint with `no-floating-promises`; make unhandled rejections fail loudly in non-prod.
+> * **Current remediation (2026-08-04):** Market Research now awaits theme synchronization inside a handled effect and surfaces HTTP/network failures in the runtime strip. Python InsForge/thought callbacks attach an observer, and managed orchestrator tasks inspect gathered results, append an error log, and finish the mission as `error` when an unexpected exception escapes; intentional cancellation remains ignored.
+> * **Remaining boundary:** Existing client-side `void` refresh patterns and intentionally handled provider/UI promise failures still need a broader no-floating-promises rule and a route-by-route audit.
 
 > ### [Issue #29]: `unhandledRejection` only logs while `uncaughtException` hard-exits — worst of both
 > * **Category:** C
 > * **SystemicImpact:** Rejected promises leave the process running in a possibly-corrupt state (no recovery), while any uncaught throw kills the process outright with no restart — so the failure modes are "silent corruption" and "sudden death," neither handled.
 > * **TechnicalBreakdown:** `ai-server.mjs:19–26` — `unhandledRejection` → `console.error` only; `uncaughtException` → `console.error` + `process.exit(1)`.
 > * **RemediationParadigm:** Treat both as fatal under a supervisor that restarts cleanly; drain in-flight requests, emit an alert, and exit for a fresh, healthy process.
+> * **Current remediation (2026-08-04):** The AI server now routes both events through one bounded shutdown path: it marks the process fatal, clears scheduled refresh timers, stops accepting new HTTP work, drains existing connections, force-closes after five seconds if necessary, and exits non-zero. `SIGINT`/`SIGTERM` use the same path with a clean exit code.
+> * **Remaining boundary:** A deployment supervisor must still restart the process and deliver the structured/standard-error signal to an operator; the repository does not control the production process manager.
 
 > ### [Issue #30]: Numeric/limit parsing trusts query input and provider output
 > * **Category:** C
 > * **SystemicImpact:** Unbounded or `NaN` values from query strings and unverified numeric fields propagate into slicing, formatting, and DB limits, producing wrong results or runtime errors deep in the pipeline.
 > * **TechnicalBreakdown:** e.g., `Number.parseInt(url.searchParams.get("limit") || "20", 10)` (`ai-server.mjs:4060` area) has no upper bound or `NaN` guard; numeric fields from LLM/DB are used without validation (ties to #24/#25).
 > * **RemediationParadigm:** Clamp and validate all numeric inputs (min/max, `Number.isFinite`), centralize a safe-parse helper, and reject out-of-range values at the boundary.
+> * **Current remediation (2026-08-04):** `parseBoundedInteger` clamps background-export query limits to 1–100, and request validators enforce finite/ranged numbers for TTS, inference, semantic search, and trend analysis before those handlers run.
+> * **Current remediation (2026-08-04):** `server/lib/response-validation.mjs` now bounds persisted agent telemetry, discovery engagement counts, thought tokens/durations, memory versions, and business-plan metrics before dashboard/trend/recommendation use; MongoDB vector writes/results apply the same discovery bounds and restrict scores to `[0,1]`. `server/lib/response-validation.test.mjs` and `pnpm server:test` cover non-finite, fractional, and out-of-range values.
+> * **Remaining boundary:** Provider-specific response schemas and broader generated-artifact fields still need validation beyond the current recommendation/business-plan contracts.
 
 ### Category D: Security Posture, Data Leakage & Zero-Trust Violations
 
@@ -213,6 +230,8 @@
 > * **SystemicImpact:** Any authenticated user can SELECT/INSERT/UPDATE/DELETE *every other user's* missions, agents, discoveries, logs, business plans, and builder outputs. There is no per-owner isolation — a multi-tenant data breach by design.
 > * **TechnicalBreakdown:** `insforge/masterbuild_rls_policies.sql` — every policy is `FOR … TO authenticated USING (true) WITH CHECK (true)` (lines 22–168, all 10 tables). No `owner_id = auth.uid()` predicate anywhere.
 > * **RemediationParadigm:** Add an `owner_id` to each table and rewrite policies as `USING (owner_id = auth.uid())`; separate a service role for the runtime from the user role; test policies with a per-tenant matrix.
+
+> **Remediation status (2026-08-04):** The historical API findings below are mitigated at the application boundary for non-demo deployments: InsForge bearer sessions are required for data, mutation, search, inference, and provider routes; browser origins use an explicit allow-list; in-process IP/user budgets are enforced; and inference image URLs reject private or non-allow-listed hosts. `/health`, `/api/worker/preflight`, and ephemeral local preview JPEGs remain intentionally public. Owner-scoped schema/RLS isolation (#33) is implemented in the checked-in migration, policies, and server filters; remote application and the two-user tenant matrix remain open because the linked backend is paused. Durable edge-level quotas, provider spend caps, and deployment proof also remain open.
 
 > ### [Issue #34]: Every API endpoint is unauthenticated — open LLM/TTS proxy (wallet draining)
 > * **Category:** D
@@ -326,7 +345,7 @@
 *Goal: eradicate the 50 flaws and make the system safe, typed, and tenant-isolated.*
 
 - **Stop the bleeding (Quarter 1):** Rotate and purge the committed InsForge service key (#31) and anon JWT (#32); remove `logs/` and the 811 KB progress dump from history (#40); add secret-scanning + working Husky pre-commit hooks (#50); `npm audit fix` the critical Vitest RCE (#39).
-- **Establish a real backend boundary:** Add authentication and per-user rate limiting to every endpoint (#34, #36), lock CORS to an allow-list (#35), validate all inputs with Zod (#24), and rewrite RLS to `owner_id = auth.uid()` with a separate service role (#33).
+- **Finish the real backend boundary:** Keep the application auth/CORS/rate-limit/SSRF/input-validation controls for non-demo routes (#24, #34–#37), then add response schemas, owner-scoped RLS with a separate service role (#33), durable edge quotas, and provider spend caps before multi-tenant production use.
 - **Pick one system of record:** Promote owner-scoped Postgres/InsForge as authoritative for the venture portfolio; demote `localStorage` to a synced cache with schema-versioned blobs and atomic, optimistic-concurrency writes (#1, #10, #21, #22).
 - **Decompose the monoliths:** Break `venture-portfolio.ts` (#4) and `VentureLab.tsx` (#5) into bounded contexts and lazily-loaded, individually-error-bounded panels (#18, #49); port `ai-server.mjs` to a typed, modular, middleware-based server (#7, #45).
 - **Make failures visible:** Turn on structured logging + tracing + alerting by default (#41); replace silent `catch`/`{}` swallows with surfaced errors and retries (#17, #25, #27, #28, #29); add server and agent test suites and run the *full* suite in CI (#42, #43).

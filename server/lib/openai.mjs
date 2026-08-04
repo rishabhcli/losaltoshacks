@@ -1,21 +1,10 @@
 import { getRequiredEnv, loadProjectEnv } from "./env.mjs";
+import { parseProviderJson } from "./structured-output.mjs";
 
 loadProjectEnv();
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-4o";
-
-function parseJson(text) {
-  if (!text) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    return {};
-  }
-}
 
 function buildMessages({ systemPrompt, userPrompt, imageUrl }) {
   const messages = [
@@ -74,7 +63,15 @@ export async function inferWithOpenAI({
   });
 
   const text = await response.text();
-  const payload = parseJson(text);
+  let payload;
+  try {
+    payload = parseProviderJson(text, { provider: "OpenAI", operation: "chat response" });
+  } catch (error) {
+    if (!response.ok) {
+      throw new Error(`OpenAI request failed with status ${response.status}.`);
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     const message =

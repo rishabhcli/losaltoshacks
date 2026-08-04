@@ -25,7 +25,9 @@ function canListen(port) {
     server.once("listening", () => {
       server.close(() => resolve(true));
     });
-    server.listen(port, host);
+    // The AI server binds the wildcard address, so probing only the loopback
+    // interface can miss an existing wildcard listener on the same port.
+    server.listen(port);
   });
 }
 

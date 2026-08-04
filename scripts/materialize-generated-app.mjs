@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { writeFileAtomic } from "../server/lib/atomic-file.mjs";
 
 export function usage() {
   return [
@@ -149,7 +150,7 @@ export function materialize(scaffold, target, options) {
     if (options.write) {
       fs.mkdirSync(path.dirname(file.fullPath), { recursive: true });
       if (!exists || current !== file.content) {
-        fs.writeFileSync(file.fullPath, file.content);
+        writeFileAtomic(file.fullPath, file.content);
       }
     }
 

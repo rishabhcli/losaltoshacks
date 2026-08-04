@@ -1,3 +1,5 @@
+import { apiFetch } from "./api";
+
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 
 export interface OpenAIInferenceInput {
@@ -18,7 +20,7 @@ function getApiBaseUrl() {
 }
 
 export async function inferWithOpenAI(input: OpenAIInferenceInput): Promise<OpenAIInferenceResult> {
-  const response = await fetch(`${getApiBaseUrl()}/api/ai/infer`, {
+  const response = await apiFetch(`${getApiBaseUrl()}/api/ai/infer`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

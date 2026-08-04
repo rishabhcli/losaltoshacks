@@ -11,6 +11,7 @@ import { FinalOptionsPanel } from "@/components/research/FinalOptionsPanel";
 import { BusinessPlanPanel } from "@/components/research/BusinessPlanPanel";
 import { RuntimeHealthStrip } from "@/components/research/RuntimeHealthStrip";
 import { useTheme } from "@/lib/theme";
+import { apiFetch } from "@/lib/api";
 import { isAgentActiveStatus, isAgentIssueStatus } from "@/hooks/useAgentData";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
@@ -26,15 +27,37 @@ export function MarketResearch() {
 
   const [viewMode, setViewMode] = useState<ViewMode>("command");
   const [showFinalOptions, setShowFinalOptions] = useState(false);
+  const [themeSyncError, setThemeSyncError] = useState<string | null>(null);
   const { theme } = useTheme();
 
   // Sync theme to server so browser showcase matches
   useEffect(() => {
-    fetch(`${API_BASE}/api/theme`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ theme }),
-    }).catch(() => {});
+    let cancelled = false;
+
+    async function syncTheme() {
+      setThemeSyncError(null);
+      try {
+        const response = await apiFetch(`${API_BASE}/api/theme`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ theme }),
+        });
+        if (!response.ok) {
+          throw new Error(`Theme sync failed with HTTP ${response.status}.`);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : "Theme sync failed.";
+          setThemeSyncError(message);
+          console.warn("[marketpulse] Theme sync unavailable:", error);
+        }
+      }
+    }
+
+    void syncTheme();
+    return () => {
+      cancelled = true;
+    };
   }, [theme]);
 
   const isRunning = useMemo(() => {
@@ -152,7 +175,7 @@ export function MarketResearch() {
         </div>
         </div>
       </div>
-      <RuntimeHealthStrip />
+      <RuntimeHealthStrip themeSyncError={themeSyncError} />
 
       {/* ── Main Content Area (fills viewport) ──────────────── */}
       <div className="flex-1 flex flex-col overflow-y-auto min-h-0 lg:flex-row lg:overflow-hidden">
